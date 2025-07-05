@@ -121,7 +121,7 @@ class GRANITEPipeline:
         edges_df = pd.DataFrame(edges_list)
         
         # Create MetricGraph
-        self.data['metric_graph'] = self.mg_interface.create_metric_graph(
+        self.data['metric_graph'] = self.mg_interface.create_graph(
             nodes_df, edges_df
         )
         

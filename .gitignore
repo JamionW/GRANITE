@@ -1,0 +1,129 @@
+# GRANITE Framework .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Data files (too large for git)
+data/raw/
+data/processed/
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.csv
+!requirements.txt
+!config/*.yaml
+*.zip
+*.geojson
+*.gpkg
+
+# Output files
+output/
+results/
+*.png
+*.pdf
+*.jpg
+!docs/images/*
+
+# Model files
+*.pth
+*.pkl
+*.h5
+*.ckpt
+models/
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+*~
+.*.swp
+
+# Documentation build
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+.temp/
+
+# Environment variables
+.env
+.env.local
+
+# Large files
+*.tar.gz
+*.tar
+*.gz
+
+# Specific project files to ignore
+granite_predictions.csv
+gnn_features.npy
+validation_results.csv
+granite_visualization.png
+granite_model.pth
+
+# But keep example data
+!data/example/
+!data/README.md

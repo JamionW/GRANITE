@@ -1,0 +1,9 @@
+GRANITE Framework - Working Data Source URLs
+==================================================
+
+SVI Data Sources:
+1. FEMA SVI Data
+   https://hazards.fema.gov/nri/data-resources/SVI_2020_US.csv
+
+
+Generated: 2025-07-05 13:52:19

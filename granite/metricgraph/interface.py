@@ -389,10 +389,10 @@ class MetricGraphInterface:
         # Simple distance-weighted interpolation
         n_pred = len(locations_df)
         predictions = pd.DataFrame({
-            'mean': np.random.uniform(0.2, 0.8, n_pred),  # Dummy predictions
-            'sd': np.random.uniform(0.05, 0.15, n_pred),   # Dummy uncertainty
-            'q025': np.random.uniform(0.1, 0.6, n_pred),
-            'q975': np.random.uniform(0.4, 0.9, n_pred)
+            'mean': np.random.uniform(0.2, 0.8, n_pred),
+            'sd': np.random.uniform(0.05, 0.15, n_pred),
+            'lower_95': np.random.uniform(0.1, 0.6, n_pred),  # CORRECT
+            'upper_95': np.random.uniform(0.4, 0.9, n_pred)   # CORRECT
         })
         
         return predictions

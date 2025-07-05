@@ -1,0 +1,13 @@
+data_sources:
+  census_tracts:
+    backup_urls: []
+    last_updated: '2025-07-05T13:52:19.963191'
+    primary_url: null
+  roads:
+    backup_urls: []
+    last_updated: '2025-07-05T13:52:19.963194'
+    primary_url: null
+  svi:
+    backup_urls: []
+    last_updated: '2025-07-05T13:52:19.963181'
+    primary_url: https://hazards.fema.gov/nri/data-resources/SVI_2020_US.csv

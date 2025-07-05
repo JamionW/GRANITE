@@ -1,0 +1,121 @@
+# GRANITE Framework Configuration
+# ================================
+
+# Data settings
+data:
+  # State and county for analysis
+  state: "Tennessee"
+  state_fips: "47"
+  county: "Hamilton"
+  county_fips: "065"
+  
+  # Census year
+  census_year: 2020
+  
+  # Data sources (set to null to download automatically)
+  roads_file: null  # e.g., "data/tl_2023_47065_roads.shp"
+  transit_file: null
+  addresses_file: null
+  
+  # Synthetic data generation
+  n_synthetic_addresses: 1000
+  bbox: [-85.5, 35.0, -85.0, 35.5]  # [min_lon, min_lat, max_lon, max_lat]
+
+# GNN model settings
+model:
+  # Architecture
+  type: "standard"  # "standard" or "hybrid"
+  input_dim: 5  # Will be set automatically based on features
+  hidden_dim: 64
+  output_dim: 3  # kappa, alpha, tau
+  dropout: 0.2
+  
+  # Training
+  epochs: 100
+  learning_rate: 0.01
+  weight_decay: 0.0001
+  spatial_weight: 1.0
+  reg_weight: 0.01
+  
+  # Learning rate scheduler
+  scheduler:
+    enabled: true
+    patience: 10
+    factor: 0.5
+    min_lr: 0.00001
+
+# MetricGraph settings
+metricgraph:
+  # Whittle-Matérn parameters
+  alpha: 1.5  # Smoothness parameter
+  mesh_resolution: 0.01
+  
+  # Model formula (can include GNN features)
+  formula: "y ~ gnn_kappa + gnn_alpha + gnn_tau"
+  
+  # Prediction settings
+  compute_variances: true
+  posterior_samples: false
+  n_samples: 1000
+
+# Disaggregation settings
+disaggregation:
+  # Validation
+  validation_split: 0.2  # Fraction of tracts for validation
+  
+  # Mass preservation
+  enforce_mass_preservation: false  # Experimental feature
+  
+  # Uncertainty calibration
+  calibrate_uncertainty: false
+
+# Visualization settings
+visualization:
+  # Plot settings
+  figure_size: [16, 12]
+  dpi: 300
+  style: "seaborn-v0_8-darkgrid"
+  
+  # Color maps
+  svi_cmap: "RdYlBu_r"
+  uncertainty_cmap: "viridis"
+  feature_cmap: "plasma"
+  
+  # Sampling for plots
+  n_sample_intervals: 100
+
+# Output settings
+output:
+  # File formats
+  save_predictions: true
+  save_features: true
+  save_validation: true
+  save_plots: true
+  
+  # File names
+  predictions_file: "granite_predictions.csv"
+  features_file: "gnn_features.npy"
+  validation_file: "validation_results.csv"
+  plot_file: "granite_visualization.png"
+  model_file: "granite_model.pth"
+
+# Computational settings
+computation:
+  # Device
+  device: "auto"  # "cpu", "cuda", or "auto"
+  
+  # Random seed
+  seed: 42
+  
+  # Parallelization
+  n_jobs: -1  # Number of parallel jobs (-1 for all cores)
+  
+  # Memory management
+  batch_size: 1000  # For processing large datasets
+
+# Logging settings
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "[%(asctime)s] %(levelname)s: %(message)s"
+  save_to_file: true
+  log_file: "granite.log"

@@ -1,16 +1,18 @@
 """
-Updated data loading functions for GRANITE framework with robust URL handling
+Data loading functions for GRANITE framework
+Updated with robust URL handling, local file support, and better error handling
 """
 import os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 import fiona
-from shapely.geometry import Point, LineString
+from shapely.geometry import Point, LineString, Polygon
 import networkx as nx
 from datetime import datetime
 import urllib.request
 import urllib.error
+import requests
 
 
 class DataLoader:
@@ -20,11 +22,15 @@ class DataLoader:
         self.data_dir = data_dir
         self.verbose = verbose
         
-        # Updated SVI URLs to try (in order of preference)
+        # Ensure data directories exist
+        os.makedirs(os.path.join(self.data_dir, 'raw'), exist_ok=True)
+        os.makedirs(os.path.join(self.data_dir, 'processed'), exist_ok=True)
+        
+        # Updated SVI URLs (current as of July 2025)
         self.svi_urls = [
-            "https://www.atsdr.cdc.gov/placeandhealth/svi/data/SviDataCsv/SVI_2020_US.csv",
+            "https://svi.cdc.gov/Documents/Data/2020/csv/SVI2020_US_tract.csv",
             "https://svi.cdc.gov/Documents/Data/2020/csv/SVI_2020_US.csv",
-            "https://www.atsdr.cdc.gov/placeandhealth/svi/data/SviDataCsv/SVI2020_US.csv"
+            "https://www.atsdr.cdc.gov/placeandhealth/svi/data/SviDataCsv/SVI_2020_US.csv"
         ]
         
     def _log(self, message):
@@ -37,23 +43,31 @@ class DataLoader:
         """Try multiple SVI URLs until one works"""
         for i, url in enumerate(self.svi_urls):
             try:
-                self._log(f"  Trying SVI URL {i+1}/{len(self.svi_urls)}: {url[:50]}...")
+                self._log(f"  Trying SVI URL {i+1}/{len(self.svi_urls)}: {url[:60]}{'...' if len(url) > 60 else ''}")
                 
-                # Test if URL is accessible
-                with urllib.request.urlopen(url, timeout=10) as response:
-                    if response.status == 200:
-                        self._log(f"  ✓ URL {i+1} is accessible")
-                        return pd.read_csv(url)
-                        
-            except (urllib.error.HTTPError, urllib.error.URLError, Exception) as e:
-                self._log(f"  ✗ URL {i+1} failed: {str(e)}")
+                # Use requests with timeout
+                response = requests.get(url, timeout=30)
+                if response.status_code == 200:
+                    # Try to parse as CSV
+                    from io import StringIO
+                    df = pd.read_csv(StringIO(response.text), nrows=5)
+                    if len(df.columns) > 10:  # SVI should have many columns
+                        self._log(f"  ✓ URL {i+1} is working - CSV with {len(df.columns)} columns")
+                        return pd.read_csv(StringIO(response.text))
+                    else:
+                        self._log(f"  ✗ URL {i+1} returned invalid CSV - only {len(df.columns)} columns")
+                else:
+                    self._log(f"  ✗ URL {i+1} failed: HTTP {response.status_code}")
+                    
+            except Exception as e:
+                self._log(f"  ✗ URL {i+1} failed: {str(e)[:50]}")
                 continue
         
         return None
     
-    def load_svi_data(self, state='Tennessee', county='Hamilton'):
+    def load_svi_data(self, state='Tennessee', county='Hamilton', svi_file=None):
         """
-        Load Social Vulnerability Index data from CDC with robust URL handling
+        Load Social Vulnerability Index data from local file or CDC with robust URL handling
         
         Parameters:
         -----------
@@ -61,6 +75,8 @@ class DataLoader:
             State name for SVI data
         county : str
             County name to filter
+        svi_file : str, optional
+            Path to local SVI CSV file
             
         Returns:
         --------
@@ -69,21 +85,51 @@ class DataLoader:
         """
         self._log(f"Loading SVI data for {county} County, {state}...")
         
+        # Check for local file first
+        if svi_file and os.path.exists(svi_file):
+            self._log(f"  Loading SVI data from local file: {svi_file}")
+            try:
+                svi_df = pd.read_csv(svi_file)
+                self._log(f"  ✓ Loaded local SVI data ({len(svi_df)} total records)")
+            except Exception as e:
+                self._log(f"  ✗ Error loading local SVI file: {e}")
+                self._log("  Falling back to URL download...")
+                svi_df = self._try_download_svi()
+        else:
+            # Check for file in data/raw directory
+            local_svi_file = os.path.join(self.data_dir, 'raw', 'SVI2020_US_tract.csv')
+            alt_svi_file = os.path.join(self.data_dir, 'raw', 'SVI_2020_US.csv')
+            
+            if os.path.exists(local_svi_file):
+                self._log(f"  Loading SVI data from: {local_svi_file}")
+                try:
+                    svi_df = pd.read_csv(local_svi_file)
+                    self._log(f"  ✓ Loaded local SVI data ({len(svi_df)} total records)")
+                except Exception as e:
+                    self._log(f"  ✗ Error loading local SVI file: {e}")
+                    svi_df = self._try_download_svi()
+            elif os.path.exists(alt_svi_file):
+                self._log(f"  Loading SVI data from: {alt_svi_file}")
+                try:
+                    svi_df = pd.read_csv(alt_svi_file)
+                    self._log(f"  ✓ Loaded local SVI data ({len(svi_df)} total records)")
+                except Exception as e:
+                    self._log(f"  ✗ Error loading local SVI file: {e}")
+                    svi_df = self._try_download_svi()
+            else:
+                # Try to download SVI data
+                svi_df = self._try_download_svi()
+        
+        if svi_df is None:
+            # If all methods fail, create mock data for testing
+            self._log("  ⚠️  All SVI sources failed. Creating mock data for testing...")
+            return self._create_mock_svi_data(state, county)
+        
         try:
-            # Try to download SVI data
-            svi_df = self._try_download_svi()
-            
-            if svi_df is None:
-                # If all URLs fail, create mock data for testing
-                self._log("  ⚠️  All SVI URLs failed. Creating mock data for testing...")
-                return self._create_mock_svi_data(state, county)
-            
-            self._log(f"  ✓ Downloaded SVI data ({len(svi_df)} total records)")
-            
             # Filter for specific state and county
             # Try different column name variations
-            state_cols = ['STATE', 'ST', 'ST_ABBR', 'STUSPS']
-            county_cols = ['COUNTY', 'CNTY', 'COUNTY_NAME']
+            state_cols = ['STATE', 'ST', 'ST_ABBR', 'STUSPS', 'STNAME']
+            county_cols = ['COUNTY', 'CNTY', 'COUNTY_NAME', 'LOCATION']
             
             state_col = None
             county_col = None
@@ -99,19 +145,18 @@ class DataLoader:
                     break
             
             if state_col and county_col:
-                # Filter data
-                county_svi = svi_df[
-                    (svi_df[state_col].str.contains(state, case=False, na=False)) &
-                    (svi_df[county_col].str.contains(county, case=False, na=False))
-                ].copy()
-            else:
+                # Filter data by state and county
+                state_filter = svi_df[state_col].astype(str).str.contains(state, case=False, na=False)
+                county_filter = svi_df[county_col].astype(str).str.contains(county, case=False, na=False)
+                county_svi = svi_df[state_filter & county_filter].copy()
+            elif 'FIPS' in svi_df.columns:
                 # Fallback: use FIPS code filtering
                 # Hamilton County, TN FIPS: 47065
-                if 'FIPS' in svi_df.columns:
-                    county_svi = svi_df[svi_df['FIPS'].astype(str).str.startswith('47065')].copy()
-                else:
-                    self._log("  ⚠️  Cannot filter by state/county. Using mock data...")
-                    return self._create_mock_svi_data(state, county)
+                fips_pattern = '47065'
+                county_svi = svi_df[svi_df['FIPS'].astype(str).str.startswith(fips_pattern)].copy()
+            else:
+                self._log("  ⚠️  Cannot filter by state/county. Using mock data...")
+                return self._create_mock_svi_data(state, county)
             
             if len(county_svi) == 0:
                 self._log("  ⚠️  No data found for specified county. Using mock data...")
@@ -145,7 +190,7 @@ class DataLoader:
             return county_svi
             
         except Exception as e:
-            self._log(f"  ✗ Error loading SVI data: {str(e)}")
+            self._log(f"  ✗ Error processing SVI data: {str(e)}")
             self._log("  ⚠️  Falling back to mock data...")
             return self._create_mock_svi_data(state, county)
     
@@ -178,9 +223,9 @@ class DataLoader:
         
         return mock_data
     
-    def load_census_tracts(self, state_fips='47', county_fips='065', year=2020):
+    def load_census_tracts(self, state_fips='47', county_fips='065', year=2020, census_tracts_file=None):
         """
-        Load census tract geometries from Census TIGER files
+        Load census tract geometries from local file or Census TIGER files
         
         Parameters:
         -----------
@@ -190,6 +235,8 @@ class DataLoader:
             County FIPS code (e.g., '065' for Hamilton)
         year : int
             Census year
+        census_tracts_file : str, optional
+            Path to local census tracts shapefile
             
         Returns:
         --------
@@ -198,35 +245,61 @@ class DataLoader:
         """
         self._log(f"Loading census tracts for state {state_fips}, county {county_fips}...")
         
-        # Census TIGER URL
-        tiger_url = f"https://www2.census.gov/geo/tiger/TIGER{year}/TRACT/tl_{year}_{state_fips}_tract.zip"
+        # Check for local file first
+        if census_tracts_file and os.path.exists(census_tracts_file):
+            self._log(f"  Loading census tracts from local file: {census_tracts_file}")
+            try:
+                tracts_gdf = gpd.read_file(census_tracts_file)
+                self._log(f"  ✓ Loaded {len(tracts_gdf)} census tracts from local file")
+            except Exception as e:
+                self._log(f"  ✗ Error loading local tracts file: {e}")
+                tracts_gdf = None
+        else:
+            # Check for file in data/raw directory
+            local_tracts_file = os.path.join(self.data_dir, 'raw', f'tl_{year}_{state_fips}_tract.shp')
+            
+            if os.path.exists(local_tracts_file):
+                self._log(f"  Loading census tracts from: {local_tracts_file}")
+                try:
+                    tracts_gdf = gpd.read_file(local_tracts_file)
+                    self._log(f"  ✓ Loaded {len(tracts_gdf)} census tracts from local file")
+                except Exception as e:
+                    self._log(f"  ✗ Error loading local tracts file: {e}")
+                    tracts_gdf = None
+            else:
+                # Try to download from Census TIGER
+                tiger_url = f"https://www2.census.gov/geo/tiger/TIGER{year}/TRACT/tl_{year}_{state_fips}_tract.zip"
+                
+                try:
+                    self._log(f"  Downloading from: {tiger_url}")
+                    tracts_gdf = gpd.read_file(tiger_url)
+                    self._log(f"  ✓ Downloaded {len(tracts_gdf)} census tracts for state {state_fips}")
+                except Exception as e:
+                    self._log(f"  ✗ Error downloading census tracts: {str(e)}")
+                    tracts_gdf = None
         
-        try:
-            # Load tract geometries
-            tracts_gdf = gpd.read_file(tiger_url)
-            self._log(f"  ✓ Downloaded {len(tracts_gdf)} census tracts for state {state_fips}")
-            
-            # Filter for specific county
-            county_tracts = tracts_gdf[tracts_gdf['COUNTYFP'] == county_fips].copy()
-            
-            # Create full FIPS code
-            county_tracts['FIPS'] = county_tracts['STATEFP'] + county_tracts['COUNTYFP'] + county_tracts['TRACTCE']
-            
-            self._log(f"  ✓ Filtered to {len(county_tracts)} tracts for county {county_fips}")
-            
-            return county_tracts
-            
-        except Exception as e:
-            self._log(f"  ✗ Error loading census tracts: {str(e)}")
-            
+        if tracts_gdf is None:
             # Create mock tract geometries
             self._log("  Creating mock census tract geometries...")
             return self._create_mock_census_tracts(state_fips, county_fips)
+        
+        # Filter for specific county
+        if 'COUNTYFP' in tracts_gdf.columns:
+            county_tracts = tracts_gdf[tracts_gdf['COUNTYFP'] == county_fips].copy()
+        else:
+            # If no county column, return all tracts (for debugging)
+            county_tracts = tracts_gdf.copy()
+        
+        # Create full FIPS code
+        if 'STATEFP' in county_tracts.columns and 'COUNTYFP' in county_tracts.columns and 'TRACTCE' in county_tracts.columns:
+            county_tracts['FIPS'] = county_tracts['STATEFP'] + county_tracts['COUNTYFP'] + county_tracts['TRACTCE']
+        
+        self._log(f"  ✓ Filtered to {len(county_tracts)} tracts for county {county_fips}")
+        
+        return county_tracts
     
     def _create_mock_census_tracts(self, state_fips='47', county_fips='065'):
         """Create mock census tract geometries for testing"""
-        from shapely.geometry import Polygon
-        
         # Create simple rectangular tracts
         fips_codes = [
             f'{state_fips}{county_fips}000100', f'{state_fips}{county_fips}000200', 
@@ -252,21 +325,52 @@ class DataLoader:
         
         return mock_tracts
     
-    # ... (rest of the methods remain the same)
-    
     def load_road_network(self, roads_file=None, state_fips='47', county_fips='065', year=2023):
-        """Load road network data - same as before but with better error handling"""
+        """
+        Load road network data from local file or Census TIGER with better error handling
+        
+        Parameters:
+        -----------
+        roads_file : str, optional
+            Path to roads shapefile
+        state_fips : str
+            State FIPS code
+        county_fips : str
+            County FIPS code
+        year : int
+            Year for Census TIGER data
+            
+        Returns:
+        --------
+        gpd.GeoDataFrame
+            Road network data
+        """
+        self._log("Loading road network...")
+        
+        # Check for explicitly provided file
         if roads_file and os.path.exists(roads_file):
-            self._log(f"Loading road network from {roads_file}...")
+            self._log(f"  Loading road network from: {roads_file}")
             try:
                 roads_gdf = gpd.read_file(roads_file)
-                self._log(f"  ✓ Loaded {len(roads_gdf)} road segments")
+                self._log(f"  ✓ Loaded {len(roads_gdf)} road segments from local file")
                 return roads_gdf
             except Exception as e:
                 self._log(f"  ✗ Error loading roads file: {e}")
         
-        # Download from Census TIGER
-        self._log(f"Downloading road network for county {state_fips}{county_fips}...")
+        # Check for file in data/raw directory
+        local_roads_file = os.path.join(self.data_dir, 'raw', f'tl_{year}_{state_fips}{county_fips}_roads.shp')
+        
+        if os.path.exists(local_roads_file):
+            self._log(f"  Loading road network from: {local_roads_file}")
+            try:
+                roads_gdf = gpd.read_file(local_roads_file)
+                self._log(f"  ✓ Loaded {len(roads_gdf)} road segments from local file")
+                return roads_gdf
+            except Exception as e:
+                self._log(f"  ✗ Error loading local roads file: {e}")
+        
+        # Try to download from Census TIGER
+        self._log(f"  Downloading road network for county {state_fips}{county_fips}...")
         tiger_roads_url = f"https://www2.census.gov/geo/tiger/TIGER{year}/ROADS/tl_{year}_{state_fips}{county_fips}_roads.zip"
         
         try:
@@ -275,6 +379,7 @@ class DataLoader:
             return roads_gdf
         except Exception as e:
             self._log(f"  ✗ Error downloading roads: {e}")
+            self._log("  Creating mock road network...")
             return self._create_mock_roads()
     
     def _create_mock_roads(self):
@@ -292,8 +397,42 @@ class DataLoader:
         self._log(f"  ✓ Created {len(mock_roads)} mock road segments")
         return mock_roads
     
-    def load_transit_stops(self):
-        """Load mock transit stops for testing"""
+    def load_transit_stops(self, transit_file=None):
+        """
+        Load transit stops from local file or create mock data
+        
+        Parameters:
+        -----------
+        transit_file : str, optional
+            Path to transit stops file
+            
+        Returns:
+        --------
+        gpd.GeoDataFrame
+            Transit stop locations
+        """
+        if transit_file and os.path.exists(transit_file):
+            self._log(f"Loading transit stops from: {transit_file}")
+            try:
+                transit_gdf = gpd.read_file(transit_file)
+                self._log(f"  ✓ Loaded {len(transit_gdf)} transit stops")
+                return transit_gdf
+            except Exception as e:
+                self._log(f"  ✗ Error loading transit file: {e}")
+        
+        # Check for file in data/raw directory
+        local_transit_file = os.path.join(self.data_dir, 'raw', 'transit_stops.shp')
+        
+        if os.path.exists(local_transit_file):
+            self._log(f"Loading transit stops from: {local_transit_file}")
+            try:
+                transit_gdf = gpd.read_file(local_transit_file)
+                self._log(f"  ✓ Loaded {len(transit_gdf)} transit stops from local file")
+                return transit_gdf
+            except Exception as e:
+                self._log(f"  ✗ Error loading local transit file: {e}")
+        
+        # Create mock transit stops
         self._log("Creating mock transit stops...")
         
         mock_stops = gpd.GeoDataFrame({
@@ -309,11 +448,49 @@ class DataLoader:
         self._log(f"  ✓ Created {len(mock_stops)} mock transit stops")
         return mock_stops
     
-    def load_address_points(self, n_synthetic=1000, bbox=(-85.5, 35.0, -85.0, 35.5)):
-        """Generate synthetic address points - same as before"""
+    def load_address_points(self, addresses_file=None, n_synthetic=1000, bbox=(-85.5, 35.0, -85.0, 35.5)):
+        """
+        Load address points from local file or generate synthetic points
+        
+        Parameters:
+        -----------
+        addresses_file : str, optional
+            Path to address points file
+        n_synthetic : int
+            Number of synthetic addresses to generate if no file
+        bbox : tuple
+            Bounding box for synthetic addresses (min_lon, min_lat, max_lon, max_lat)
+            
+        Returns:
+        --------
+        gpd.GeoDataFrame
+            Address point locations
+        """
+        if addresses_file and os.path.exists(addresses_file):
+            self._log(f"Loading address points from: {addresses_file}")
+            try:
+                addresses_gdf = gpd.read_file(addresses_file)
+                self._log(f"  ✓ Loaded {len(addresses_gdf)} address points")
+                return addresses_gdf
+            except Exception as e:
+                self._log(f"  ✗ Error loading addresses file: {e}")
+        
+        # Check for file in data/raw directory
+        local_addresses_file = os.path.join(self.data_dir, 'raw', 'address_points.shp')
+        
+        if os.path.exists(local_addresses_file):
+            self._log(f"Loading address points from: {local_addresses_file}")
+            try:
+                addresses_gdf = gpd.read_file(local_addresses_file)
+                self._log(f"  ✓ Loaded {len(addresses_gdf)} address points from local file")
+                return addresses_gdf
+            except Exception as e:
+                self._log(f"  ✗ Error loading local addresses file: {e}")
+        
+        # Generate synthetic address points
         self._log(f"Generating {n_synthetic} synthetic address points...")
         
-        np.random.seed(42)
+        np.random.seed(42)  # Reproducible addresses
         
         # Generate random points within bounding box
         lons = np.random.uniform(bbox[0], bbox[2], n_synthetic)
@@ -332,7 +509,21 @@ class DataLoader:
         return addresses
     
     def create_network_graph(self, roads_gdf, directed=False):
-        """Create NetworkX graph from road geometries - same as before"""
+        """
+        Create NetworkX graph from road geometries
+        
+        Parameters:
+        -----------
+        roads_gdf : gpd.GeoDataFrame
+            Road network data
+        directed : bool
+            Whether to create directed graph
+            
+        Returns:
+        --------
+        nx.Graph or nx.DiGraph
+            Network graph
+        """
         self._log("Creating network graph from road geometries...")
         
         G = nx.DiGraph() if directed else nx.Graph()
@@ -341,16 +532,22 @@ class DataLoader:
             if hasattr(road.geometry, 'coords'):
                 coords = list(road.geometry.coords)
                 
+                # Add edges between consecutive coordinates
                 for i in range(len(coords) - 1):
                     u = coords[i]
                     v = coords[i + 1]
                     
+                    # Calculate length
                     length = np.sqrt((u[0] - v[0])**2 + (u[1] - v[1])**2)
+                    
+                    # Add edge with attributes
                     G.add_edge(u, v, length=length, road_id=idx)
                     
+                    # Add road type if available
                     if 'MTFCC' in road:
                         G[u][v]['road_type'] = road['MTFCC']
         
+        # Add node attributes
         for node in G.nodes():
             G.nodes[node]['x'] = node[0]
             G.nodes[node]['y'] = node[1]
@@ -358,13 +555,33 @@ class DataLoader:
         self._log(f"  ✓ Created network graph:")
         self._log(f"    - Nodes: {G.number_of_nodes()}")
         self._log(f"    - Edges: {G.number_of_edges()}")
+        if not directed:
+            self._log(f"    - Connected components: {nx.number_connected_components(G)}")
         
         return G
 
 
-# Updated convenience function
-def load_hamilton_county_data(data_dir='./data', roads_file=None):
-    """Load all data for Hamilton County analysis with robust error handling"""
+# Convenience functions for direct imports
+def load_hamilton_county_data(data_dir='./data', roads_file=None, svi_file=None, census_tracts_file=None):
+    """
+    Load all data for Hamilton County analysis with robust error handling
+    
+    Parameters:
+    -----------
+    data_dir : str
+        Directory containing data files
+    roads_file : str, optional
+        Path to roads shapefile
+    svi_file : str, optional
+        Path to SVI CSV file
+    census_tracts_file : str, optional
+        Path to census tracts shapefile
+        
+    Returns:
+    --------
+    dict
+        Dictionary containing all loaded datasets
+    """
     loader = DataLoader(data_dir=data_dir)
     
     print("\n" + "="*60)
@@ -372,14 +589,16 @@ def load_hamilton_county_data(data_dir='./data', roads_file=None):
     print("="*60 + "\n")
     
     try:
+        # Load all datasets
         data = {
-            'svi': loader.load_svi_data(),
-            'census_tracts': loader.load_census_tracts(),
+            'svi': loader.load_svi_data(svi_file=svi_file),
+            'census_tracts': loader.load_census_tracts(census_tracts_file=census_tracts_file),
             'roads': loader.load_road_network(roads_file=roads_file),
             'transit_stops': loader.load_transit_stops(),
             'addresses': loader.load_address_points()
         }
         
+        # Create network graph
         data['road_network'] = loader.create_network_graph(data['roads'])
         
         print("\n" + "="*60)

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "FEMA SVI Data",
+    "url": "https://hazards.fema.gov/nri/data-resources/SVI_2020_US.csv",
+    "description": "FEMA National Risk Index SVI data",
+    "status": "WORKING",
+    "details": "CSV with 1 columns, sample: ['<!DOCTYPE html>']",
+    "tested_at": "2025-07-05T13:52:19.042047"
+  },
+  {
+    "name": "OpenStreetMap Hamilton County",
+    "url": "https://download.geofabrik.de/north-america/us/tennessee-latest.osm.pbf",
+    "type": "osm_roads",
+    "description": "OpenStreetMap data for Tennessee",
+    "status": "WORKING",
+    "details": "HTTP 200",
+    "tested_at": "2025-07-05T13:52:19.789683"
+  }
+]

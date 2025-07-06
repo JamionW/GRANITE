@@ -18,31 +18,62 @@ class MetricGraphInterface:
     def __init__(self, verbose=True):
         self.verbose = verbose
         
-        # Set up conversion context
-        self.converter = default_converter + pandas2ri.converter
-        
         # Import R packages
         self._log("Initializing R interface...")
         
         try:
-            with localconverter(self.converter):
-                self.base = importr('base')
-                self.mg = importr('MetricGraph')
-            self._log("  ✓ MetricGraph package loaded")
-        except Exception as e:
-            self._log("  ✗ MetricGraph not found. Installing...")
+            self.base = importr('base')
+            
+            # First try to load MetricGraph
             try:
-                with localconverter(self.converter):
-                    ro.r('install.packages("MetricGraph", repos="http://cran.r-project.org")')
-                    self.mg = importr('MetricGraph')
-                self._log("  ✓ MetricGraph installed successfully")
-            except Exception as install_error:
-                self._log(f"  ✗ Failed to install MetricGraph: {install_error}")
-                # Create a dummy interface for testing
-                self.mg = None
+                self.mg = importr('MetricGraph')
+                self._log("  ✓ MetricGraph package loaded")
+            except:
+                self._log("  ✗ MetricGraph not found. Installing...")
                 
-        # Define R functions
-        self._define_r_functions()
+                # Set up personal library path for codespace
+                ro.r('''
+                # Create personal library directory if it doesn't exist
+                personal_lib <- Sys.getenv("R_LIBS_USER")
+                if (!dir.exists(personal_lib)) {
+                    dir.create(personal_lib, recursive = TRUE)
+                }
+                
+                # Add to library paths
+                .libPaths(c(personal_lib, .libPaths()))
+                
+                # Install with automatic library selection
+                options(repos = c(CRAN = "https://cran.r-project.org/",
+                                INLA = "https://inla.r-inla-download.org/R/stable"))
+                
+                # Install INLA first
+                if (!require("INLA", quietly = TRUE)) {
+                    install.packages("INLA", lib = personal_lib, 
+                                repos = "https://inla.r-inla-download.org/R/stable")
+                }
+                
+                # Install MetricGraph
+                if (!require("MetricGraph", quietly = TRUE)) {
+                    install.packages("MetricGraph", lib = personal_lib)
+                }
+                ''')
+                
+                try:
+                    self.mg = importr('MetricGraph')
+                    self._log("  ✓ MetricGraph installed and loaded successfully")
+                except Exception as e:
+                    self._log(f"  ✗ Failed to install MetricGraph: {str(e)}")
+                    self._log("  ⚠️  Skipping R function definitions (MetricGraph not available)")
+                    self.mg = None
+                    return
+            
+            # Define R functions only if MetricGraph loaded successfully
+            if self.mg is not None:
+                self._define_r_functions()
+                
+        except Exception as e:
+            self._log(f"  ✗ Failed to initialize R interface: {str(e)}")
+            self.mg = None
         
     def _log(self, message):
         """Logging with timestamp"""

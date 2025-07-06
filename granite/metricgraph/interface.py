@@ -22,54 +22,42 @@ class MetricGraphInterface:
         self._log("Initializing R interface...")
         
         try:
+            import rpy2.robjects as ro
+            from rpy2.robjects.packages import importr
+            import subprocess
+            import os
+            
+            # CRITICAL FIX: Force rpy2 to use same library paths as direct R
+            self._log("  Synchronizing R library paths...")
+            try:
+                result = subprocess.run(['R', '--slave', '-e', 'cat(.libPaths(), sep="\\n")'], 
+                                    capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    r_lib_paths = [path.strip() for path in result.stdout.strip().split('\n') if path.strip()]
+                    
+                    # Set the same paths in rpy2 session
+                    path_str = ', '.join([f'"{path}"' for path in r_lib_paths])
+                    ro.r(f'.libPaths(c({path_str}))')
+                    self._log(f"  ✓ Synchronized library paths: {r_lib_paths}")
+                else:
+                    self._log(f"  ⚠️  Could not sync library paths: {result.stderr}")
+            except Exception as e:
+                self._log(f"  ⚠️  Library path sync failed: {e}")
+            
             self.base = importr('base')
             
-            # First try to load MetricGraph
+            # Try to load MetricGraph
             try:
                 self.mg = importr('MetricGraph')
                 self._log("  ✓ MetricGraph package loaded")
-            except:
-                self._log("  ✗ MetricGraph not found. Installing...")
                 
-                # Set up personal library path for codespace
-                ro.r('''
-                # Create personal library directory if it doesn't exist
-                personal_lib <- Sys.getenv("R_LIBS_USER")
-                if (!dir.exists(personal_lib)) {
-                    dir.create(personal_lib, recursive = TRUE)
-                }
-                
-                # Add to library paths
-                .libPaths(c(personal_lib, .libPaths()))
-                
-                # Install with automatic library selection
-                options(repos = c(CRAN = "https://cran.r-project.org/",
-                                INLA = "https://inla.r-inla-download.org/R/stable"))
-                
-                # Install INLA first
-                if (!require("INLA", quietly = TRUE)) {
-                    install.packages("INLA", lib = personal_lib, 
-                                repos = "https://inla.r-inla-download.org/R/stable")
-                }
-                
-                # Install MetricGraph
-                if (!require("MetricGraph", quietly = TRUE)) {
-                    install.packages("MetricGraph", lib = personal_lib)
-                }
-                ''')
-                
-                try:
-                    self.mg = importr('MetricGraph')
-                    self._log("  ✓ MetricGraph installed and loaded successfully")
-                except Exception as e:
-                    self._log(f"  ✗ Failed to install MetricGraph: {str(e)}")
-                    self._log("  ⚠️  Skipping R function definitions (MetricGraph not available)")
-                    self.mg = None
-                    return
-            
-            # Define R functions only if MetricGraph loaded successfully
-            if self.mg is not None:
+                # Define R functions
                 self._define_r_functions()
+                
+            except Exception as e:
+                self._log(f"  ✗ MetricGraph failed to load: {e}")
+                self._log("  ⚠️  Skipping R function definitions (MetricGraph not available)")
+                self.mg = None
                 
         except Exception as e:
             self._log(f"  ✗ Failed to initialize R interface: {str(e)}")

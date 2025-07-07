@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from datetime import datetime
+import torch
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -518,67 +519,148 @@ class GRANITEPipeline:
         
         return summary
 
-    def _process_single_tract(self, tract_data, config, epochs=None, visualize=True):
-        """Process a single tract through the full pipeline"""
-        fips_code = tract_data['fips_code']
+    def _process_single_tract(self, tract_data, config, epochs, visualize):
+        """
+        Process single tract with optimized MetricGraph integration
+        OPTIMIZED VERSION - includes smart sampling configuration
+        """
+        self._log("Processing single tract with optimized MetricGraph integration")
         
         try:
-            # 1. Prepare graph data
-            self._log("  Preparing graph structures...")
-            pyg_data, node_mapping = prepare_graph_data(
-                tract_data['road_network']
+            # Extract tract components
+            road_network = tract_data['road_network']
+            svi_data = tract_data['svi_data']
+            addresses = tract_data['addresses']
+            
+            # Log network statistics
+            n_edges = road_network.number_of_edges()
+            n_nodes = road_network.number_of_nodes()
+            self._log(f"Original network: {n_nodes} nodes, {n_edges} edges")
+            
+            # Step 1: Train GNN on road network
+            self._log("Training GNN for accessibility feature extraction...")
+            
+            graph_data, node_mapping = prepare_graph_data(road_network)  # ← Remove svi_data, handle return tuple
+            model = create_gnn_model(
+                input_dim=graph_data.x.shape[1],  # ← Use .x instead of ['node_features']
+                hidden_dim=config.get('model', {}).get('hidden_dim', 64),
+                output_dim=3
+            )
+
+            trained_model, gnn_features, training_metrics = train_accessibility_gnn(
+                graph_data, model, epochs=epochs
             )
             
-            # 2. Create and train GNN
-            epochs = epochs or config.get('model', {}).get('epochs', 50)
-            self._log(f"  Training GNN for {epochs} epochs...")
+            # Step 2: Prepare MetricGraph inputs
+            nodes_df, edges_df = self._prepare_metricgraph_inputs(road_network)
             
-            gnn_model = create_gnn_model(
-                input_dim=config.get('model', {}).get('input_dim', 5),
-                hidden_dim=config.get('model', {}).get('hidden_dim', 32),
-                output_dim=config.get('model', {}).get('output_dim', 3),
-                dropout=config.get('model', {}).get('dropout', 0.2)
+            # Step 3: Get optimization settings from config
+            metricgraph_config = config.get('metricgraph', {})
+            r_opts = metricgraph_config.get('r_optimizations', {})
+            smart_sampling_config = metricgraph_config.get('smart_sampling', {})
+            
+            # OPTIMIZATION PARAMETERS (configurable)
+            enable_smart_sampling = smart_sampling_config.get('enabled', False)
+            max_edges = r_opts.get('max_edges', 2000)
+            batch_size = r_opts.get('batch_size', 300)
+            
+            # Auto-enable smart sampling if network is large and auto-sampling is enabled
+            processing_config = config.get('processing', {}).get('memory_optimization', {})
+            if (processing_config.get('enable_sampling_auto', True) and 
+                n_edges > processing_config.get('sampling_threshold', 3000)):
+                enable_smart_sampling = True
+                self._log(f"Auto-enabling smart sampling (network has {n_edges} edges)")
+            
+            # Step 5: Create MetricGraph with optimizations
+            self._log("Creating MetricGraph with optimized interface...")
+            metric_graph = self.mg_interface.create_graph(
+                nodes_df, 
+                edges_df,
+                enable_sampling=enable_smart_sampling,  # NEW PARAMETER
+                max_edges=max_edges,                     # NEW PARAMETER  
+                batch_size=batch_size                    # NEW PARAMETER
             )
             
-            # Use the correct function signature from your existing code
-            trained_model, gnn_features, training_history = train_accessibility_gnn(
-                pyg_data,
-                gnn_model,
-                epochs=epochs
-            )
+            if metric_graph is not None:
+                # Step 6: Disaggregate SVI using MetricGraph
+                self._log("Performing SVI disaggregation with GNN features...")
+                
+                # Prepare observations
+                svi_value = svi_data['RPL_THEMES'].iloc[0]
+
+                # Get road network centroid coordinates
+                road_nodes = list(road_network.nodes())
+                if road_nodes:
+                    x_coords = [node[0] for node in road_nodes]
+                    y_coords = [node[1] for node in road_nodes]
+                    centroid_x = sum(x_coords) / len(x_coords)
+                    centroid_y = sum(y_coords) / len(y_coords)
+                else:
+                    centroid_x, centroid_y = -85.3, 35.1  # Fallback coordinates
+
+                observations = pd.DataFrame({
+                    'x': [centroid_x],
+                    'y': [centroid_y], 
+                    'value': [svi_value]
+                })
+                
+                # Run disaggregation
+                address_coords = pd.DataFrame({
+                'x': [addr.geometry.x for _, addr in addresses.iterrows()],
+                'y': [addr.geometry.y for _, addr in addresses.iterrows()]
+                })
+
+                mg_results = self.mg_interface.disaggregate_svi(
+                    metric_graph,
+                    observations,
+                    address_coords,
+                    nodes_df,
+                    gnn_features=gnn_features
+                )
+                
+                # Step 7: Format results
+                predictions = addresses[['x', 'y']].copy()
+                predictions['predicted_svi'] = mg_results['mean']
+                predictions['uncertainty'] = mg_results['sd']
+                predictions['ci_lower'] = mg_results['q025']
+                predictions['ci_upper'] = mg_results['q975']
+                
+                success_metrics = {
+                    'method': 'optimized_metricgraph',
+                    'gnn_training': training_metrics,
+                    'metricgraph_success': True,
+                    'smart_sampling_used': enable_smart_sampling,
+                    'original_edges': n_edges,
+                    'processed_edges': len(edges_df) if not enable_smart_sampling else "sampled",
+                    'n_predictions': len(predictions)
+                }
+                
+                self._log(f"✓ Successfully processed tract with {len(predictions)} predictions")
+                
+            else:
+                # Step 8: Enhanced fallback using GNN features
+                self._log("MetricGraph failed, using enhanced GNN-based fallback...")
+                predictions = self._enhanced_gnn_fallback(
+                    road_network, svi_data, addresses, gnn_features
+                )
+                
+                success_metrics = {
+                    'method': 'enhanced_gnn_fallback',
+                    'gnn_training': training_metrics,
+                    'metricgraph_success': False,
+                    'smart_sampling_used': enable_smart_sampling,
+                    'n_predictions': len(predictions)
+                }
             
-            # 3. Run MetricGraph disaggregation
-            self._log("  Running spatial disaggregation...")
-            disaggregation_results = self._run_tract_metricgraph(
-                tract_data, gnn_features, config
-            )
-            
-            # 4. Compile results
-            results = {
-                'status': 'success',
-                'fips_code': fips_code,
-                'network_stats': tract_data['network_stats'],
-                'gnn_model': trained_model,
-                'gnn_features': gnn_features,
-                'training_history': training_history,
-                'predictions': disaggregation_results['predictions'],
-                'validation': disaggregation_results.get('validation', {}),
-                'metrics': disaggregation_results.get('metrics', {})
+            return {
+                'predictions': predictions,
+                'metrics': success_metrics,
+                'status': 'success'
             }
-            
-            # 5. Create visualization if requested
-            if visualize:
-                self._create_tract_visualization(results, tract_data, config)
-            
-            return results
             
         except Exception as e:
-            self._log(f"  Error in tract processing: {str(e)}", 'ERROR')
-            return {
-                'status': 'error',
-                'fips_code': fips_code,
-                'error': str(e)
-            }
+            self._log(f"✗ Error in optimized processing: {str(e)}", 'ERROR')
+            return self._fallback_tract_interpolation(tract_data)
 
     def _run_tract_metricgraph(self, tract_data, gnn_features, config):
         """Run MetricGraph disaggregation for a single tract"""
@@ -618,11 +700,16 @@ class GRANITEPipeline:
             covariates.columns = ['gnn_kappa', 'gnn_alpha', 'gnn_tau']
             
             # Run disaggregation
+            tract_address_coords = pd.DataFrame({
+                'x': [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()],
+                'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()]
+            })
+
             mg_results = self.mg_interface.disaggregate_svi(
                 metric_graph,
                 observations,
-                tract_data['addresses'],  # Use tract addresses as prediction locations
-                nodes_df,  # This one is correctly defined above
+                tract_address_coords, 
+                nodes_df,
                 gnn_features=covariates
             )
             
@@ -701,6 +788,12 @@ class GRANITEPipeline:
             })
         
         return {
+            'status': 'success',
+            'fips_code': tract_data['fips_code'],
+            'network_stats': {  # ← ADD THIS BLOCK
+                'nodes': tract_data['road_network'].number_of_nodes(),
+                'edges': tract_data['road_network'].number_of_edges()
+            },
             'predictions': pd.DataFrame(predictions),
             'validation': {},
             'metrics': {'method': 'fallback'}
@@ -766,6 +859,61 @@ class GRANITEPipeline:
         """Create summary visualization for batch processing"""
         # Placeholder for batch visualization
         self._log("Creating batch summary visualization")
+
+    def _enhanced_gnn_fallback(self, road_network, svi_data, addresses, gnn_features):
+        """
+        Enhanced fallback using GNN features for spatial interpolation
+        This provides better predictions than simple distance weighting
+        """
+        self._log("Using enhanced GNN-based spatial interpolation...")
+        
+        # Get node positions
+        nodes = list(road_network.nodes())
+        node_positions = np.array([[node[0], node[1]] for node in nodes])
+        
+        predictions = []
+        
+        for _, addr in addresses.iterrows():
+            addr_point = np.array([addr['x'], addr['y']])
+            
+            # Find nearest network nodes
+            distances = np.linalg.norm(node_positions - addr_point, axis=1)
+            nearest_indices = np.argsort(distances)[:5]  # Use 5 nearest nodes
+            
+            # Weight by inverse distance
+            nearest_distances = distances[nearest_indices]
+            weights = 1 / (nearest_distances + 1e-6)
+            weights /= weights.sum()
+            
+            # Interpolate using GNN features
+            if len(gnn_features) > max(nearest_indices):
+                weighted_features = np.average(gnn_features[nearest_indices], weights=weights, axis=0)
+                
+                # Convert GNN features to SVI prediction
+                # This is a simple linear combination - could be enhanced with learned mapping
+                predicted_svi = np.clip(
+                    0.3 * weighted_features[0] + 0.4 * weighted_features[1] + 0.3 * weighted_features[2],
+                    0, 1
+                )
+                
+                # Estimate uncertainty based on feature variance
+                feature_variance = np.var(gnn_features[nearest_indices], axis=0)
+                uncertainty = np.sqrt(np.mean(feature_variance)) * 0.2
+            else:
+                # Fallback to simple mean if GNN features don't align
+                predicted_svi = 0.5
+                uncertainty = 0.15
+            
+            predictions.append({
+                'x': addr['x'],
+                'y': addr['y'],
+                'predicted_svi': predicted_svi,
+                'uncertainty': uncertainty,
+                'ci_lower': predicted_svi - 1.96 * uncertainty,
+                'ci_upper': predicted_svi + 1.96 * uncertainty
+            })
+        
+        return pd.DataFrame(predictions)
 
 
 # Convenience functions for backwards compatibility

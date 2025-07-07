@@ -292,7 +292,7 @@ def print_banner():
     """Print GRANITE banner"""
     banner = """
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║                            GRANITE                                    ║
+    ║                            GRANITE                                   ║
     ║  Graph-Refined Accessibility Network for Integrated Transit Equity   ║
     ╠══════════════════════════════════════════════════════════════════════╣
     ║  A framework for Social Vulnerability Index disaggregation using     ║

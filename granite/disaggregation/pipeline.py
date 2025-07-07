@@ -235,7 +235,9 @@ class GRANITEPipeline:
         self.results['disaggregation'] = self.mg_interface.disaggregate_svi(
             self.data['metric_graph'],
             observations,
-            covariates
+            self.data['addresses'],  # Use addresses as prediction locations
+            None,  # nodes_df not available in county mode
+            gnn_features=covariates
         )
         
         # Interpolate to address locations
@@ -589,12 +591,25 @@ class GRANITEPipeline:
             # Create MetricGraph
             metric_graph = self.mg_interface.create_graph(nodes_df, edges_df)
             
-            # Prepare observations (single tract SVI value)
+            # Prepare observations (single tract SVI value with network centroid coordinates)
             svi_value = tract_data['svi_data']['RPL_THEMES'].iloc[0]
+
+            # Get road network centroid coordinates (reliable and always available)
+            road_nodes = list(tract_data['road_network'].nodes())
+            if road_nodes:
+                # Use centroid of road network
+                x_coords = [node[0] for node in road_nodes]
+                y_coords = [node[1] for node in road_nodes]
+                centroid_x = sum(x_coords) / len(x_coords)
+                centroid_y = sum(y_coords) / len(y_coords)
+            else:
+                # Fallback to center of bounding box
+                centroid_x, centroid_y = -85.3, 35.1  # Approximate center of area
+
             observations = pd.DataFrame({
-                'location': [0],  # Single observation point
-                'svi': [svi_value],
-                'weight': [1.0]
+                'x': [centroid_x],            # Road network centroid longitude
+                'y': [centroid_y],            # Road network centroid latitude
+                'value': [svi_value]          # SVI value
             })
             
             # Prepare covariates (GNN features)
@@ -606,7 +621,9 @@ class GRANITEPipeline:
             mg_results = self.mg_interface.disaggregate_svi(
                 metric_graph,
                 observations,
-                covariates
+                tract_data['addresses'],  # Use tract addresses as prediction locations
+                nodes_df,  # This one is correctly defined above
+                gnn_features=covariates
             )
             
             # Interpolate to address locations

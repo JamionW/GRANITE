@@ -1,5 +1,5 @@
-# GRANITE Framework Configuration - Auto-generated
-# Updated: 2025-07-05 18:32:07
+# GRANITE Framework Configuration - Complete Version
+# Updated: 2025-07-06 with FIPS-based processing support
 
 data:
   state: "Tennessee"
@@ -8,30 +8,62 @@ data:
   county_fips: "065"
   census_year: 2020
   
-  # Local data files
+  # Processing mode selection
+  processing_mode: "fips"  # "county" (original, memory-intensive) or "fips" (memory-efficient)
+  
+  # FIPS-based processing configuration
+  fips_config:
+    # Single tract processing
+    single_fips: null  # e.g., "47065001100" for specific tract
+    
+    # Batch processing options
+    batch:
+      # Explicit list of FIPS codes to process
+      target_list: []  # e.g., ["47065001100", "47065001200", "47065001300"]
+      
+      # Auto-selection for batch processing
+      auto_select:
+        enabled: true
+        mode: "range"        # "all", "range", or "sample"
+        range_start: 1       # Start from tract 1
+        range_end: 5         # Process first 5 tracts
+        sample_size: 10      # If mode is "sample", how many random tracts
+    
+    # Memory management settings
+    memory:
+      tract_buffer_degrees: 0.01    # Buffer around each tract (degrees)
+      max_network_nodes: 10000      # Maximum nodes per tract network
+      max_network_edges: 20000      # Maximum edges per tract network
+  
+  # Local data files (original settings)
   svi_file: "data/raw/SVI2020_US_tract.csv"
   roads_file: "data/raw/tl_2023_47065_roads.shp" 
   census_tracts_file: "data/raw/tl_2020_47_tract.shp"
   
-  # Fallback settings
+  # Fallback settings for address generation
   n_synthetic_addresses: 1000
-  bbox: [-85.5, 35.0, -85.0, 35.5]
+  bbox: [-85.5, 35.0, -85.0, 35.5]  # Hamilton County bounding box
 
 # GNN model settings
 model:
   type: "standard"
   input_dim: 5
-  hidden_dim: 64
+  hidden_dim: 64              # Will be reduced to 32 for FIPS mode automatically
   output_dim: 3
   dropout: 0.2
-  epochs: 100
+  epochs: 100                 # Default epochs (can be overridden by command line)
   learning_rate: 0.01
 
 # MetricGraph settings  
 metricgraph:
   alpha: 1.5
-  mesh_resolution: 0.01
+  mesh_resolution: 0.01       # Fine resolution for county mode
   formula: "y ~ gnn_kappa + gnn_alpha + gnn_tau"
+  
+  # FIPS-specific MetricGraph settings
+  fips_mode:
+    mesh_resolution: 0.02     # Coarser for smaller tract networks
+    max_nodes_override: 8000  # Override for very large tracts
 
 # Output settings
 output:
@@ -39,3 +71,41 @@ output:
   save_features: true
   save_validation: true
   save_plots: true
+  
+  # FIPS-specific output options
+  fips_output:
+    individual_tract_folders: true    # Create separate folder for each tract
+    batch_summary: true              # Create batch processing summary
+    combined_predictions: true       # Combine all tract predictions into one file
+
+# Processing control settings
+processing:
+  parallel_tracts: false      # Enable parallel processing of multiple tracts
+  max_workers: 4             # Number of parallel workers (if parallel enabled)
+  continue_on_error: true    # Continue batch processing if individual tracts fail
+  memory_monitoring: true    # Monitor memory usage during processing
+
+# Logging and debugging
+logging:
+  level: "INFO"              # DEBUG, INFO, WARNING, ERROR
+  save_logs: true
+  log_file: "logs/granite.log"
+
+# Experimental features (advanced users)
+experimental:
+  advanced_network_simplification: false
+  custom_interpolation_methods: false
+  gpu_acceleration: false
+  
+# Model validation settings
+validation:
+  cross_validation_folds: 5
+  test_split: 0.2
+  random_seed: 42
+  
+# Visualization settings
+visualization:
+  figure_size: [12, 8]
+  dpi: 300
+  color_scheme: "viridis"
+  save_intermediate_plots: false

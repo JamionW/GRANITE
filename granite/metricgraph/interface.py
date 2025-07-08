@@ -185,31 +185,34 @@ class MetricGraphInterface:
                 # Trim edge list to actual size
                 edge_list <- edge_list[1:edge_count]
                 
-                cat("Creating MetricGraph object with", edge_count, "valid edges\\n")
-                
-                # OPTIMIZATION 2: Single optimized creation attempt
+                cat("Creating MetricGraph object with", edge_count, "valid edges\n")
+                cat("This may take several minutes for large networks...\n")
+
+                # OPTIMIZATION 2: Single optimized creation attempt with progress
                 tryCatch({
+                    cat("Step 1/3: Initializing MetricGraph...\n")
                     graph <- metric_graph$new(
                         edges = edge_list,
                         longlat = FALSE,
-                        verbose = 0,
-                        perform_merges = TRUE,  # ← ADD THIS LINE
+                        verbose = 1,
+                        perform_merges = TRUE,
                         tolerance = list(
-                            vertex_vertex = 1e-6,   # ← Relax tolerance
-                            vertex_edge = 1e-6,     # ← Relax tolerance  
-                            edge_edge = 1e-6        # ← Relax tolerance
+                            vertex_vertex = 1e-6,
+                            vertex_edge = 1e-6,
+                            edge_edge = 1e-6
                         )
                     )
-                    
-                    cat("SUCCESS: MetricGraph created successfully\\n")
+                    cat("Step 2/3: MetricGraph created, finalizing...\n")
+                    cat("Step 3/3: MetricGraph ready!\n")
+                    cat("SUCCESS: MetricGraph created successfully\n")
                     return(list(TRUE, graph))
                     
                 }, error = function(e) {
-                    cat("ERROR in MetricGraph creation:", conditionMessage(e), "\\n")
+                    cat("ERROR in MetricGraph creation:", conditionMessage(e), "\n")
                     
                     # FALLBACK: Try with reduced network if still failing
                     if(edge_count > 1000) {
-                        cat("Attempting fallback with first 1000 edges\\n")
+                        cat("Attempting fallback with first 1000 edges\n")
                         fallback_edges <- edge_list[1:1000]
                         
                         tryCatch({
@@ -218,10 +221,10 @@ class MetricGraphInterface:
                                 longlat = FALSE,
                                 verbose = 0
                             )
-                            cat("FALLBACK SUCCESS: Created graph with 1000 edges\\n")
+                            cat("FALLBACK SUCCESS: Created graph with 1000 edges\n")
                             return(list(TRUE, graph))
                         }, error = function(e2) {
-                            cat("FALLBACK FAILED:", conditionMessage(e2), "\\n")
+                            cat("FALLBACK FAILED:", conditionMessage(e2), "\n")
                             return(list(FALSE, paste("Creation failed:", conditionMessage(e))))
                         })
                     } else {

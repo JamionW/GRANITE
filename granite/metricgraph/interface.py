@@ -135,10 +135,10 @@ class MetricGraphInterface:
                 colnames(E) <- c("from", "to")
                 
                 # Limit edges if too many
-                if(nrow(E) > max_edges) {
-                    cat("Limiting to", max_edges, "edges for memory efficiency\\n")
-                    E <- E[1:max_edges, , drop = FALSE]
-                }
+                #if(nrow(E) > max_edges) {
+                #    cat("Limiting to", max_edges, "edges for memory efficiency\\n")
+                #    E <- E[1:max_edges, , drop = FALSE]
+                #}
                 
                 # OPTIMIZATION 1: Batch edge processing
                 n_edges <- nrow(E)

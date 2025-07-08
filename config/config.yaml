@@ -63,8 +63,8 @@ metricgraph:
   # NEW: R Processing Optimizations
   r_optimizations:
     enabled: true             # Enable R processing optimizations
-    max_edges: 2000           # Maximum edges for MetricGraph (memory limit)
-    batch_size: 300           # R batch processing size
+    max_edges: 1000           # Maximum edges for MetricGraph (memory limit)
+    batch_size: 200           # R batch processing size
     enable_gc: true           # Enable garbage collection in R
     
   # NEW: Smart Network Sampling (CONFIGURABLE)

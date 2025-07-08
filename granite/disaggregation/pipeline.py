@@ -874,7 +874,7 @@ class GRANITEPipeline:
         predictions = []
         
         for _, addr in addresses.iterrows():
-            addr_point = np.array([addr['x'], addr['y']])
+            addr_point = np.array([addr.geometry.x, addr.geometry.y])
             
             # Find nearest network nodes
             distances = np.linalg.norm(node_positions - addr_point, axis=1)

@@ -615,7 +615,7 @@ class GRANITEPipeline:
                     observations,
                     address_coords,
                     nodes_df,
-                    gnn_features=gnn_features
+                    gnn_features=pd.DataFrame(gnn_features, columns=['gnn_kappa', 'gnn_alpha', 'gnn_tau'])
                 )
                 
                 # Step 7: Format results

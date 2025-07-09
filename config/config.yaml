@@ -70,7 +70,7 @@ metricgraph:
   # Smart Network Sampling 
   smart_sampling:
     enabled: false            # Enable smart network sampling (set to true to activate)
-    max_edges: 2000           # Maximum edges after sampling
+    max_edges: 500            # Maximum edges after sampling
     preserve_backbone: true   # Preserve high-centrality edges
     spatial_coverage: true    # Maintain spatial coverage
     connectivity_check: true  # Ensure network remains connected
@@ -118,7 +118,7 @@ logging:
   log_optimizations: true    # Log optimization decisions
   log_memory_usage: true     # Log memory usage
 
-# Experimental features (advanced users)
+# Experimental features (placeholders only... not implemented yet)
 experimental:
   advanced_network_simplification: false
   custom_interpolation_methods: false
@@ -126,9 +126,9 @@ experimental:
   
   Advanced R optimizations
   r_advanced:
-    custom_tolerance: false         # Use custom tolerance settings
-    parallel_r_processing: false   # Enable parallel R processing (experimental)
-    memory_mapped_edges: false     # Use memory mapping for large edge lists
+    custom_tolerance: false        
+    parallel_r_processing: false   
+    memory_mapped_edges: false    
   
 # Model validation settings
 validation:

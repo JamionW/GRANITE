@@ -7,7 +7,6 @@ import pandas as pd
 import geopandas as gpd
 import fiona
 from shapely.geometry import Point, LineString
-from shapely.ops import unary_union
 import networkx as nx
 from datetime import datetime
 
@@ -335,98 +334,6 @@ class DataLoader:
         
         return G
     
-    def load_tract_specific_roads(self, fips_code, buffer_degrees=0.01, roads_file=None):
-        """
-        Load road network filtered to specific tract + buffer
-        This is what FIPS mode should be doing!
-        
-        Parameters:
-        -----------
-        fips_code : str
-            FIPS code for specific tract (e.g., "47065001100")
-        buffer_degrees : float
-            Buffer around tract in degrees (default 0.01 ≈ 1km)
-        roads_file : str, optional
-            Path to roads shapefile
-            
-        Returns:
-        --------
-        gpd.GeoDataFrame
-            Roads within tract boundary + buffer
-        """
-        self._log(f"Loading road network for tract {fips_code}...")
-        
-        # Step 1: Get the specific tract geometry
-        tract_boundary = self._get_tract_boundary(fips_code)
-        if tract_boundary is None:
-            self._log(f"  ✗ Could not find tract {fips_code}")
-            return gpd.GeoDataFrame()
-        
-        # Step 2: Create buffered boundary
-        buffered_boundary = tract_boundary.buffer(buffer_degrees)
-        self._log(f"  - Tract boundary with {buffer_degrees:.3f}° buffer")
-        
-        # Step 3: Load full road network
-        all_roads = self.load_road_network(roads_file)
-        self._log(f"  - Loaded {len(all_roads)} total road segments")
-        
-        # Step 4: Spatial filter - only roads intersecting buffered tract
-        tract_roads = self._spatially_filter_roads(all_roads, buffered_boundary)
-        
-        self._log(f"  ✓ Filtered to {len(tract_roads)} road segments for tract {fips_code}")
-        
-        return tract_roads
-
-    def _get_tract_boundary(self, fips_code):
-        """Get the boundary geometry for a specific tract"""
-        try:
-            # Load census tracts if not already loaded
-            if not hasattr(self, '_census_tracts'):
-                self._census_tracts = self.load_census_tracts()
-            
-            # Find the specific tract
-            tract_row = self._census_tracts[self._census_tracts['FIPS'] == fips_code]
-            
-            if len(tract_row) == 0:
-                self._log(f"  ✗ Tract {fips_code} not found in census data")
-                return None
-            
-            # Get the geometry
-            tract_geometry = tract_row.geometry.iloc[0]
-            
-            self._log(f"  ✓ Found tract {fips_code} boundary")
-            return tract_geometry
-            
-        except Exception as e:
-            self._log(f"  ✗ Error getting tract boundary: {str(e)}")
-            return None
-
-    def _spatially_filter_roads(self, roads_gdf, boundary_geometry):
-        """Filter roads to only those intersecting the boundary"""
-        try:
-            # Ensure same CRS
-            if roads_gdf.crs != boundary_geometry.crs if hasattr(boundary_geometry, 'crs') else None:
-                # Assume boundary uses same CRS as roads for now
-                pass
-            
-            # Create GeoSeries for the boundary
-            if hasattr(boundary_geometry, 'geometry'):
-                boundary_geom = boundary_geometry.geometry.iloc[0]
-            else:
-                boundary_geom = boundary_geometry
-            
-            # Spatial intersection - roads that intersect the buffered tract
-            intersecting_roads = roads_gdf[roads_gdf.geometry.intersects(boundary_geom)].copy()
-            
-            self._log(f"  - Spatial filter: {len(roads_gdf)} → {len(intersecting_roads)} roads")
-            
-            return intersecting_roads
-            
-        except Exception as e:
-            self._log(f"  ✗ Error in spatial filtering: {str(e)}")
-            # Fallback: return all roads
-            return roads_gdf
-
     # ==========================================
     # NEW FIPS-BASED PROCESSING METHODS
     # ==========================================
@@ -509,215 +416,85 @@ class DataLoader:
             
             return G
 
-    def load_single_tract_data(self, fips_code, buffer_degrees=0.01, max_nodes=10000, max_edges=20000):
+    def load_single_tract_data(self, fips_code, buffer_degrees=0.01, 
+                          max_nodes=None, max_edges=None, 
+                          preserve_network=True):  # NEW PARAMETER
         """
-        FIXED: Load data for a single tract with proper spatial filtering
+        Load all data for a single census tract with optional memory management
         
         Parameters:
         -----------
         fips_code : str
-            FIPS code for the tract
+            Census tract FIPS code (11 digits)
         buffer_degrees : float
             Buffer around tract for road network (degrees)
-        max_nodes : int
-            Maximum nodes in road network
-        max_edges : int  
-            Maximum edges in road network
+        max_nodes : int, optional
+            Maximum nodes in road network (None = unlimited, recommended for disaggregation)
+        max_edges : int, optional
+            Maximum edges in road network (None = unlimited, recommended for disaggregation)
+        preserve_network : bool
+            If True, preserves full network granularity (recommended for spatial disaggregation)
             
         Returns:
         --------
         dict
-            Tract data with spatially filtered roads
+            Dictionary containing tract data
         """
         self._log(f"Loading data for tract {fips_code}")
         
-        try:
-            # Step 1: Load tract-specific road network (THE KEY FIX!)
-            roads_gdf = self.load_tract_specific_roads(
-                fips_code, 
-                buffer_degrees=buffer_degrees
-            )
-            
-            if len(roads_gdf) == 0:
-                self._log(f"  ✗ No roads found for tract {fips_code}")
-                return self._create_empty_tract_data(fips_code)
-            
-            # Step 2: Create network graph from filtered roads
-            road_network = self.create_network_graph(roads_gdf)
-            
-            # Step 3: Apply size limits if needed
-            if road_network.number_of_nodes() > max_nodes:
-                self._log(f"  ⚠️  Network has {road_network.number_of_nodes()} nodes (>{max_nodes} limit)")
-                # Apply network simplification if needed
-                road_network = self._simplify_network_if_needed(road_network, max_nodes, max_edges)
-            
-            # Step 4: Load other tract data
-            tract_data = self._load_tract_ancillary_data(fips_code, road_network)
-            
-            # Step 5: Compile results
-            result = {
-                'fips_code': fips_code,
-                'road_network': road_network,
-                'roads_gdf': roads_gdf,
-                'svi_data': tract_data['svi_data'],
-                'addresses': tract_data['addresses'],
-                'network_stats': {
-                    'nodes': road_network.number_of_nodes(),
-                    'edges': road_network.number_of_edges(),
-                    'roads_loaded': len(roads_gdf)
-                }
-            }
-            
-            self._log(f"  ✓ Tract data loaded:")
-            self._log(f"    - Road segments: {len(roads_gdf)}")
-            self._log(f"    - Network nodes: {road_network.number_of_nodes()}")
-            self._log(f"    - Network edges: {road_network.number_of_edges()}")
-            self._log(f"    - Addresses: {len(tract_data['addresses'])}")
-            
-            return result
-            
-        except Exception as e:
-            self._log(f"  ✗ Error loading tract data: {str(e)}")
-            return self._create_empty_tract_data(fips_code)
+        # Extract state and county from FIPS
+        state_fips = fips_code[:2]
+        county_fips = fips_code[2:5]
         
-    def _load_tract_ancillary_data(self, fips_code, road_network):
-        """Load SVI data and generate addresses for the tract"""
+        # 1. Load tract geometry
+        tract_geometry = self._load_single_tract_geometry(fips_code)
+        if tract_geometry is None:
+            raise ValueError(f"Tract {fips_code} not found")
         
-        # Load SVI data for this tract
-        svi_data = self._get_tract_svi_data(fips_code)
+        # 2. Load SVI data for this tract
+        tract_svi = self._load_single_tract_svi(fips_code)
         
-        # Generate addresses within the tract
-        addresses = self._generate_tract_addresses(fips_code, road_network)
+        # 3. Create buffered bbox for road network
+        bounds = tract_geometry.bounds  # Returns tuple: (minx, miny, maxx, maxy)
+        buffered_bbox = [
+            bounds[0] - buffer_degrees,  # minx
+            bounds[1] - buffer_degrees,  # miny
+            bounds[2] + buffer_degrees,  # maxx
+            bounds[3] + buffer_degrees   # maxy
+        ]
         
-        return {
-            'svi_data': svi_data,
-            'addresses': addresses
-        }
-
-    def _get_tract_svi_data(self, fips_code):
-        """Get SVI data for specific tract"""
-        try:
-            # Load SVI data if not already loaded
-            if not hasattr(self, '_svi_data'):
-                self._svi_data = self.load_svi_data()
-            
-            # Filter to specific tract
-            tract_svi = self._svi_data[self._svi_data['FIPS'] == fips_code]
-            
-            if len(tract_svi) == 0:
-                self._log(f"  ⚠️  No SVI data for tract {fips_code}")
-                # Create dummy SVI data
-                tract_svi = pd.DataFrame({
-                    'FIPS': [fips_code],
-                    'RPL_THEMES': [0.5]  # Default SVI value
-                })
-            
-            return tract_svi
-            
-        except Exception as e:
-            self._log(f"  ✗ Error loading SVI data: {str(e)}")
-            return pd.DataFrame({'FIPS': [fips_code], 'RPL_THEMES': [0.5]})
-
-    def _generate_tract_addresses(self, fips_code, road_network, n_addresses=100):
-        """Generate synthetic addresses within the tract"""
-        try:
-            # Get network bounds
-            nodes = list(road_network.nodes())
-            if len(nodes) == 0:
-                return gpd.GeoDataFrame()
-            
-            x_coords = [node[0] for node in nodes]
-            y_coords = [node[1] for node in nodes]
-            
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            # Generate random points within network bounds
-            np.random.seed(42)  # Reproducible addresses
-            
-            addresses_data = []
-            for i in range(n_addresses):
-                x = np.random.uniform(x_min, x_max)
-                y = np.random.uniform(y_min, y_max)
-                
-                addresses_data.append({
-                    'address_id': i,
-                    'x': x,
-                    'y': y
-                })
-            
-            # Create GeoDataFrame
-            addresses_gdf = gpd.GeoDataFrame(
-                addresses_data,
-                geometry=gpd.points_from_xy([addr['x'] for addr in addresses_data],
-                                        [addr['y'] for addr in addresses_data]),
-                crs='EPSG:4326'
-            )
-            
-            self._log(f"  ✓ Generated {len(addresses_gdf)} synthetic addresses")
-            return addresses_gdf
-            
-        except Exception as e:
-            self._log(f"  ✗ Error generating addresses: {str(e)}")
-            return gpd.GeoDataFrame()
-
-    def _simplify_network_if_needed(self, road_network, max_nodes, max_edges):
-        """Simplify network if it exceeds size limits"""
+        # 4. Load roads within buffered area
+        roads = self._load_roads_for_bbox(
+            state_fips, county_fips, buffered_bbox
+        )
         
-        current_nodes = road_network.number_of_nodes()
-        current_edges = road_network.number_of_edges()
+        # 5. Create network with granularity preservation
+        road_network = self._create_preserved_network(
+            roads, max_nodes, max_edges, preserve_network
+        )
         
-        if current_nodes <= max_nodes and current_edges <= max_edges:
-            return road_network
+        # 6. Generate address points within tract
+        addresses = self._generate_tract_addresses(
+            tract_geometry, n_points=min(200, max(50, road_network.number_of_nodes() // 50))
+        )
         
-        self._log(f"  Simplifying network: {current_nodes} → {max_nodes} nodes")
-        
-        try:
-            # Simple node sampling approach
-            import networkx as nx
-            
-            # Calculate how many nodes to keep
-            keep_ratio = max_nodes / current_nodes
-            
-            # Sample nodes randomly but preserve connectivity
-            all_nodes = list(road_network.nodes())
-            np.random.seed(42)  # Reproducible simplification
-            
-            # Keep a fraction of nodes
-            nodes_to_keep = np.random.choice(
-                all_nodes, 
-                size=min(max_nodes, len(all_nodes)), 
-                replace=False
-            )
-            
-            # Create subgraph
-            simplified_network = road_network.subgraph(nodes_to_keep).copy()
-            
-            # Ensure connectivity - if disconnected, add connecting edges
-            if not nx.is_connected(simplified_network):
-                # Find largest component
-                largest_component = max(nx.connected_components(simplified_network), key=len)
-                simplified_network = road_network.subgraph(largest_component).copy()
-            
-            self._log(f"  ✓ Simplified to {simplified_network.number_of_nodes()} nodes, {simplified_network.number_of_edges()} edges")
-            
-            return simplified_network
-            
-        except Exception as e:
-            self._log(f"  ✗ Network simplification failed: {str(e)}")
-            return road_network
-
-    def _create_empty_tract_data(self, fips_code):
-        """Create empty tract data structure for failed loads"""
-        import networkx as nx
+        # 7. Create transit stops
+        transit_stops = self._create_tract_transit_stops(tract_geometry)
         
         return {
             'fips_code': fips_code,
-            'road_network': nx.Graph(),
-            'roads_gdf': gpd.GeoDataFrame(),
-            'svi_data': pd.DataFrame({'FIPS': [fips_code], 'RPL_THEMES': [0.5]}),
-            'addresses': gpd.GeoDataFrame(),
-            'network_stats': {'nodes': 0, 'edges': 0, 'roads_loaded': 0}
+            'tract_geometry': tract_geometry,
+            'svi_data': tract_svi,
+            'roads': roads,
+            'road_network': road_network,
+            'addresses': addresses,
+            'transit_stops': transit_stops,
+            'network_stats': {
+                'nodes': road_network.number_of_nodes(),
+                'edges': road_network.number_of_edges(),
+                'buffer_km': buffer_degrees * 111,  # Rough conversion
+                'preserved': preserve_network,
+            }
         }
 
     def load_batch_fips_data(self, fips_list, preserve_network=True, **kwargs):

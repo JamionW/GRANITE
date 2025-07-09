@@ -1,6 +1,5 @@
 """
 Main disaggregation pipeline for GRANITE framework
-ENHANCED VERSION - includes all placeholder implementations
 """
 import os
 import numpy as np
@@ -10,16 +9,6 @@ from datetime import datetime
 import torch
 import warnings
 warnings.filterwarnings('ignore')
-
-# Enhanced imports for new functionality
-from scipy.spatial.distance import cdist
-from scipy.interpolate import RBFInterpolator
-from sklearn.model_selection import cross_val_score, KFold
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import matplotlib.pyplot as plt
-import seaborn as sns
-from scipy import stats
-import networkx as nx
 
 from ..data.loaders import DataLoader
 from ..models.gnn import prepare_graph_data, create_gnn_model
@@ -37,12 +26,6 @@ class GRANITEPipeline:
     Supports both:
     - County-wide processing 
     - FIPS-based processing
-    
-    ENHANCED VERSION with:
-    - Network-aware spatial interpolation
-    - Comprehensive validation metrics
-    - Rich visualizations
-    - Robust fallback methods
     """
     
     def __init__(self, data_dir='./data', output_dir='./output', verbose=True):
@@ -293,396 +276,28 @@ class GRANITEPipeline:
         
         self._log("Visualization complete!")
     
-    # ==========================================
-    # ENHANCED SPATIAL INTERPOLATION METHODS
-    # ==========================================
-    
     def _interpolate_to_addresses(self):
-        """
-        ENHANCED: Interpolate disaggregation results to address locations using 
-        network-aware spatial interpolation
-        """
-        self._log("Performing network-aware spatial interpolation to addresses...")
-        
+        """Interpolate disaggregation results to address locations"""
+        # Placeholder implementation
         addresses = self.data['addresses']
-        
-        # Get MetricGraph disaggregation results
-        if 'disaggregation' not in self.results:
-            self._log("No disaggregation results found, using fallback")
-            return self._fallback_address_interpolation(addresses)
-        
-        mg_results = self.results['disaggregation']
-        
-        # Method 1: Network-based interpolation if we have network connectivity
-        if 'road_network' in self.data:
-            predictions = self._network_aware_interpolation(
-                mg_results, addresses, self.data['road_network']
-            )
-        else:
-            # Method 2: Enhanced spatial interpolation with GNN features
-            predictions = self._gnn_enhanced_interpolation(
-                mg_results, addresses, self.results.get('gnn_features')
-            )
-        
+        predictions = pd.DataFrame({
+            'address_id': range(len(addresses)),
+            'longitude': [addr.geometry.x for _, addr in addresses.iterrows()],
+            'latitude': [addr.geometry.y for _, addr in addresses.iterrows()],
+            'mean': np.random.uniform(0.2, 0.8, len(addresses)),
+            'sd': np.random.uniform(0.05, 0.15, len(addresses))
+        })
         return predictions
     
-    def _network_aware_interpolation(self, mg_results, addresses, road_network):
-        """Network-aware spatial interpolation using road network topology"""
-        self._log("  Using network-aware spatial interpolation")
-        
-        try:
-            predictions = []
-            
-            # Get observation points from tract centroids
-            tract_centroids = self.data['tracts_with_svi'].geometry.centroid
-            
-            for idx, addr in addresses.iterrows():
-                addr_point = (addr.geometry.x, addr.geometry.y)
-                
-                # Find nearest network nodes
-                network_nodes = list(road_network.nodes())
-                node_distances = [
-                    np.sqrt((addr_point[0] - node[0])**2 + (addr_point[1] - node[1])**2)
-                    for node in network_nodes
-                ]
-                nearest_node_idx = np.argmin(node_distances)
-                nearest_node = network_nodes[nearest_node_idx]
-                
-                # Calculate network distances to tract centroids
-                network_distances = []
-                weights = []
-                
-                for tract_idx, centroid in enumerate(tract_centroids):
-                    centroid_point = (centroid.x, centroid.y)
-                    
-                    # Find nearest network node to tract centroid
-                    centroid_distances = [
-                        np.sqrt((centroid_point[0] - node[0])**2 + (centroid_point[1] - node[1])**2)
-                        for node in network_nodes
-                    ]
-                    nearest_centroid_node_idx = np.argmin(centroid_distances)
-                    nearest_centroid_node = network_nodes[nearest_centroid_node_idx]
-                    
-                    # Calculate network distance (simplified - could use shortest path)
-                    try:
-                        network_dist = nx.shortest_path_length(
-                            road_network, nearest_node, nearest_centroid_node
-                        )
-                    except:
-                        # Fallback to Euclidean distance if no path exists
-                        network_dist = np.sqrt(
-                            (nearest_node[0] - nearest_centroid_node[0])**2 + 
-                            (nearest_node[1] - nearest_centroid_node[1])**2
-                        )
-                    
-                    network_distances.append(network_dist)
-                    weights.append(1 / (network_dist + 1e-6))
-                
-                # Normalize weights
-                weights = np.array(weights)
-                weights /= weights.sum()
-                
-                # Interpolate using network-weighted values
-                if hasattr(mg_results, 'mean') and len(mg_results.mean) > 0:
-                    pred_mean = np.average(mg_results.mean[:len(weights)], weights=weights)
-                    pred_sd = np.sqrt(np.average(mg_results.sd[:len(weights)]**2, weights=weights))
-                else:
-                    # Fallback using tract SVI values
-                    tract_svi_values = self.data['tracts_with_svi']['RPL_THEMES'].values
-                    pred_mean = np.average(tract_svi_values[:len(weights)], weights=weights)
-                    pred_sd = np.std(tract_svi_values) * 0.3
-                
-                predictions.append({
-                    'address_id': idx,
-                    'longitude': addr_point[0],
-                    'latitude': addr_point[1],
-                    'mean': pred_mean,
-                    'sd': pred_sd,
-                    'q025': pred_mean - 1.96 * pred_sd,
-                    'q975': pred_mean + 1.96 * pred_sd
-                })
-            
-            return pd.DataFrame(predictions)
-            
-        except Exception as e:
-            self._log(f"Network interpolation failed: {str(e)}, using fallback")
-            return self._gnn_enhanced_interpolation(mg_results, addresses, self.results.get('gnn_features'))
-
-    def _gnn_enhanced_interpolation(self, mg_results, addresses, gnn_features):
-        """Enhanced spatial interpolation using GNN features"""
-        self._log("  Using GNN-enhanced spatial interpolation")
-        
-        try:
-            predictions = []
-            
-            # Use GNN features to inform spatial variation
-            if gnn_features is not None and len(gnn_features) > 0:
-                # Extract spatial parameters from GNN features
-                kappa_mean = np.mean(gnn_features[:, 0])  # Precision parameter
-                alpha_mean = np.mean(gnn_features[:, 1])  # Smoothness parameter  
-                tau_mean = np.mean(gnn_features[:, 2])    # Nugget effect
-            else:
-                kappa_mean, alpha_mean, tau_mean = 1.0, 0.5, 0.1
-            
-            # Base prediction from tract-level data
-            if hasattr(mg_results, 'mean'):
-                base_svi = np.mean(mg_results.mean)
-                base_uncertainty = np.mean(mg_results.sd)
-            else:
-                base_svi = self.data['tracts_with_svi']['RPL_THEMES'].mean()
-                base_uncertainty = self.data['tracts_with_svi']['RPL_THEMES'].std() * 0.3
-            
-            for idx, addr in addresses.iterrows():
-                # Add spatial variation based on GNN-learned parameters
-                spatial_variation = tau_mean * np.random.normal(0, 1)
-                
-                pred_mean = np.clip(base_svi + spatial_variation, 0, 1)
-                pred_sd = base_uncertainty * (1 + alpha_mean * 0.5)  # Uncertainty varies with smoothness
-                
-                predictions.append({
-                    'address_id': idx,
-                    'longitude': addr.geometry.x,
-                    'latitude': addr.geometry.y,
-                    'mean': pred_mean,
-                    'sd': pred_sd,
-                    'q025': pred_mean - 1.96 * pred_sd,
-                    'q975': pred_mean + 1.96 * pred_sd
-                })
-            
-            return pd.DataFrame(predictions)
-            
-        except Exception as e:
-            self._log(f"GNN interpolation failed: {str(e)}, using basic fallback")
-            return self._fallback_address_interpolation(addresses)
-
-    def _fallback_address_interpolation(self, addresses):
-        """Enhanced fallback interpolation when no other method works"""
-        self._log("  Using enhanced fallback interpolation for addresses")
-        
-        predictions = []
-        
-        # Get base SVI value from tract data
-        if 'tracts_with_svi' in self.data and len(self.data['tracts_with_svi']) > 0:
-            base_svi = self.data['tracts_with_svi']['RPL_THEMES'].mean()
-            svi_std = self.data['tracts_with_svi']['RPL_THEMES'].std()
-        else:
-            base_svi = 0.5
-            svi_std = 0.2
-        
-        for idx, addr in addresses.iterrows():
-            # Add small spatial variation
-            spatial_variation = np.random.normal(0, svi_std * 0.3)
-            pred_svi = np.clip(base_svi + spatial_variation, 0, 1)
-            uncertainty = svi_std * 0.5
-            
-            predictions.append({
-                'address_id': idx,
-                'longitude': addr.geometry.x,
-                'latitude': addr.geometry.y,
-                'mean': pred_svi,
-                'sd': uncertainty,
-                'q025': pred_svi - 1.96 * uncertainty,
-                'q975': pred_svi + 1.96 * uncertainty
-            })
-        
-        return pd.DataFrame(predictions)
-    
-    # ==========================================
-    # ENHANCED VALIDATION METHODS
-    # ==========================================
-    
     def _compute_validation_metrics(self):
-        """
-        ENHANCED: Compute comprehensive validation metrics using spatial 
-        cross-validation and uncertainty calibration
-        """
-        self._log("Computing comprehensive validation metrics...")
-        
-        if 'predictions' not in self.results:
-            self._log("No predictions available for validation")
-            return pd.DataFrame()
-        
-        predictions_df = self.results['predictions']
-        tracts_with_svi = self.data['tracts_with_svi']
-        
-        # Method 1: Tract-level aggregation validation
-        tract_validation = self._validate_tract_aggregation(predictions_df, tracts_with_svi)
-        
-        # Method 2: Spatial cross-validation (if sufficient data)
-        if len(tracts_with_svi) >= 5:
-            spatial_cv_metrics = self._spatial_cross_validation(tracts_with_svi)
-            tract_validation.update(spatial_cv_metrics)
-        
-        # Method 3: Uncertainty calibration metrics
-        if 'sd' in predictions_df.columns or 'uncertainty' in predictions_df.columns:
-            uncertainty_metrics = self._validate_uncertainty_calibration(predictions_df, tracts_with_svi)
-            tract_validation.update(uncertainty_metrics)
-        
-        # Convert to DataFrame for consistency
-        validation_df = pd.DataFrame([tract_validation])
-        
-        return validation_df
-
-    def _validate_tract_aggregation(self, predictions_df, tracts_with_svi):
-        """Validate that address predictions aggregate to tract values (mass preservation)"""
-        validation_results = {}
-        
-        try:
-            # Create spatial join between predictions and tracts
-            predictions_gdf = gpd.GeoDataFrame(
-                predictions_df,
-                geometry=gpd.points_from_xy(predictions_df['longitude'], predictions_df['latitude']),
-                crs='EPSG:4326'
-            )
-            
-            # Ensure CRS match
-            if tracts_with_svi.crs != predictions_gdf.crs:
-                tracts_with_svi = tracts_with_svi.to_crs(predictions_gdf.crs)
-            
-            # Spatial join
-            joined = gpd.sjoin(predictions_gdf, tracts_with_svi, how='left', predicate='within')
-            
-            # Aggregate predictions by tract
-            pred_col = 'mean' if 'mean' in predictions_df.columns else 'predicted_svi'
-            tract_pred_agg = joined.groupby('FIPS')[pred_col].mean()
-            
-            # Compare with true tract values
-            true_tract_svi = tracts_with_svi.set_index('FIPS')['RPL_THEMES']
-            
-            # Calculate metrics for overlapping tracts
-            common_fips = tract_pred_agg.index.intersection(true_tract_svi.index)
-            
-            if len(common_fips) > 0:
-                true_vals = true_tract_svi.loc[common_fips]
-                pred_vals = tract_pred_agg.loc[common_fips]
-                
-                validation_results.update({
-                    'tract_mae': mean_absolute_error(true_vals, pred_vals),
-                    'tract_rmse': np.sqrt(mean_squared_error(true_vals, pred_vals)),
-                    'tract_r2': r2_score(true_vals, pred_vals),
-                    'tract_correlation': np.corrcoef(true_vals, pred_vals)[0, 1],
-                    'mass_preservation_error': np.abs(true_vals.mean() - pred_vals.mean()),
-                    'n_validated_tracts': len(common_fips)
-                })
-            else:
-                self._log("Warning: No spatial overlap found between predictions and tracts")
-                validation_results.update({
-                    'tract_mae': np.nan,
-                    'tract_rmse': np.nan,
-                    'tract_r2': np.nan,
-                    'tract_correlation': np.nan,
-                    'mass_preservation_error': np.nan,
-                    'n_validated_tracts': 0
-                })
-                
-        except Exception as e:
-            self._log(f"Error in tract aggregation validation: {str(e)}")
-            validation_results.update({
-                'tract_mae': np.nan,
-                'tract_rmse': np.nan,
-                'tract_r2': np.nan,
-                'tract_correlation': np.nan,
-                'mass_preservation_error': np.nan,
-                'n_validated_tracts': 0
-            })
-        
-        return validation_results
-
-    def _spatial_cross_validation(self, tracts_with_svi, n_folds=5):
-        """Perform spatial cross-validation to assess generalization"""
-        cv_metrics = {}
-        
-        try:
-            # Simple spatial blocking (could be enhanced with more sophisticated methods)
-            folds = KFold(n_splits=min(n_folds, len(tracts_with_svi)), shuffle=True, random_state=42)
-            
-            cv_scores = {'mae': [], 'rmse': [], 'r2': []}
-            svi_values = tracts_with_svi['RPL_THEMES'].dropna().values
-            
-            if len(svi_values) < n_folds:
-                self._log(f"Insufficient data for {n_folds}-fold CV, using {len(svi_values)} folds")
-                n_folds = len(svi_values)
-            
-            for train_idx, test_idx in folds.split(svi_values):
-                train_svi = svi_values[train_idx]
-                test_svi = svi_values[test_idx]
-                
-                # Simple prediction model for CV (replace with actual model)
-                pred_svi = np.full_like(test_svi, train_svi.mean())
-                
-                cv_scores['mae'].append(mean_absolute_error(test_svi, pred_svi))
-                cv_scores['rmse'].append(np.sqrt(mean_squared_error(test_svi, pred_svi)))
-                if len(np.unique(test_svi)) > 1:  # Avoid R2 calculation issues
-                    cv_scores['r2'].append(r2_score(test_svi, pred_svi))
-            
-            cv_metrics.update({
-                'cv_mae_mean': np.mean(cv_scores['mae']),
-                'cv_mae_std': np.std(cv_scores['mae']),
-                'cv_rmse_mean': np.mean(cv_scores['rmse']),
-                'cv_rmse_std': np.std(cv_scores['rmse']),
-                'cv_r2_mean': np.mean(cv_scores['r2']) if cv_scores['r2'] else np.nan,
-                'cv_r2_std': np.std(cv_scores['r2']) if cv_scores['r2'] else np.nan
-            })
-            
-        except Exception as e:
-            self._log(f"Error in spatial cross-validation: {str(e)}")
-            cv_metrics.update({
-                'cv_mae_mean': np.nan,
-                'cv_mae_std': np.nan,
-                'cv_rmse_mean': np.nan,
-                'cv_rmse_std': np.nan,
-                'cv_r2_mean': np.nan,
-                'cv_r2_std': np.nan
-            })
-        
-        return cv_metrics
-
-    def _validate_uncertainty_calibration(self, predictions_df, tracts_with_svi):
-        """Validate uncertainty calibration using prediction intervals"""
-        uncertainty_metrics = {}
-        
-        try:
-            # Get uncertainty column
-            uncertainty_col = 'sd' if 'sd' in predictions_df.columns else 'uncertainty'
-            pred_col = 'mean' if 'mean' in predictions_df.columns else 'predicted_svi'
-            
-            if uncertainty_col not in predictions_df.columns:
-                self._log("No uncertainty information available for calibration validation")
-                return {'uncertainty_calibrated': False}
-            
-            uncertainties = predictions_df[uncertainty_col].values
-            predictions = predictions_df[pred_col].values
-            
-            # Calculate calibration metrics
-            mean_uncertainty = np.mean(uncertainties)
-            uncertainty_range = np.max(uncertainties) - np.min(uncertainties)
-            
-            # Check if uncertainties are reasonable (not all zeros or too large)
-            reasonable_uncertainty = (mean_uncertainty > 0.001) and (mean_uncertainty < 0.5)
-            
-            uncertainty_metrics.update({
-                'mean_uncertainty': mean_uncertainty,
-                'uncertainty_range': uncertainty_range,
-                'uncertainty_reasonable': reasonable_uncertainty,
-                'uncertainty_calibrated': reasonable_uncertainty and (uncertainty_range > 0.001)
-            })
-            
-            # Additional calibration checks if we have sufficient data
-            if len(predictions) > 10:
-                # Check for correlation between predictions and uncertainties
-                uncertainty_correlation = np.corrcoef(predictions, uncertainties)[0, 1]
-                uncertainty_metrics['pred_uncertainty_correlation'] = uncertainty_correlation
-            
-        except Exception as e:
-            self._log(f"Error in uncertainty calibration validation: {str(e)}")
-            uncertainty_metrics.update({
-                'mean_uncertainty': np.nan,
-                'uncertainty_range': np.nan,
-                'uncertainty_reasonable': False,
-                'uncertainty_calibrated': False
-            })
-        
-        return uncertainty_metrics
+        """Compute validation metrics for results"""
+        # Placeholder implementation
+        return pd.DataFrame({
+            'tract_id': ['47065001100', '47065001200'],
+            'true_svi': [0.45, 0.67],
+            'predicted_avg': [0.44, 0.66],
+            'error': [0.01, 0.01]
+        })
     
     # ==========================================
     # NEW FIPS-BASED PROCESSING METHODS
@@ -795,13 +410,7 @@ class GRANITEPipeline:
             self.data['current_fips'] = fips_code
             
             # Process tract
-            result = self._process_single_tract(tract_data, config, epochs, visualize)
-            
-            # Add FIPS code to result
-            if 'fips_code' not in result:
-                result['fips_code'] = fips_code
-            
-            return result
+            return self._process_single_tract(tract_data, config, epochs, visualize)
             
         except Exception as e:
             self._log(f"Error processing tract {fips_code}: {str(e)}", 'ERROR')
@@ -860,10 +469,6 @@ class GRANITEPipeline:
                     tract_data, config, epochs, 
                     visualize=False  # Skip individual visualizations in batch
                 )
-                
-                # Add FIPS code to result
-                if 'fips_code' not in result:
-                    result['fips_code'] = fips_code
                 
                 batch_results[fips_code] = result
                 
@@ -1047,25 +652,10 @@ class GRANITEPipeline:
                     'n_predictions': len(predictions)
                 }
             
-            # Create visualization if requested
-            if visualize:
-                fips_code = tract_data.get('fips_code', 'unknown')
-                result_for_viz = {
-                    'fips_code': fips_code,
-                    'predictions': predictions,
-                    'metrics': success_metrics,
-                    'status': 'success'
-                }
-                self._create_tract_visualization(result_for_viz, tract_data, config)
-            
             return {
                 'predictions': predictions,
                 'metrics': success_metrics,
-                'status': 'success',
-                'network_stats': {
-                    'nodes': n_nodes,
-                    'edges': n_edges
-                }
+                'status': 'success'
             }
             
         except Exception as e:
@@ -1161,38 +751,21 @@ class GRANITEPipeline:
         return nodes_df, edges_df
 
     def _interpolate_tract_to_addresses(self, mg_results, addresses):
-        """
-        ENHANCED: Interpolate MetricGraph results to address locations with 
-        proper spatial interpolation methods
-        """
-        if mg_results is None or len(mg_results) == 0:
-            return self._fallback_address_interpolation(addresses)
-        
+        """Interpolate MetricGraph results to address locations"""
+        # Simple interpolation - in practice, use sophisticated spatial interpolation
         predictions = []
         
-        # Extract prediction statistics from MetricGraph results
-        if isinstance(mg_results, pd.DataFrame):
-            pred_mean = mg_results['mean'].iloc[0] if 'mean' in mg_results.columns else 0.5
-            pred_sd = mg_results['sd'].iloc[0] if 'sd' in mg_results.columns else 0.1
-        else:
-            pred_mean = getattr(mg_results, 'mean', [0.5])[0]
-            pred_sd = getattr(mg_results, 'sd', [0.1])[0]
-        
         for idx, addr in addresses.iterrows():
-            # Add address-level spatial variation
-            address_variation = np.random.normal(0, pred_sd * 0.5)
-            
-            final_pred = np.clip(pred_mean + address_variation, 0, 1)
-            final_sd = pred_sd * (1 + np.abs(address_variation) * 0.1)
+            # Placeholder prediction (replace with actual interpolation)
+            pred_svi = mg_results.get('mean_prediction', 0.5)
+            pred_sd = mg_results.get('sd_prediction', 0.1)
             
             predictions.append({
-                'address_id': getattr(addr, 'address_id', idx),
+                'address_id': addr['address_id'],
                 'longitude': addr.geometry.x,
                 'latitude': addr.geometry.y,
-                'predicted_svi': final_pred,
-                'uncertainty': final_sd,
-                'ci_lower': final_pred - 1.96 * final_sd,
-                'ci_upper': final_pred + 1.96 * final_sd
+                'predicted_svi': pred_svi + np.random.normal(0, 0.02),  # Add small variation
+                'uncertainty': pred_sd
             })
         
         return pd.DataFrame(predictions)
@@ -1207,7 +780,7 @@ class GRANITEPipeline:
         predictions = []
         for idx, addr in tract_data['addresses'].iterrows():
             predictions.append({
-                'address_id': getattr(addr, 'address_id', idx),
+                'address_id': addr['address_id'],
                 'longitude': addr.geometry.x,
                 'latitude': addr.geometry.y,
                 'predicted_svi': tract_svi + np.random.normal(0, 0.05),
@@ -1216,8 +789,8 @@ class GRANITEPipeline:
         
         return {
             'status': 'success',
-            'fips_code': tract_data.get('fips_code', 'unknown'),
-            'network_stats': {
+            'fips_code': tract_data['fips_code'],
+            'network_stats': {  # ← ADD THIS BLOCK
                 'nodes': tract_data['road_network'].number_of_nodes(),
                 'edges': tract_data['road_network'].number_of_edges()
             },
@@ -1277,309 +850,15 @@ class GRANITEPipeline:
         
         self._log(f"Batch summary saved to: {summary_file}")
 
-    # ==========================================
-    # ENHANCED VISUALIZATION METHODS
-    # ==========================================
-
     def _create_tract_visualization(self, results, tract_data, config):
-        """
-        ENHANCED: Create comprehensive visualization for individual tract processing
-        """
-        fips_code = results.get('fips_code', 'unknown')
-        self._log(f"Creating visualization for tract {fips_code}")
-        
-        try:
-            # Create output directory for tract
-            tract_output_dir = os.path.join(self.output_dir, f'tract_{fips_code}')
-            os.makedirs(tract_output_dir, exist_ok=True)
-            
-            # Create figure with subplots
-            fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-            fig.suptitle(f'GRANITE Results: Census Tract {fips_code}', fontsize=16, fontweight='bold')
-            
-            # Plot 1: Network structure
-            ax1 = axes[0, 0]
-            self._plot_tract_network(ax1, tract_data)
-            ax1.set_title('Road Network Structure')
-            
-            # Plot 2: Prediction map
-            ax2 = axes[0, 1]
-            if 'predictions' in results and len(results['predictions']) > 0:
-                self._plot_prediction_map(ax2, results['predictions'], tract_data)
-                ax2.set_title('SVI Predictions')
-            else:
-                ax2.text(0.5, 0.5, 'No predictions available', 
-                        ha='center', va='center', transform=ax2.transAxes)
-                ax2.set_title('SVI Predictions (No Data)')
-            
-            # Plot 3: Uncertainty visualization
-            ax3 = axes[1, 0]
-            if 'predictions' in results and 'uncertainty' in results['predictions'].columns:
-                self._plot_uncertainty_map(ax3, results['predictions'])
-                ax3.set_title('Prediction Uncertainty')
-            else:
-                ax3.text(0.5, 0.5, 'No uncertainty data', 
-                        ha='center', va='center', transform=ax3.transAxes)
-                ax3.set_title('Prediction Uncertainty (No Data)')
-            
-            # Plot 4: Performance metrics
-            ax4 = axes[1, 1]
-            self._plot_tract_metrics(ax4, results)
-            ax4.set_title('Processing Metrics')
-            
-            plt.tight_layout()
-            
-            # Save visualization
-            viz_path = os.path.join(tract_output_dir, f'tract_{fips_code}_analysis.png')
-            plt.savefig(viz_path, dpi=300, bbox_inches='tight')
-            plt.close()
-            
-            self._log(f"Tract visualization saved to: {viz_path}")
-            
-        except Exception as e:
-            self._log(f"Error creating tract visualization: {str(e)}", 'ERROR')
-
-    def _plot_tract_network(self, ax, tract_data):
-        """Plot road network structure for tract"""
-        try:
-            if 'road_network' in tract_data:
-                network = tract_data['road_network']
-                pos = {node: node for node in network.nodes()}
-                
-                # Draw network
-                nx.draw_networkx_edges(network, pos, ax=ax, alpha=0.5, width=0.5, color='gray')
-                nx.draw_networkx_nodes(network, pos, ax=ax, node_size=10, alpha=0.7, color='blue')
-                
-                # Add addresses if available
-                if 'addresses' in tract_data and len(tract_data['addresses']) > 0:
-                    addresses = tract_data['addresses']
-                    ax.scatter([addr.geometry.x for _, addr in addresses.iterrows()],
-                              [addr.geometry.y for _, addr in addresses.iterrows()],
-                              c='red', s=20, alpha=0.8, label='Addresses')
-                    ax.legend()
-            
-            ax.set_aspect('equal')
-            ax.grid(True, alpha=0.3)
-            
-        except Exception as e:
-            ax.text(0.5, 0.5, f'Network plot error: {str(e)[:50]}...', 
-                   ha='center', va='center', transform=ax.transAxes)
-
-    def _plot_prediction_map(self, ax, predictions, tract_data):
-        """Plot SVI predictions map"""
-        try:
-            # Get prediction values
-            pred_col = 'predicted_svi' if 'predicted_svi' in predictions.columns else 'mean'
-            pred_values = predictions[pred_col]
-            
-            # Create scatter plot
-            scatter = ax.scatter(predictions['longitude'], predictions['latitude'],
-                               c=pred_values, cmap='viridis', s=30, alpha=0.8)
-            
-            # Add colorbar
-            plt.colorbar(scatter, ax=ax, label='Predicted SVI')
-            
-            ax.set_xlabel('Longitude')
-            ax.set_ylabel('Latitude')
-            ax.grid(True, alpha=0.3)
-            
-        except Exception as e:
-            ax.text(0.5, 0.5, f'Prediction plot error: {str(e)[:50]}...', 
-                   ha='center', va='center', transform=ax.transAxes)
-
-    def _plot_uncertainty_map(self, ax, predictions):
-        """Plot uncertainty map"""
-        try:
-            uncertainty_col = 'uncertainty' if 'uncertainty' in predictions.columns else 'sd'
-            uncertainty_values = predictions[uncertainty_col]
-            
-            scatter = ax.scatter(predictions['longitude'], predictions['latitude'],
-                               c=uncertainty_values, cmap='Reds', s=30, alpha=0.8)
-            
-            plt.colorbar(scatter, ax=ax, label='Prediction Uncertainty')
-            
-            ax.set_xlabel('Longitude')
-            ax.set_ylabel('Latitude')
-            ax.grid(True, alpha=0.3)
-            
-        except Exception as e:
-            ax.text(0.5, 0.5, f'Uncertainty plot error: {str(e)[:50]}...', 
-                   ha='center', va='center', transform=ax.transAxes)
-
-    def _plot_tract_metrics(self, ax, results):
-        """Plot processing metrics"""
-        try:
-            metrics = results.get('metrics', {})
-            
-            # Create metrics display
-            metrics_text = []
-            
-            if 'method' in metrics:
-                metrics_text.append(f"Method: {metrics['method']}")
-            
-            if 'gnn_training' in metrics:
-                gnn_metrics = metrics['gnn_training']
-                if 'final_loss' in gnn_metrics:
-                    metrics_text.append(f"GNN Loss: {gnn_metrics['final_loss']:.4f}")
-            
-            if 'metricgraph_success' in metrics:
-                mg_success = "✓" if metrics['metricgraph_success'] else "✗"
-                metrics_text.append(f"MetricGraph: {mg_success}")
-            
-            if 'n_predictions' in metrics:
-                metrics_text.append(f"Predictions: {metrics['n_predictions']}")
-            
-            # Display metrics as text
-            if metrics_text:
-                ax.text(0.1, 0.9, '\n'.join(metrics_text), transform=ax.transAxes, 
-                       verticalalignment='top', fontfamily='monospace')
-            else:
-                ax.text(0.5, 0.5, 'No metrics available', 
-                       ha='center', va='center', transform=ax.transAxes)
-            
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, 1)
-            ax.axis('off')
-            
-        except Exception as e:
-            ax.text(0.5, 0.5, f'Metrics error: {str(e)[:50]}...', 
-                   ha='center', va='center', transform=ax.transAxes)
+        """Create visualization for individual tract"""
+        # Placeholder for tract visualization
+        self._log(f"  Creating visualization for tract {results['fips_code']}")
 
     def _create_batch_visualization(self, summary, config):
-        """
-        ENHANCED: Create comprehensive batch summary visualization
-        """
-        self._log("Creating batch summary visualization...")
-        
-        try:
-            # Create figure
-            fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-            fig.suptitle('GRANITE Batch Processing Summary', fontsize=16, fontweight='bold')
-            
-            # Plot 1: Processing success summary
-            ax1 = axes[0, 0]
-            success_counts = [summary['successful'], summary['skipped'], summary['errors']]
-            labels = ['Successful', 'Skipped', 'Errors']
-            colors = ['green', 'orange', 'red']
-            ax1.pie(success_counts, labels=labels, colors=colors, autopct='%1.1f%%')
-            ax1.set_title('Processing Results')
-            
-            # Plot 2: Network size distribution
-            ax2 = axes[0, 1]
-            self._plot_network_size_distribution(ax2, summary)
-            ax2.set_title('Network Size Distribution')
-            
-            # Plot 3: Performance by tract
-            ax3 = axes[1, 0]
-            self._plot_batch_performance_metrics(ax3, summary)
-            ax3.set_title('Performance by Tract')
-            
-            # Plot 4: Summary statistics
-            ax4 = axes[1, 1]
-            self._plot_batch_summary_stats(ax4, summary)
-            ax4.set_title('Summary Statistics')
-            
-            plt.tight_layout()
-            
-            # Save visualization
-            viz_path = os.path.join(self.output_dir, 'batch_summary_visualization.png')
-            plt.savefig(viz_path, dpi=300, bbox_inches='tight')
-            plt.close()
-            
-            self._log(f"Batch visualization saved to: {viz_path}")
-            
-        except Exception as e:
-            self._log(f"Error creating batch visualization: {str(e)}", 'ERROR')
-
-    def _plot_network_size_distribution(self, ax, summary):
-        """Plot distribution of network sizes across tracts"""
-        try:
-            network_sizes = []
-            for fips, result in summary['results'].items():
-                if 'network_stats' in result:
-                    network_sizes.append(result['network_stats'].get('edges', 0))
-            
-            if network_sizes:
-                ax.hist(network_sizes, bins=min(10, len(network_sizes)), alpha=0.7, color='skyblue')
-                ax.set_xlabel('Number of Edges')
-                ax.set_ylabel('Number of Tracts')
-                ax.grid(True, alpha=0.3)
-            else:
-                ax.text(0.5, 0.5, 'No network data available', 
-                       ha='center', va='center', transform=ax.transAxes)
-                
-        except Exception as e:
-            ax.text(0.5, 0.5, f'Network plot error: {str(e)[:30]}...', 
-                   ha='center', va='center', transform=ax.transAxes)
-
-    def _plot_batch_performance_metrics(self, ax, summary):
-        """Plot performance metrics across tracts"""
-        try:
-            fips_codes = []
-            n_predictions = []
-            
-            for fips, result in summary['results'].items():
-                if result.get('status') == 'success':
-                    fips_codes.append(fips[-4:])  # Last 4 digits for readability
-                    n_preds = len(result.get('predictions', []))
-                    n_predictions.append(n_preds)
-            
-            if fips_codes and n_predictions:
-                bars = ax.bar(range(len(fips_codes)), n_predictions, alpha=0.7, color='lightcoral')
-                ax.set_xlabel('Census Tract (last 4 digits)')
-                ax.set_ylabel('Number of Predictions')
-                ax.set_xticks(range(len(fips_codes)))
-                ax.set_xticklabels(fips_codes, rotation=45)
-                ax.grid(True, alpha=0.3)
-                
-                # Add value labels on bars
-                for i, bar in enumerate(bars):
-                    height = bar.get_height()
-                    ax.text(bar.get_x() + bar.get_width()/2., height,
-                           f'{int(height)}', ha='center', va='bottom', fontsize=8)
-            else:
-                ax.text(0.5, 0.5, 'No performance data available', 
-                       ha='center', va='center', transform=ax.transAxes)
-                
-        except Exception as e:
-            ax.text(0.5, 0.5, f'Performance plot error: {str(e)[:30]}...', 
-                   ha='center', va='center', transform=ax.transAxes)
-
-    def _plot_batch_summary_stats(self, ax, summary):
-        """Plot summary statistics"""
-        try:
-            stats_text = [
-                f"Total Tracts: {summary['total_tracts']}",
-                f"Success Rate: {summary['success_rate']:.1%}",
-                f"Successful: {summary['successful']}",
-                f"Skipped: {summary['skipped']}",
-                f"Errors: {summary['errors']}"
-            ]
-            
-            # Calculate additional statistics
-            successful_results = {k: v for k, v in summary['results'].items() 
-                                if v.get('status') == 'success'}
-            
-            if successful_results:
-                total_predictions = sum(len(result.get('predictions', [])) 
-                                      for result in successful_results.values())
-                avg_predictions = total_predictions / len(successful_results)
-                stats_text.extend([
-                    f"",
-                    f"Total Predictions: {total_predictions}",
-                    f"Avg Predictions/Tract: {avg_predictions:.1f}"
-                ])
-            
-            ax.text(0.1, 0.9, '\n'.join(stats_text), transform=ax.transAxes,
-                   verticalalignment='top', fontfamily='monospace', fontsize=12)
-            
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, 1)
-            ax.axis('off')
-            
-        except Exception as e:
-            ax.text(0.5, 0.5, f'Stats error: {str(e)[:30]}...', 
-                   ha='center', va='center', transform=ax.transAxes)
+        """Create summary visualization for batch processing"""
+        # Placeholder for batch visualization
+        self._log("Creating batch summary visualization")
 
     def _enhanced_gnn_fallback(self, road_network, svi_data, addresses, gnn_features):
         """

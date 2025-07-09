@@ -1,6 +1,5 @@
 """
 MetricGraph R interface for GRANITE framework
-OPTIMIZED VERSION - Drop-in replacement for existing interface.py
 """
 import numpy as np
 import pandas as pd
@@ -19,7 +18,7 @@ import gc
 
 
 class MetricGraphInterface:
-    """Interface to R MetricGraph package for spatial modeling - OPTIMIZED VERSION"""
+    """Interface to R MetricGraph package for spatial modeling"""
     
     def __init__(self, verbose=True):
         self.verbose = verbose
@@ -34,11 +33,11 @@ class MetricGraphInterface:
             import subprocess
             import os
             
-            # CRITICAL FIX: Use modern rpy2 converter (NO activation/deactivation)
+            # Use modern rpy2 converter
             self.converter = ro.default_converter + pandas2ri.converter
-            self._log("  ✓ Modern rpy2 converter initialized")
+            self._log("  - Modern rpy2 converter initialized")
             
-            # CRITICAL FIX: Force rpy2 to use same library paths as direct R
+            # Force rpy2 to use same library paths as direct R
             self._log("  Synchronizing R library paths...")
             try:
                 result = subprocess.run(['R', '--slave', '-e', 'cat(.libPaths(), sep="\\n")'], 
@@ -49,30 +48,30 @@ class MetricGraphInterface:
                     # Set the same paths in rpy2 session
                     path_str = ', '.join([f'"{path}"' for path in r_lib_paths])
                     ro.r(f'.libPaths(c({path_str}))')
-                    self._log(f"  ✓ Synchronized library paths: {r_lib_paths}")
+                    self._log(f"  - Synchronized library paths: {r_lib_paths}")
                 else:
-                    self._log(f"  ⚠️  Could not sync library paths: {result.stderr}")
+                    self._log(f"  *!*  Could not sync library paths: {result.stderr}")
             except Exception as e:
-                self._log(f"  ⚠️  Library path sync failed: {e}")
+                self._log(f"  *!*  Library path sync failed: {e}")
             
             self.base = importr('base')
             
             # Try to load MetricGraph
             try:
                 self.mg = importr('MetricGraph')
-                self._log("  ✓ MetricGraph package loaded")
+                self._log("  - MetricGraph package loaded")
                 
                 # Define optimized R functions
                 self._define_optimized_r_functions()
-                self._log("  ✓ Optimized R functions defined")
+                self._log("  - Optimized R functions defined")
                 
             except Exception as e:
-                self._log(f"  ✗ MetricGraph failed to load: {e}")
-                self._log("  ⚠️  Skipping R function definitions (MetricGraph not available)")
+                self._log(f"  x!x MetricGraph failed to load: {e}")
+                self._log("  x!x  Skipping R function definitions (MetricGraph not available)")
                 self.mg = None
                 
         except Exception as e:
-            self._log(f"  ✗ Failed to initialize R interface: {str(e)}")
+            self._log(f"  x!x Failed to initialize R interface: {str(e)}")
             self.mg = None
         
     def _log(self, message):
@@ -85,7 +84,7 @@ class MetricGraphInterface:
         """Define optimized R functions for MetricGraph operations"""
         
         if self.mg is None:
-            self._log("  ⚠️  Skipping R function definitions (MetricGraph not available)")
+            self._log("  *!*  Skipping R function definitions (MetricGraph not available)")
             return
         
         # Test basic MetricGraph functionality first
@@ -105,18 +104,17 @@ class MetricGraphInterface:
             result = ro.r('test_mg()')
             
             if "SUCCESS" not in str(result):
-                self._log(f"  ✗ MetricGraph test failed: {result}")
+                self._log(f"  x!x MetricGraph test failed: {result}")
                 self.mg = None
                 return
             else:
-                self._log("  ✓ MetricGraph basic test passed")
+                self._log("  x!x MetricGraph basic test passed")
                 
         except Exception as e:
-            self._log(f"  ✗ MetricGraph test error: {e}")
+            self._log(f"  x!x MetricGraph test error: {e}")
             self.mg = None
             return
         
-        # OPTIMIZATION: Define memory-efficient graph creation function
         try:
             ro.r('''
             create_optimized_metric_graph <- function(nodes, edges, batch_size = 300, max_edges = 2000) {
@@ -188,7 +186,6 @@ class MetricGraphInterface:
                 cat("Creating MetricGraph object with", edge_count, "valid edges\n")
                 cat("This may take several minutes for large networks...\n")
 
-                # OPTIMIZATION 2: Single optimized creation attempt with progress
                 tryCatch({
                     cat("Step 1/3: Initializing MetricGraph...\n")
                     graph <- metric_graph$new(
@@ -234,7 +231,7 @@ class MetricGraphInterface:
             }
             ''')
             
-            # OPTIMIZATION: Define efficient fitting and prediction function
+            # Define fitting and prediction function
             ro.r('''
             fit_and_predict_optimized <- function(graph, observations, prediction_locations, 
                                                  gnn_features = NULL, alpha = 1.5) {
@@ -319,10 +316,10 @@ class MetricGraphInterface:
             }
             ''')
             
-            self._log("  ✓ Optimized R functions defined successfully")
+            self._log("  - Optimized R functions defined successfully")
             
         except Exception as e:
-            self._log(f"  ✗ Error defining optimized R functions: {e}")
+            self._log(f"  x!x Error defining optimized R functions: {e}")
             self.mg = None
     
     def create_graph(self, nodes_df, edges_df, enable_sampling=False, max_edges=2000, batch_size=300):
@@ -348,7 +345,7 @@ class MetricGraphInterface:
             MetricGraph object or None if failed
         """
         if self.mg is None:
-            self._log("⚠️  MetricGraph not available - returning None")
+            self._log("*!*  MetricGraph not available - returning None")
             return None
             
         self._log("Creating MetricGraph object with optimized processing...")
@@ -359,7 +356,7 @@ class MetricGraphInterface:
                 self._log("  ✗ Empty input data")
                 return None
                 
-            # OPTIMIZATION: Apply smart sampling if enabled
+            # Apply smart sampling if enabled
             if enable_sampling and len(edges_df) > max_edges:
                 self._log(f"  Applying smart network sampling (>{max_edges} edges)")
                 nodes_df, edges_df = self._apply_smart_sampling(
@@ -393,21 +390,21 @@ class MetricGraphInterface:
                 
                 if success:
                     graph = result[1]  # Second element is the graph
-                    self._log("  ✓ MetricGraph created successfully")
+                    self._log("  - MetricGraph created successfully")
                     return graph
                 else:
                     error_msg = str(result[1])
-                    self._log(f"  ✗ MetricGraph creation failed: {error_msg}")
+                    self._log(f"  x!x MetricGraph creation failed: {error_msg}")
                     return None
                     
         except Exception as e:
-            self._log(f"  ✗ Error in optimized graph creation: {str(e)}")
+            self._log(f"  x!x Error in optimized graph creation: {str(e)}")
             return None
             
     def _apply_smart_sampling(self, nodes_df, edges_df, max_edges):
         """
         Apply smart network sampling while preserving important connections
-        This is the CONFIGURABLE smart sampling feature
+        This is a CONFIGURABLE smart sampling feature
         """
         self._log(f"  Smart sampling: {len(edges_df)} -> {max_edges} edges")
         
@@ -422,7 +419,7 @@ class MetricGraphInterface:
         for _, row in edges_df.iterrows():
             G.add_edge(row['from'], row['to'])
             
-        # Strategy 1: Keep high-centrality edges (backbone)
+        # Strategy 1: Keep high-centrality edges
         try:
             edge_centrality = nx.edge_betweenness_centrality(G, k=min(500, G.number_of_nodes()))
             high_centrality_edges = sorted(edge_centrality.items(), key=lambda x: x[1], reverse=True)
@@ -529,11 +526,9 @@ class MetricGraphInterface:
                         nodes_df, gnn_features=None, alpha=1.5):
         """
         Perform SVI disaggregation using MetricGraph with optimizations
-        
-        SAME API as original - this is a drop-in replacement
         """
         if metric_graph is None:
-            self._log("⚠️  Graph is None - using fallback prediction")
+            self._log("*!*  Graph is None - using fallback prediction")
             return self._fallback_prediction(observations, prediction_locations)
             
         try:
@@ -562,16 +557,16 @@ class MetricGraphInterface:
                 # Convert back to pandas
                 result_df = ro.conversion.rpy2py(r_result)
                 
-                self._log("  ✓ Optimized disaggregation completed")
+                self._log("  - Optimized disaggregation completed")
                 return result_df
                 
         except Exception as e:
-            self._log(f"  ✗ Error in optimized disaggregation: {str(e)}")
+            self._log(f"  x!x Error in optimized disaggregation: {str(e)}")
             return self._fallback_prediction(observations, prediction_locations)
 
     def _fallback_prediction(self, observations, prediction_locations):
         """Enhanced fallback prediction using spatial interpolation"""
-        self._log("  Using enhanced spatial interpolation fallback")
+        self._log("  Using spatial interpolation fallback")
         
         n_pred = len(prediction_locations)
         obs_values = observations.get('svi_score', observations.get('value', [0.5] * len(observations)))

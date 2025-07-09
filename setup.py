@@ -290,7 +290,7 @@ def main():
         "install_requires": requirements,
         "entry_points": {
             "console_scripts": [
-                "granite=scripts.run_granite:main",
+                "granite=granite.scripts.run_granite:main",  
             ],
         },
         "include_package_data": True,

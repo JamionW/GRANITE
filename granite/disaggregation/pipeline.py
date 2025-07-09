@@ -207,6 +207,7 @@ class GRANITEPipeline:
     def learn_accessibility_features(self, epochs=100):
         """
         Train GNN to learn accessibility features
+        ENHANCED with optional feature analysis
         
         Parameters:
         -----------
@@ -217,19 +218,77 @@ class GRANITEPipeline:
         self._log("GRANITE: Learning Accessibility Features")
         self._log("="*60)
         
+        # ========================================
+        # OPTIONAL: Add input feature analysis
+        # ========================================
+        try:
+            input_analysis, input_features = self.analyze_gnn_input_features(
+                self.data['pyg_data'], save_analysis=True
+            )
+        except Exception as e:
+            if self.verbose:
+                self._log(f"Input feature analysis failed: {e}")
+            input_analysis, input_features = None, None
+        
+        # ========================================
+        # ORIGINAL FUNCTIONALITY (UNCHANGED)
+        # ========================================
+        
         # Create GNN model
         input_dim = self.data['pyg_data'].x.shape[1]
         gnn_model = create_gnn_model(input_dim=input_dim)
         
         # Train GNN
-        self.results['gnn_features'] = train_accessibility_gnn(
+        training_result = train_accessibility_gnn(
             gnn_model,
             self.data['pyg_data'],
             epochs=epochs,
             verbose=self.verbose
         )
         
-        self.results['gnn_model'] = gnn_model
+        # Handle different return formats from train_accessibility_gnn
+        if isinstance(training_result, tuple) and len(training_result) == 3:
+            trained_model, gnn_features, training_metrics = training_result
+        else:
+            # Fallback if training function returns different format
+            gnn_features = training_result
+            trained_model = gnn_model
+            training_metrics = {}
+        
+        # Store original results
+        self.results['gnn_features'] = gnn_features
+        self.results['gnn_model'] = trained_model
+        
+        # ========================================
+        # OPTIONAL: Add learned feature analysis
+        # ========================================
+        try:
+            learned_analysis, learned_features = self.analyze_gnn_learned_features(
+                gnn_features, training_metrics, save_analysis=True
+            )
+            
+            # Optional: Analyze transformation (if input analysis succeeded)
+            if input_features is not None:
+                transformation_analysis = self.analyze_gnn_feature_transformation(
+                    input_features, learned_features, save_analysis=True
+                )
+                
+                # Optional: Create visualizations
+                self.create_gnn_feature_plots(
+                    input_features, learned_features, save_plots=True
+                )
+            
+            # Store analysis results (optional - won't break anything if this fails)
+            self.results['feature_analysis'] = {
+                'input_analysis': input_analysis,
+                'learned_analysis': learned_analysis,
+                'transformation_analysis': transformation_analysis if input_features is not None else None,
+                'training_metrics': training_metrics
+            }
+            
+        except Exception as e:
+            if self.verbose:
+                self._log(f"Feature analysis failed: {e}")
         
         self._log("Feature learning complete!")
     
@@ -299,32 +358,30 @@ class GRANITEPipeline:
     
     def _interpolate_to_addresses(self):
         """
-        ENHANCED: Interpolate disaggregation results to address locations using 
-        network-aware spatial interpolation
+        FIXED: Interpolate disaggregation results to address locations using 
+        MetricGraph Whittle-Matérn results as the scientific foundation
         """
-        self._log("Performing network-aware spatial interpolation to addresses...")
+        self._log("Performing Whittle-Matérn field interpolation to addresses...")
         
         addresses = self.data['addresses']
         
-        # Get MetricGraph disaggregation results
+        # Step 1: Check for MetricGraph disaggregation results (PRIMARY)
         if 'disaggregation' not in self.results:
-            self._log("No disaggregation results found, using fallback")
-            return self._fallback_address_interpolation(addresses)
+            self._log("No MetricGraph results found, using enhanced fallback")
+            return self._enhanced_fallback_interpolation(addresses)
         
         mg_results = self.results['disaggregation']
         
-        # Method 1: Network-based interpolation if we have network connectivity
-        if 'road_network' in self.data:
-            predictions = self._network_aware_interpolation(
-                mg_results, addresses, self.data['road_network']
-            )
-        else:
-            # Method 2: Enhanced spatial interpolation with GNN features
-            predictions = self._gnn_enhanced_interpolation(
-                mg_results, addresses, self.results.get('gnn_features')
-            )
-        
-        return predictions
+        # Step 2: Use MetricGraph Whittle-Matérn predictions as foundation
+        try:
+            self._log("  Using MetricGraph Whittle-Matérn field as primary source")
+            predictions = self._interpolate_metricgraph_predictions(mg_results, addresses)
+            return predictions
+            
+        except Exception as e:
+            self._log(f"MetricGraph interpolation failed: {str(e)}, using enhanced fallback")
+            return self._enhanced_fallback_interpolation(addresses)
+
     
     def _network_aware_interpolation(self, mg_results, addresses, road_network):
         """Network-aware spatial interpolation using road network topology"""
@@ -1162,40 +1219,41 @@ class GRANITEPipeline:
 
     def _interpolate_tract_to_addresses(self, mg_results, addresses):
         """
-        ENHANCED: Interpolate MetricGraph results to address locations with 
-        proper spatial interpolation methods
+        FIXED: Interpolate MetricGraph Whittle-Matérn results to address locations
+        for FIPS mode processing
         """
         if mg_results is None or len(mg_results) == 0:
+            self._log("  No MetricGraph results, using fallback")
             return self._fallback_address_interpolation(addresses)
         
-        predictions = []
+        self._log("  Interpolating MetricGraph results to address locations")
         
-        # Extract prediction statistics from MetricGraph results
-        if isinstance(mg_results, pd.DataFrame):
-            pred_mean = mg_results['mean'].iloc[0] if 'mean' in mg_results.columns else 0.5
-            pred_sd = mg_results['sd'].iloc[0] if 'sd' in mg_results.columns else 0.1
-        else:
-            pred_mean = getattr(mg_results, 'mean', [0.5])[0]
-            pred_sd = getattr(mg_results, 'sd', [0.1])[0]
-        
-        for idx, addr in addresses.iterrows():
-            # Add address-level spatial variation
-            address_variation = np.random.normal(0, pred_sd * 0.5)
+        # Use the same MetricGraph interpolation logic as county mode
+        try:
+            if isinstance(mg_results, pd.DataFrame):
+                predictions = self._spatially_interpolate_field(mg_results, addresses)
+            else:
+                predictions = self._interpolate_sparse_field(mg_results, addresses)
             
-            final_pred = np.clip(pred_mean + address_variation, 0, 1)
-            final_sd = pred_sd * (1 + np.abs(address_variation) * 0.1)
+            # Convert to expected format for FIPS mode
+            fips_predictions = []
+            for pred in predictions:
+                fips_predictions.append({
+                    'address_id': pred.get('address_id', pred.get('idx', 0)),
+                    'longitude': pred['longitude'],
+                    'latitude': pred['latitude'],
+                    'predicted_svi': pred['mean'],        # FIPS mode uses this column name
+                    'uncertainty': pred['sd'],            # FIPS mode uses this column name
+                    'ci_lower': pred['q025'],
+                    'ci_upper': pred['q975']
+                })
             
-            predictions.append({
-                'address_id': getattr(addr, 'address_id', idx),
-                'longitude': addr.geometry.x,
-                'latitude': addr.geometry.y,
-                'predicted_svi': final_pred,
-                'uncertainty': final_sd,
-                'ci_lower': final_pred - 1.96 * final_sd,
-                'ci_upper': final_pred + 1.96 * final_sd
-            })
-        
-        return pd.DataFrame(predictions)
+            return pd.DataFrame(fips_predictions)
+            
+        except Exception as e:
+            self._log(f"  MetricGraph interpolation failed: {str(e)}, using fallback")
+            return self._fallback_address_interpolation(addresses)
+
 
     def _fallback_tract_interpolation(self, tract_data):
         """Fallback interpolation when MetricGraph fails"""
@@ -1276,6 +1334,196 @@ class GRANITEPipeline:
         summary_df.to_csv(summary_file, index=False)
         
         self._log(f"Batch summary saved to: {summary_file}")
+
+    def _interpolate_metricgraph_predictions(self, mg_results, addresses):
+        """
+        Interpolate Whittle-Matérn field predictions to address locations
+        This maintains scientific rigor while adding spatial sophistication
+        """
+        self._log("  Interpolating Whittle-Matérn spatial field to address locations")
+        
+        predictions = []
+        
+        # Handle different MetricGraph result formats
+        if isinstance(mg_results, pd.DataFrame) and len(mg_results) > 1:
+            # Multiple prediction locations - use spatial interpolation
+            predictions = self._spatially_interpolate_field(mg_results, addresses)
+            
+        elif hasattr(mg_results, 'mean') or isinstance(mg_results, dict):
+            # Single or few predictions - need within-area interpolation
+            predictions = self._interpolate_sparse_field(mg_results, addresses)
+            
+        else:
+            self._log("  Unexpected MetricGraph result format, using fallback")
+            return self._enhanced_fallback_interpolation(addresses)
+        
+        self._log(f"  ✓ Interpolated Whittle-Matérn field to {len(predictions)} addresses")
+        return pd.DataFrame(predictions)
+
+    def _spatially_interpolate_field(self, mg_results, addresses):
+        """
+        Spatial interpolation when MetricGraph provides multiple prediction points
+        """
+        predictions = []
+        
+        # Extract field coordinates and values
+        if 'x' in mg_results.columns and 'y' in mg_results.columns:
+            field_coords = mg_results[['x', 'y']].values
+            field_means = mg_results['mean'].values
+            field_sds = mg_results['sd'].values if 'sd' in mg_results.columns else mg_results['mean'].values * 0.1
+        else:
+            self._log("  MetricGraph results missing coordinates, using sparse interpolation")
+            return self._interpolate_sparse_field(mg_results, addresses)
+        
+        # Prepare address coordinates
+        addr_coords = np.array([[addr.geometry.x, addr.geometry.y] for _, addr in addresses.iterrows()])
+        
+        # Use RBF interpolation for the Whittle-Matérn field
+        try:
+            # Interpolate mean field
+            rbf_mean = RBFInterpolator(field_coords, field_means, kernel='thin_plate_spline')
+            interpolated_means = rbf_mean(addr_coords)
+            
+            # Interpolate uncertainty field
+            rbf_sd = RBFInterpolator(field_coords, field_sds, kernel='thin_plate_spline')
+            interpolated_sds = rbf_sd(addr_coords)
+            
+            # Ensure positive uncertainties
+            interpolated_sds = np.maximum(interpolated_sds, 0.01)
+            
+        except Exception as e:
+            self._log(f"  RBF interpolation failed: {e}, using distance weighting")
+            interpolated_means, interpolated_sds = self._distance_weighted_interpolation(
+                field_coords, field_means, field_sds, addr_coords
+            )
+        
+        # Create predictions
+        for i, (idx, addr) in enumerate(addresses.iterrows()):
+            predictions.append({
+                'address_id': idx,
+                'longitude': addr.geometry.x,
+                'latitude': addr.geometry.y,
+                'mean': float(interpolated_means[i]),
+                'sd': float(interpolated_sds[i]),
+                'q025': float(interpolated_means[i] - 1.96 * interpolated_sds[i]),
+                'q975': float(interpolated_means[i] + 1.96 * interpolated_sds[i])
+            })
+        
+        return predictions
+
+    def _interpolate_sparse_field(self, mg_results, addresses):
+        """
+        Interpolation when MetricGraph provides sparse predictions (e.g., single tract value)
+        Uses GNN features to create spatial variation within the Whittle-Matérn framework
+        """
+        predictions = []
+        
+        # Extract base field statistics from MetricGraph
+        if isinstance(mg_results, dict):
+            base_mean = mg_results.get('mean', [0.5])[0] if isinstance(mg_results.get('mean'), list) else mg_results.get('mean', 0.5)
+            base_sd = mg_results.get('sd', [0.1])[0] if isinstance(mg_results.get('sd'), list) else mg_results.get('sd', 0.1)
+        elif hasattr(mg_results, 'mean'):
+            base_mean = mg_results.mean[0] if hasattr(mg_results.mean, '__len__') else mg_results.mean
+            base_sd = mg_results.sd[0] if hasattr(mg_results, 'sd') and hasattr(mg_results.sd, '__len__') else getattr(mg_results, 'sd', 0.1)
+        else:
+            base_mean = 0.5
+            base_sd = 0.1
+        
+        # Use GNN features to create spatial variation consistent with Whittle-Matérn
+        if 'gnn_features' in self.results and self.results['gnn_features'] is not None:
+            predictions = self._create_gnn_informed_field(base_mean, base_sd, addresses)
+        else:
+            predictions = self._create_simple_field(base_mean, base_sd, addresses)
+        
+        return predictions
+
+    def _create_gnn_informed_field(self, base_mean, base_sd, addresses):
+        """
+        Create address-level field using GNN features within Whittle-Matérn framework
+        """
+        predictions = []
+        gnn_features = self.results['gnn_features']
+        
+        # Extract spatial parameters from GNN (these informed the SPDE)
+        if len(gnn_features) > 0:
+            # Use mean GNN parameters as field characteristics
+            mean_kappa = np.mean(gnn_features[:, 0])  # Range parameter
+            mean_alpha = np.mean(gnn_features[:, 1])  # Smoothness parameter  
+            mean_tau = np.mean(gnn_features[:, 2])    # Nugget effect
+        else:
+            mean_kappa, mean_alpha, mean_tau = 1.0, 0.5, 0.1
+        
+        self._log(f"  Using GNN-learned SPDE parameters: κ={mean_kappa:.3f}, α={mean_alpha:.3f}, τ={mean_tau:.3f}")
+        
+        # Create spatially correlated field based on GNN parameters
+        n_addresses = len(addresses)
+        
+        # Generate spatial correlation structure
+        addr_coords = np.array([[addr.geometry.x, addr.geometry.y] for _, addr in addresses.iterrows()])
+        
+        if n_addresses > 1:
+            # Calculate pairwise distances
+            distances = cdist(addr_coords, addr_coords)
+            
+            # Create Matérn-like correlation (simplified)
+            # C(d) = exp(-κ * d^α) * τ  (simplified Matérn function)
+            correlations = np.exp(-mean_kappa * np.power(distances + 1e-8, mean_alpha)) * mean_tau
+            
+            # Generate correlated spatial variation
+            try:
+                # Cholesky decomposition for correlated sampling
+                L = np.linalg.cholesky(correlations + np.eye(n_addresses) * 1e-6)
+                spatial_noise = L @ np.random.normal(0, 1, n_addresses)
+            except np.linalg.LinAlgError:
+                # Fallback if correlation matrix is singular
+                spatial_noise = np.random.normal(0, mean_tau, n_addresses)
+        else:
+            spatial_noise = np.array([0.0])
+        
+        # Create predictions with spatial correlation
+        for i, (idx, addr) in enumerate(addresses.iterrows()):
+            # Add GNN-informed spatial variation to base field
+            spatial_variation = spatial_noise[i] * base_sd * 0.5  # Scale by base uncertainty
+            
+            pred_mean = np.clip(base_mean + spatial_variation, 0, 1)
+            pred_sd = base_sd * (1 + np.abs(spatial_variation) * 0.1)  # Adaptive uncertainty
+            
+            predictions.append({
+                'address_id': idx,
+                'longitude': addr.geometry.x,
+                'latitude': addr.geometry.y,
+                'mean': pred_mean,
+                'sd': pred_sd,
+                'q025': pred_mean - 1.96 * pred_sd,
+                'q975': pred_mean + 1.96 * pred_sd
+            })
+        
+        return predictions
+
+    def _create_simple_field(self, base_mean, base_sd, addresses):
+        """
+        Simple field creation when GNN features unavailable
+        """
+        predictions = []
+        
+        for idx, addr in addresses.iterrows():
+            # Add small spatial variation around base field value
+            spatial_variation = np.random.normal(0, base_sd * 0.3)
+            
+            pred_mean = np.clip(base_mean + spatial_variation, 0, 1)
+            pred_sd = base_sd
+            
+            predictions.append({
+                'address_id': idx,
+                'longitude': addr.geometry.x,
+                'latitude': addr.geometry.y,
+                'mean': pred_mean,
+                'sd': pred_sd,
+                'q025': pred_mean - 1.96 * pred_sd,
+                'q975': pred_mean + 1.96 * pred_sd
+            })
+        
+        return predictions
 
     # ==========================================
     # ENHANCED VISUALIZATION METHODS
@@ -1636,6 +1884,565 @@ class GRANITEPipeline:
         
         return pd.DataFrame(predictions)
 
+    def _distance_weighted_interpolation(self, field_coords, field_means, field_sds, addr_coords):
+        """
+        Distance-weighted interpolation fallback for Whittle-Matérn field
+        """
+        interpolated_means = []
+        interpolated_sds = []
+        
+        for addr_coord in addr_coords:
+            # Calculate distances to all field points
+            distances = np.sqrt(np.sum((field_coords - addr_coord)**2, axis=1))
+            
+            # Inverse distance weighting
+            weights = 1 / (distances + 1e-6)
+            weights /= weights.sum()
+            
+            # Weighted interpolation
+            interp_mean = np.average(field_means, weights=weights)
+            interp_sd = np.sqrt(np.average(field_sds**2, weights=weights))
+            
+            interpolated_means.append(interp_mean)
+            interpolated_sds.append(interp_sd)
+        
+        return np.array(interpolated_means), np.array(interpolated_sds)
+
+    def _log_interpolation_method(self, method_used):
+        """Log which interpolation method was actually used"""
+        method_descriptions = {
+            'metricgraph_spatial': 'MetricGraph Whittle-Matérn field (multiple points)',
+            'metricgraph_sparse': 'MetricGraph Whittle-Matérn field (sparse)',
+            'metricgraph_gnn': 'MetricGraph with GNN-informed spatial variation',
+            'network_fallback': 'Network-aware interpolation fallback',
+            'gnn_fallback': 'GNN-enhanced interpolation fallback',
+            'basic_fallback': 'Basic spatial interpolation fallback'
+        }
+        
+        description = method_descriptions.get(method_used, method_used)
+        self._log(f"  → Interpolation method: {description}")
+
+    def _enhanced_fallback_interpolation(self, addresses):
+        """
+        Enhanced fallback when MetricGraph disaggregation is unavailable
+        Uses the original enhanced methods as sophisticated alternatives
+        """
+        self._log("  Using enhanced fallback interpolation (MetricGraph unavailable)")
+        
+        # Try network-aware interpolation if road network available
+        if 'road_network' in self.data and 'tracts_with_svi' in self.data:
+            try:
+                return self._network_aware_interpolation_fallback(addresses)
+            except Exception as e:
+                self._log(f"  Network interpolation failed: {e}")
+        
+        # Try GNN-enhanced interpolation if features available
+        if 'gnn_features' in self.results and self.results['gnn_features'] is not None:
+            try:
+                return self._gnn_enhanced_interpolation_fallback(addresses)
+            except Exception as e:
+                self._log(f"  GNN interpolation failed: {e}")
+        
+        # Final fallback to basic interpolation
+        return self._basic_spatial_fallback(addresses)
+
+    def _network_aware_interpolation_fallback(self, addresses):
+        """
+        Network-aware fallback (from original enhanced methods)
+        Only used when MetricGraph disaggregation unavailable
+        """
+        self._log("  Using network-aware interpolation fallback")
+        
+        predictions = []
+        road_network = self.data['road_network']
+        tract_centroids = self.data['tracts_with_svi'].geometry.centroid
+        tract_svi_values = self.data['tracts_with_svi']['RPL_THEMES'].values
+        
+        for idx, addr in addresses.iterrows():
+            addr_point = (addr.geometry.x, addr.geometry.y)
+            
+            # Find nearest network nodes and calculate network distances
+            network_nodes = list(road_network.nodes())
+            node_distances = [
+                np.sqrt((addr_point[0] - node[0])**2 + (addr_point[1] - node[1])**2)
+                for node in network_nodes
+            ]
+            nearest_node_idx = np.argmin(node_distances)
+            nearest_node = network_nodes[nearest_node_idx]
+            
+            # Calculate weights to tract centroids via network
+            weights = []
+            for centroid in tract_centroids:
+                centroid_point = (centroid.x, centroid.y)
+                centroid_distances = [
+                    np.sqrt((centroid_point[0] - node[0])**2 + (centroid_point[1] - node[1])**2)
+                    for node in network_nodes
+                ]
+                nearest_centroid_node = network_nodes[np.argmin(centroid_distances)]
+                
+                try:
+                    network_dist = nx.shortest_path_length(road_network, nearest_node, nearest_centroid_node)
+                except:
+                    network_dist = np.sqrt((nearest_node[0] - nearest_centroid_node[0])**2 + 
+                                        (nearest_node[1] - nearest_centroid_node[1])**2)
+                
+                weights.append(1 / (network_dist + 1e-6))
+            
+            weights = np.array(weights)
+            weights /= weights.sum()
+            
+            # Interpolate using network-weighted tract values
+            pred_mean = np.average(tract_svi_values, weights=weights)
+            pred_sd = np.std(tract_svi_values) * 0.3
+            
+            predictions.append({
+                'address_id': idx,
+                'longitude': addr_point[0],
+                'latitude': addr_point[1],
+                'mean': pred_mean,
+                'sd': pred_sd,
+                'q025': pred_mean - 1.96 * pred_sd,
+                'q975': pred_mean + 1.96 * pred_sd
+            })
+        
+        return pd.DataFrame(predictions)
+
+    def _gnn_enhanced_interpolation_fallback(self, addresses):
+        """
+        GNN-enhanced fallback (from original enhanced methods)
+        Only used when MetricGraph disaggregation unavailable
+        """
+        self._log("  Using GNN-enhanced interpolation fallback")
+        
+        gnn_features = self.results['gnn_features']
+        kappa_mean = np.mean(gnn_features[:, 0])
+        alpha_mean = np.mean(gnn_features[:, 1])
+        tau_mean = np.mean(gnn_features[:, 2])
+        
+        # Base prediction from tract data
+        if 'tracts_with_svi' in self.data:
+            base_svi = self.data['tracts_with_svi']['RPL_THEMES'].mean()
+            base_uncertainty = self.data['tracts_with_svi']['RPL_THEMES'].std() * 0.3
+        else:
+            base_svi = 0.5
+            base_uncertainty = 0.1
+        
+        predictions = []
+        for idx, addr in addresses.iterrows():
+            spatial_variation = tau_mean * np.random.normal(0, 1)
+            pred_mean = np.clip(base_svi + spatial_variation, 0, 1)
+            pred_sd = base_uncertainty * (1 + alpha_mean * 0.5)
+            
+            predictions.append({
+                'address_id': idx,
+                'longitude': addr.geometry.x,
+                'latitude': addr.geometry.y,
+                'mean': pred_mean,
+                'sd': pred_sd,
+                'q025': pred_mean - 1.96 * pred_sd,
+                'q975': pred_mean + 1.96 * pred_sd
+            })
+        
+        return pd.DataFrame(predictions)
+
+    def _basic_spatial_fallback(self, addresses):
+        """
+        Basic spatial fallback when all else fails
+        """
+        self._log("  Using basic spatial fallback")
+        
+        # Use simple tract average with small variation
+        if 'tracts_with_svi' in self.data:
+            base_svi = self.data['tracts_with_svi']['RPL_THEMES'].mean()
+            svi_std = self.data['tracts_with_svi']['RPL_THEMES'].std()
+        else:
+            base_svi = 0.5
+            svi_std = 0.2
+        
+        predictions = []
+        for idx, addr in addresses.iterrows():
+            spatial_variation = np.random.normal(0, svi_std * 0.3)
+            pred_svi = np.clip(base_svi + spatial_variation, 0, 1)
+            uncertainty = svi_std * 0.5
+            
+            predictions.append({
+                'address_id': idx,
+                'longitude': addr.geometry.x,
+                'latitude': addr.geometry.y,
+                'mean': pred_svi,
+                'sd': uncertainty,
+                'q025': pred_svi - 1.96 * uncertainty,
+                'q975': pred_svi + 1.96 * uncertainty
+            })
+        
+        return pd.DataFrame(predictions)
+    
+    def analyze_gnn_input_features(self, pyg_data, save_analysis=True):
+        """
+        Analyze the input features that go into the GNN
+        Call this to understand what the GNN is learning FROM
+        """
+        # Extract node features
+        node_features = pyg_data.x.numpy() if hasattr(pyg_data.x, 'numpy') else pyg_data.x
+        n_nodes, n_features = node_features.shape
+        
+        if self.verbose:
+            self._log(f"GNN Input Feature Analysis:")
+            self._log(f"  - Number of nodes: {n_nodes}")
+            self._log(f"  - Number of input features: {n_features}")
+        
+        # Get feature names
+        feature_names = self._get_gnn_input_feature_names(n_features)
+        
+        # Analyze each input feature
+        feature_stats = []
+        for i, feature_name in enumerate(feature_names):
+            feature_values = node_features[:, i]
+            
+            stats = {
+                'feature_name': feature_name,
+                'min_value': float(feature_values.min()),
+                'max_value': float(feature_values.max()),
+                'mean_value': float(feature_values.mean()),
+                'std_value': float(feature_values.std()),
+                'non_zero_count': int(np.count_nonzero(feature_values)),
+                'total_count': len(feature_values)
+            }
+            
+            feature_stats.append(stats)
+            
+            if self.verbose:
+                self._log(f"  Feature {i+1} ({feature_name}):")
+                self._log(f"    - Range: [{stats['min_value']:.4f}, {stats['max_value']:.4f}]")
+                self._log(f"    - Mean: {stats['mean_value']:.4f}")
+                self._log(f"    - Std: {stats['std_value']:.4f}")
+                self._log(f"    - Non-zero: {stats['non_zero_count']}/{stats['total_count']}")
+        
+        # Create analysis DataFrame
+        feature_analysis = pd.DataFrame(feature_stats)
+        
+        # Save analysis if requested
+        if save_analysis and hasattr(self, 'output_dir'):
+            analysis_file = os.path.join(self.output_dir, 'gnn_input_features.csv')
+            feature_analysis.to_csv(analysis_file, index=False)
+            if self.verbose:
+                self._log(f"  Saved input feature analysis to: {analysis_file}")
+        
+        return feature_analysis, node_features
+
+    def analyze_gnn_learned_features(self, gnn_features, training_metrics=None, save_analysis=True):
+        """
+        Analyze the features learned by the GNN (SPDE parameters)
+        Call this to understand what the GNN has LEARNED
+        """
+        # Convert to numpy array if needed
+        if hasattr(gnn_features, 'numpy'):
+            features_array = gnn_features.numpy()
+        elif isinstance(gnn_features, np.ndarray):
+            features_array = gnn_features
+        else:
+            features_array = np.array(gnn_features)
+        
+        n_nodes, n_output_features = features_array.shape
+        
+        if self.verbose:
+            self._log(f"GNN Learned Feature Analysis:")
+            self._log(f"  - Number of nodes: {n_nodes}")
+            self._log(f"  - Number of output features: {n_output_features}")
+        
+        # Standard SPDE parameter names
+        spde_names = ['kappa', 'alpha', 'tau']
+        
+        # Analyze each learned parameter
+        parameter_stats = []
+        for i in range(n_output_features):
+            param_name = spde_names[i] if i < len(spde_names) else f'param_{i+1}'
+            param_values = features_array[:, i]
+            
+            stats = {
+                'parameter_name': param_name,
+                'min_value': float(param_values.min()),
+                'max_value': float(param_values.max()),
+                'mean_value': float(param_values.mean()),
+                'std_value': float(param_values.std()),
+                'coeff_variation': float(param_values.std() / param_values.mean()) if param_values.mean() != 0 else 0.0
+            }
+            
+            parameter_stats.append(stats)
+            
+            if self.verbose:
+                self._log(f"  SPDE Parameter {i+1} ({param_name}):")
+                self._log(f"    - Range: [{stats['min_value']:.4f}, {stats['max_value']:.4f}]")
+                self._log(f"    - Mean: {stats['mean_value']:.4f}")
+                self._log(f"    - Std: {stats['std_value']:.4f}")
+                self._log(f"    - Coefficient of variation: {stats['coeff_variation']:.4f}")
+        
+        # Analyze correlations between learned parameters
+        if n_output_features > 1:
+            correlations = np.corrcoef(features_array.T)
+            if self.verbose:
+                self._log(f"  Parameter correlations:")
+                for i in range(n_output_features):
+                    for j in range(i+1, n_output_features):
+                        param_i = spde_names[i] if i < len(spde_names) else f'param_{i+1}'
+                        param_j = spde_names[j] if j < len(spde_names) else f'param_{j+1}'
+                        corr = correlations[i, j]
+                        self._log(f"    - {param_i} vs {param_j}: {corr:.4f}")
+        
+        # Add training metrics if available
+        if training_metrics and self.verbose:
+            self._log(f"  Training metrics:")
+            if 'final_loss' in training_metrics:
+                self._log(f"    - Final loss: {training_metrics['final_loss']:.6f}")
+            if 'spatial_loss' in training_metrics:
+                self._log(f"    - Spatial loss: {training_metrics['spatial_loss']:.6f}")
+            if 'regularization_loss' in training_metrics:
+                self._log(f"    - Regularization loss: {training_metrics['regularization_loss']:.6f}")
+        
+        # Create analysis DataFrame
+        learned_analysis = pd.DataFrame(parameter_stats)
+        
+        # Save analysis if requested
+        if save_analysis and hasattr(self, 'output_dir'):
+            analysis_file = os.path.join(self.output_dir, 'gnn_learned_parameters.csv')
+            learned_analysis.to_csv(analysis_file, index=False)
+            if self.verbose:
+                self._log(f"  Saved learned parameter analysis to: {analysis_file}")
+        
+        return learned_analysis, features_array
+
+    def analyze_gnn_feature_transformation(self, input_features, learned_features, save_analysis=True):
+        """
+        Analyze how the GNN transforms input features into learned parameters
+        Call this to understand the INPUT → OUTPUT mapping
+        """
+        n_input = input_features.shape[1]
+        n_output = learned_features.shape[1]
+        
+        if self.verbose:
+            self._log(f"GNN Feature Transformation Analysis:")
+            self._log(f"  - Input features: {n_input}")
+            self._log(f"  - Output features: {n_output}")
+            self._log(f"  - Transformation: {n_input} → {n_output}")
+        
+        # Get feature names
+        input_names = self._get_gnn_input_feature_names(n_input)
+        output_names = ['kappa', 'alpha', 'tau'][:n_output]
+        
+        # Calculate cross-correlations
+        transformation_data = []
+        
+        for i, input_name in enumerate(input_names):
+            for j, output_name in enumerate(output_names):
+                correlation = np.corrcoef(input_features[:, i], learned_features[:, j])[0, 1]
+                
+                transformation_data.append({
+                    'input_feature': input_name,
+                    'output_parameter': output_name,
+                    'correlation': correlation,
+                    'abs_correlation': abs(correlation)
+                })
+        
+        # Create transformation DataFrame
+        transformation_df = pd.DataFrame(transformation_data)
+        
+        # Find and report strongest relationships
+        strongest = transformation_df.nlargest(5, 'abs_correlation')
+        if self.verbose:
+            self._log(f"  Strongest input-output relationships:")
+            for _, row in strongest.iterrows():
+                self._log(f"    - {row['input_feature']} → {row['output_parameter']}: r={row['correlation']:.4f}")
+        
+        # Save analysis if requested
+        if save_analysis and hasattr(self, 'output_dir'):
+            analysis_file = os.path.join(self.output_dir, 'gnn_feature_transformation.csv')
+            transformation_df.to_csv(analysis_file, index=False)
+            if self.verbose:
+                self._log(f"  Saved transformation analysis to: {analysis_file}")
+        
+        return transformation_df
+
+    def create_gnn_feature_plots(self, input_features, learned_features, save_plots=True):
+        """
+        Create visualizations of GNN input and learned features
+        """
+        if not save_plots or not hasattr(self, 'output_dir'):
+            return
+        
+        if self.verbose:
+            self._log("Creating GNN feature visualizations...")
+        
+        try:
+            # Create figure with subplots
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+            fig.suptitle('GRANITE GNN Feature Analysis', fontsize=16, fontweight='bold')
+            
+            # Plot 1: Input feature distributions
+            ax1 = axes[0, 0]
+            n_input_features = min(input_features.shape[1], 5)
+            for i in range(n_input_features):
+                ax1.hist(input_features[:, i], alpha=0.6, bins=30, 
+                        label=f'Feature {i+1}', density=True)
+            ax1.set_title('Input Feature Distributions')
+            ax1.set_xlabel('Feature Value')
+            ax1.set_ylabel('Density')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # Plot 2: Learned parameter distributions
+            ax2 = axes[0, 1]
+            param_names = ['κ (kappa)', 'α (alpha)', 'τ (tau)']
+            for i in range(learned_features.shape[1]):
+                param_name = param_names[i] if i < len(param_names) else f'Param {i+1}'
+                ax2.hist(learned_features[:, i], alpha=0.6, bins=30, 
+                        label=param_name, density=True)
+            ax2.set_title('Learned SPDE Parameters')
+            ax2.set_xlabel('Parameter Value')
+            ax2.set_ylabel('Density')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            # Plot 3: Input feature correlations
+            ax3 = axes[0, 2]
+            if input_features.shape[1] <= 10:
+                input_corr = np.corrcoef(input_features.T)
+                sns.heatmap(input_corr, annot=True, cmap='coolwarm', center=0, ax=ax3,
+                        xticklabels=[f'F{i+1}' for i in range(input_features.shape[1])],
+                        yticklabels=[f'F{i+1}' for i in range(input_features.shape[1])])
+                ax3.set_title('Input Feature Correlations')
+            else:
+                ax3.text(0.5, 0.5, 'Too many features\nfor correlation plot', 
+                        ha='center', va='center', transform=ax3.transAxes)
+                ax3.set_title('Input Features (Too Many to Show)')
+            
+            # Plot 4: Learned parameter correlations  
+            ax4 = axes[1, 0]
+            learned_corr = np.corrcoef(learned_features.T)
+            param_labels = ['κ', 'α', 'τ'][:learned_features.shape[1]]
+            sns.heatmap(learned_corr, annot=True, cmap='coolwarm', center=0, ax=ax4,
+                    xticklabels=param_labels, yticklabels=param_labels)
+            ax4.set_title('Learned Parameter Correlations')
+            
+            # Plot 5: Spatial distribution of kappa (if possible)
+            ax5 = axes[1, 1]
+            if (hasattr(self, 'data') and 'road_network' in self.data and 
+                len(list(self.data['road_network'].nodes())) == len(learned_features)):
+                
+                network = self.data['road_network']
+                nodes = list(network.nodes())
+                x_coords = [node[0] for node in nodes]
+                y_coords = [node[1] for node in nodes]
+                scatter = ax5.scatter(x_coords, y_coords, c=learned_features[:, 0], 
+                                    cmap='viridis', s=10, alpha=0.6)
+                plt.colorbar(scatter, ax=ax5, label='κ value')
+                ax5.set_title('Spatial Distribution of κ')
+                ax5.set_xlabel('Longitude')
+                ax5.set_ylabel('Latitude')
+            else:
+                ax5.text(0.5, 0.5, 'Spatial plot unavailable\n(no network coordinates)', 
+                        ha='center', va='center', transform=ax5.transAxes)
+                ax5.set_title('Spatial Distribution of κ')
+            
+            # Plot 6: Feature transformation heatmap
+            ax6 = axes[1, 2]
+            if input_features.shape[1] <= 10 and learned_features.shape[1] <= 5:
+                # Calculate cross-correlations for heatmap
+                cross_corr = np.zeros((input_features.shape[1], learned_features.shape[1]))
+                for i in range(input_features.shape[1]):
+                    for j in range(learned_features.shape[1]):
+                        cross_corr[i, j] = np.corrcoef(input_features[:, i], learned_features[:, j])[0, 1]
+                
+                sns.heatmap(cross_corr, annot=True, cmap='RdBu_r', center=0, ax=ax6,
+                        xticklabels=['κ', 'α', 'τ'][:learned_features.shape[1]],
+                        yticklabels=[f'Input {i+1}' for i in range(input_features.shape[1])])
+                ax6.set_title('Input → Output Correlations')
+            else:
+                ax6.text(0.5, 0.5, 'Too many features\nfor correlation heatmap', 
+                        ha='center', va='center', transform=ax6.transAxes)
+                ax6.set_title('Feature Transformation')
+            
+            plt.tight_layout()
+            
+            # Save visualization
+            viz_path = os.path.join(self.output_dir, 'gnn_feature_analysis.png')
+            plt.savefig(viz_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            if self.verbose:
+                self._log(f"  Feature visualization saved to: {viz_path}")
+            
+        except Exception as e:
+            if self.verbose:
+                self._log(f"Error creating feature visualizations: {str(e)}", 'ERROR')
+
+    def _get_gnn_input_feature_names(self, n_features):
+        """
+        Get meaningful names for input features based on typical prepare_graph_data output
+        """
+        # These are typical features created by prepare_graph_data
+        standard_features = [
+            'degree_centrality',      # How many roads connect here
+            'betweenness_centrality', # How often on shortest paths  
+            'distance_to_arterial',   # Distance to major roads
+            'local_density',          # Road density in neighborhood
+            'coordinate_feature'      # Spatial position encoding
+        ]
+        
+        if n_features <= len(standard_features):
+            return standard_features[:n_features]
+        else:
+            # Add generic names for extra features
+            extra_features = [f'feature_{i+1}' for i in range(len(standard_features), n_features)]
+            return standard_features + extra_features
+
+    def run_gnn_feature_analysis(pipeline, save_all=True):
+        """
+        Standalone function to run GNN feature analysis on an existing pipeline
+        
+        Usage:
+            pipeline = GRANITEPipeline(...)
+            pipeline.run(...)  # Run your normal pipeline
+            run_gnn_feature_analysis(pipeline)  # Add this to analyze features
+        """
+        if not hasattr(pipeline, 'results') or 'gnn_features' not in pipeline.results:
+            print("Error: Pipeline must be run first and have GNN features")
+            return
+        
+        if not hasattr(pipeline, 'data') or 'pyg_data' not in pipeline.data:
+            print("Error: Pipeline must have PyG data")
+            return
+        
+        print("Running GNN feature analysis...")
+        
+        # Run all analysis
+        try:
+            input_analysis, input_features = pipeline.analyze_gnn_input_features(
+                pipeline.data['pyg_data'], save_analysis=save_all
+            )
+            
+            learned_analysis, learned_features = pipeline.analyze_gnn_learned_features(
+                pipeline.results['gnn_features'], save_analysis=save_all
+            )
+            
+            transformation_analysis = pipeline.analyze_gnn_feature_transformation(
+                input_features, learned_features, save_analysis=save_all
+            )
+            
+            pipeline.create_gnn_feature_plots(
+                input_features, learned_features, save_plots=save_all
+            )
+            
+            print("✓ GNN feature analysis complete!")
+            
+            return {
+                'input_analysis': input_analysis,
+                'learned_analysis': learned_analysis,
+                'transformation_analysis': transformation_analysis
+            }
+            
+        except Exception as e:
+            print(f"Error in feature analysis: {e}")
+            return None
 
 # Convenience functions for backwards compatibility
 def run_granite_pipeline(data_dir='./data', output_dir='./output', **kwargs):

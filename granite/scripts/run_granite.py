@@ -6,10 +6,10 @@ Main execution script for GRANITE framework
 GRANITE: Graph-Refined Accessibility Network for Integrated Transit Equity
 
 Usage:
-    # Original county-wide processing
+    # County-wide processing
     python run_granite.py --epochs 5 --mode county
     
-    # New FIPS-based processing
+    # FIPS-based processing
     python run_granite.py --list_fips
     python run_granite.py --fips 47065001100 --epochs 5
     python run_granite.py --mode fips --fips_count 5 --epochs 5
@@ -90,7 +90,7 @@ def parse_arguments():
         help='Reduce output verbosity'
     )
     
-    # NEW FIPS-related arguments
+    # FIPS-related arguments
     parser.add_argument(
         '--mode',
         type=str,
@@ -164,7 +164,7 @@ def parse_fips_codes(fips_string: str) -> List[str]:
     # Handle comma-separated list
     fips_list = [fips.strip() for fips in fips_string.split(',')]
     
-    # Validate FIPS codes (should be 11 digits for tract-level)
+    # Validate FIPS codes
     valid_fips = []
     for fips in fips_list:
         if len(fips) == 11 and fips.isdigit():
@@ -236,9 +236,9 @@ def update_config_for_fips(args):
             'fips_config': {
                 'memory': {
                     'tract_buffer_degrees': args.tract_buffer,
-                    'max_network_nodes': args.max_nodes,  # Can be None now
+                    'max_network_nodes': args.max_nodes,  
                     'max_network_edges': args.max_nodes * 2 if args.max_nodes else None,
-                    'preserve_network': preserve_network  # NEW: Add preservation setting
+                    'preserve_network': preserve_network 
                 },
                 'batch': {
                     'auto_select': {
@@ -385,7 +385,7 @@ def main():
         print(f"  - Target FIPS: {target_fips if target_fips else f'Auto-select {args.fips_count} tracts'}")
         print(f"  - Tract buffer: {args.tract_buffer} degrees")
         
-        # REPLACE the max_nodes print with network preservation info:
+        # Replace the max_nodes print with network preservation info:
         preserve_network = args.preserve_network and not args.allow_simplification
         if preserve_network:
             print(f"  - Network granularity: PRESERVED (recommended for disaggregation)")

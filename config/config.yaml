@@ -54,20 +54,20 @@ model:
   epochs: 100                 # Default epochs (can be overridden by command line)
   learning_rate: 0.01
 
-# MetricGraph settings - OPTIMIZED VERSION
+# MetricGraph settings 
 metricgraph:
   alpha: 1.5
   mesh_resolution: 0.05       # Optimized resolution for efficiency
   formula: "y ~ gnn_kappa + gnn_alpha + gnn_tau"
   
-  # NEW: R Processing Optimizations
+  # R Processing Optimizations
   r_optimizations:
     enabled: true             # Enable R processing optimizations
     max_edges: 1000           # Maximum edges for MetricGraph (memory limit)
     batch_size: 200           # R batch processing size
     enable_gc: true           # Enable garbage collection in R
     
-  # NEW: Smart Network Sampling (CONFIGURABLE)
+  # Smart Network Sampling 
   smart_sampling:
     enabled: false            # Enable smart network sampling (set to true to activate)
     max_edges: 2000           # Maximum edges after sampling
@@ -94,14 +94,14 @@ output:
     batch_summary: true              # Create batch processing summary
     combined_predictions: true       # Combine all tract predictions into one file
 
-# Processing control settings - ENHANCED
+# Processing control settings 
 processing:
   parallel_tracts: false      # Enable parallel processing of multiple tracts
   max_workers: 4             # Number of parallel workers (if parallel enabled)
   continue_on_error: true    # Continue batch processing if individual tracts fail
   memory_monitoring: true    # Monitor memory usage during processing
   
-  # NEW: Memory optimization settings
+  # Memory optimization settings
   memory_optimization:
     enable_sampling_auto: true    # Automatically enable sampling for large networks
     sampling_threshold: 3000      # Auto-enable sampling above this many edges
@@ -124,7 +124,7 @@ experimental:
   custom_interpolation_methods: false
   gpu_acceleration: false
   
-  # NEW: Advanced R optimizations
+  Advanced R optimizations
   r_advanced:
     custom_tolerance: false         # Use custom tolerance settings
     parallel_r_processing: false   # Enable parallel R processing (experimental)

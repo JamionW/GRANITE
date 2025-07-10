@@ -520,9 +520,9 @@ class DataLoader:
         buffer_degrees : float
             Buffer around tract for road network (degrees)
         max_nodes : int
-            Maximum nodes in road network
+            Maximum nodes in road network (None = no limit)
         max_edges : int  
-            Maximum edges in road network
+            Maximum edges in road network (None = no limit)
             
         Returns:
         --------
@@ -532,7 +532,7 @@ class DataLoader:
         self._log(f"Loading data for tract {fips_code}")
         
         try:
-            # Step 1: Load tract-specific road network (THE KEY FIX!)
+            # Step 1: Load tract-specific road network
             roads_gdf = self.load_tract_specific_roads(
                 fips_code, 
                 buffer_degrees=buffer_degrees
@@ -545,11 +545,26 @@ class DataLoader:
             # Step 2: Create network graph from filtered roads
             road_network = self.create_network_graph(roads_gdf)
             
-            # Step 3: Apply size limits if needed
-            if road_network.number_of_nodes() > max_nodes:
-                self._log(f"  ⚠️  Network has {road_network.number_of_nodes()} nodes (>{max_nodes} limit)")
-                # Apply network simplification if needed
-                road_network = self._simplify_network_if_needed(road_network, max_nodes, max_edges)
+            # Step 3: Apply size limits if needed (with better logic)
+            original_nodes = road_network.number_of_nodes()
+            original_edges = road_network.number_of_edges()
+            
+            # FIXED: Only simplify if we actually exceed reasonable limits
+            if max_nodes is not None and original_nodes > max_nodes:
+                self._log(f"  ⚠️  Network has {original_nodes} nodes (>{max_nodes} limit)")
+                
+                # Only simplify if it's REALLY large (avoid unnecessary simplification)
+                if original_nodes > max_nodes * 2:  # Only if significantly over limit
+                    self._log(f"  🔧 Simplifying network due to size...")
+                    road_network = self._simplify_network_if_needed(road_network, max_nodes, max_edges)
+                else:
+                    self._log(f"  ✓ Keeping full network (moderate size)")
+            
+            # FIXED: Don't skip tracts just because they're large
+            # Only skip if there are truly no roads (< 10 nodes)
+            if road_network.number_of_nodes() < 10:
+                self._log(f"  ✗ Network too small ({road_network.number_of_nodes()} nodes), skipping")
+                return self._create_empty_tract_data(fips_code)
             
             # Step 4: Load other tract data
             tract_data = self._load_tract_ancillary_data(fips_code, road_network)
@@ -578,6 +593,8 @@ class DataLoader:
             
         except Exception as e:
             self._log(f"  ✗ Error loading tract data: {str(e)}")
+            import traceback
+            self._log(f"  Traceback: {traceback.format_exc()}")
             return self._create_empty_tract_data(fips_code)
         
     def _load_tract_ancillary_data(self, fips_code, road_network):
@@ -617,95 +634,6 @@ class DataLoader:
         except Exception as e:
             self._log(f"  ✗ Error loading SVI data: {str(e)}")
             return pd.DataFrame({'FIPS': [fips_code], 'RPL_THEMES': [0.5]})
-
-    def _generate_tract_addresses(self, fips_code, road_network, n_addresses=100):
-        """Generate synthetic addresses within the tract"""
-        try:
-            # Get network bounds
-            nodes = list(road_network.nodes())
-            if len(nodes) == 0:
-                return gpd.GeoDataFrame()
-            
-            x_coords = [node[0] for node in nodes]
-            y_coords = [node[1] for node in nodes]
-            
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            # Generate random points within network bounds
-            np.random.seed(42)  # Reproducible addresses
-            
-            addresses_data = []
-            for i in range(n_addresses):
-                x = np.random.uniform(x_min, x_max)
-                y = np.random.uniform(y_min, y_max)
-                
-                addresses_data.append({
-                    'address_id': i,
-                    'x': x,
-                    'y': y
-                })
-            
-            # Create GeoDataFrame
-            addresses_gdf = gpd.GeoDataFrame(
-                addresses_data,
-                geometry=gpd.points_from_xy([addr['x'] for addr in addresses_data],
-                                        [addr['y'] for addr in addresses_data]),
-                crs='EPSG:4326'
-            )
-            
-            self._log(f"  ✓ Generated {len(addresses_gdf)} synthetic addresses")
-            return addresses_gdf
-            
-        except Exception as e:
-            self._log(f"  ✗ Error generating addresses: {str(e)}")
-            return gpd.GeoDataFrame()
-
-    def _simplify_network_if_needed(self, road_network, max_nodes, max_edges):
-        """Simplify network if it exceeds size limits"""
-        
-        current_nodes = road_network.number_of_nodes()
-        current_edges = road_network.number_of_edges()
-        
-        if current_nodes <= max_nodes and current_edges <= max_edges:
-            return road_network
-        
-        self._log(f"  Simplifying network: {current_nodes} → {max_nodes} nodes")
-        
-        try:
-            # Simple node sampling approach
-            import networkx as nx
-            
-            # Calculate how many nodes to keep
-            keep_ratio = max_nodes / current_nodes
-            
-            # Sample nodes randomly but preserve connectivity
-            all_nodes = list(road_network.nodes())
-            np.random.seed(42)  # Reproducible simplification
-            
-            # Keep a fraction of nodes
-            nodes_to_keep = np.random.choice(
-                all_nodes, 
-                size=min(max_nodes, len(all_nodes)), 
-                replace=False
-            )
-            
-            # Create subgraph
-            simplified_network = road_network.subgraph(nodes_to_keep).copy()
-            
-            # Ensure connectivity - if disconnected, add connecting edges
-            if not nx.is_connected(simplified_network):
-                # Find largest component
-                largest_component = max(nx.connected_components(simplified_network), key=len)
-                simplified_network = road_network.subgraph(largest_component).copy()
-            
-            self._log(f"  ✓ Simplified to {simplified_network.number_of_nodes()} nodes, {simplified_network.number_of_edges()} edges")
-            
-            return simplified_network
-            
-        except Exception as e:
-            self._log(f"  ✗ Network simplification failed: {str(e)}")
-            return road_network
 
     def _create_empty_tract_data(self, fips_code):
         """Create empty tract data structure for failed loads"""
@@ -887,29 +815,98 @@ class DataLoader:
         
         return G
 
-    def _generate_tract_addresses(self, tract_geometry, n_points=200):
-        """Generate random address points within tract"""
-        import random
-        
-        bounds = tract_geometry.bounds  # Returns tuple: (minx, miny, maxx, maxy)
-        points = []
-        attempts = 0
-        max_attempts = n_points * 10
-        
-        while len(points) < n_points and attempts < max_attempts:
-            x = random.uniform(bounds[0], bounds[2])  # minx to maxx
-            y = random.uniform(bounds[1], bounds[3])  # miny to maxy
-            point = Point(x, y)
+    def _generate_tract_addresses(self, fips_code, road_network, n_addresses=100):
+        """Generate synthetic addresses within the tract using road network bounds"""
+        try:
+            # Get network bounds
+            nodes = list(road_network.nodes())
+            if len(nodes) == 0:
+                return gpd.GeoDataFrame()
             
-            if tract_geometry.contains(point):
-                points.append(point)
-            attempts += 1
+            x_coords = [node[0] for node in nodes]
+            y_coords = [node[1] for node in nodes]
+            
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            
+            # Generate random points within network bounds
+            np.random.seed(42)  # Reproducible addresses
+            
+            addresses_data = []
+            for i in range(n_addresses):
+                x = np.random.uniform(x_min, x_max)
+                y = np.random.uniform(y_min, y_max)
+                
+                addresses_data.append({
+                    'address_id': i,
+                    'x': x,
+                    'y': y
+                })
+            
+            # Create GeoDataFrame
+            addresses_gdf = gpd.GeoDataFrame(
+                addresses_data,
+                geometry=gpd.points_from_xy([addr['x'] for addr in addresses_data],
+                                        [addr['y'] for addr in addresses_data]),
+                crs='EPSG:4326'
+            )
+            
+            self._log(f"  ✓ Generated {len(addresses_gdf)} synthetic addresses")
+            return addresses_gdf
+            
+        except Exception as e:
+            self._log(f"  ✗ Error generating addresses: {str(e)}")
+            return gpd.GeoDataFrame()
+
+    def _simplify_network_if_needed(self, road_network, max_nodes, max_edges):
+        """Simplify network if it exceeds size limits"""
         
-        return gpd.GeoDataFrame(
-            {'address_id': range(len(points))},
-            geometry=points,
-            crs='EPSG:4326'
-        )
+        current_nodes = road_network.number_of_nodes()
+        current_edges = road_network.number_of_edges()
+        
+        if current_nodes <= max_nodes and current_edges <= max_edges:
+            return road_network
+        
+        self._log(f"  Simplifying network: {current_nodes} → {max_nodes} nodes")
+        
+        try:
+            import networkx as nx
+            
+            # FIXED: Convert nodes to indices for np.random.choice
+            all_nodes = list(road_network.nodes())
+            node_indices = np.arange(len(all_nodes))  # Create 1D array of indices
+            
+            # Sample node indices, not the actual node coordinates
+            keep_count = min(max_nodes, len(all_nodes))
+            np.random.seed(42)  # Reproducible simplification
+            
+            # Sample indices
+            selected_indices = np.random.choice(
+                node_indices, 
+                size=keep_count, 
+                replace=False
+            )
+            
+            # Convert back to actual nodes
+            nodes_to_keep = [all_nodes[i] for i in selected_indices]
+            
+            # Create subgraph
+            simplified_network = road_network.subgraph(nodes_to_keep).copy()
+            
+            # Ensure connectivity - if disconnected, keep largest component
+            if not nx.is_connected(simplified_network):
+                # Find largest component
+                largest_component = max(nx.connected_components(simplified_network), key=len)
+                simplified_network = road_network.subgraph(largest_component).copy()
+            
+            self._log(f"  ✓ Simplified to {simplified_network.number_of_nodes()} nodes, {simplified_network.number_of_edges()} edges")
+            
+            return simplified_network
+            
+        except Exception as e:
+            self._log(f"  ✗ Network simplification failed: {str(e)}")
+            # Return original network if simplification fails
+            return road_network
 
     def _create_tract_transit_stops(self, tract_geometry, n_stops=3):
         """Create mock transit stops for tract"""

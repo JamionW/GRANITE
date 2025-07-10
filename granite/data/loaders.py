@@ -1,121 +1,116 @@
 """
 Data loading functions for GRANITE framework
+
+This module handles all data loading operations including SVI data,
+census tracts, road networks, and address generation.
 """
 import os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-import fiona
-from shapely.geometry import Point, LineString
-from shapely.ops import unary_union
+from shapely.geometry import Point, box
 import networkx as nx
 from datetime import datetime
+from typing import List, Dict, Optional, Tuple
 
 
 class DataLoader:
     """Main data loader class for GRANITE framework"""
     
-    def __init__(self, data_dir='./data', verbose=True):
+    def __init__(self, data_dir: str = './data', verbose: bool = True):
+        """
+        Initialize data loader
+        
+        Parameters:
+        -----------
+        data_dir : str
+            Base directory for data files
+        verbose : bool
+            Enable verbose logging
+        """
         self.data_dir = data_dir
         self.verbose = verbose
         
-    def _log(self, message):
-        """Logging with timestamp"""
+        # Create data directories if needed
+        os.makedirs(os.path.join(data_dir, 'raw'), exist_ok=True)
+        os.makedirs(os.path.join(data_dir, 'processed'), exist_ok=True)
+    
+    def _log(self, message: str):
+        """Log message with timestamp"""
         if self.verbose:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[{timestamp}] {message}")
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            print(f"[{timestamp}] DataLoader: {message}")
     
-    # ==========================================
-    # ORIGINAL DATA LOADING METHODS
-    # ==========================================
-    
-    def load_svi_data(self, state_fips='47', county_name='Hamilton', year=2020):
+    def load_svi_data(self, state_fips: str = '47', county_name: str = 'Hamilton', 
+                     year: int = 2020) -> pd.DataFrame:
         """
-        Load Social Vulnerability Index data for Hamilton County
+        Load Social Vulnerability Index data
         
         Parameters:
         -----------
         state_fips : str
-            State FIPS code 
+            State FIPS code
         county_name : str
-            County name (e.g., 'Hamilton')
+            County name (not FIPS)
         year : int
             SVI data year
             
         Returns:
         --------
         pd.DataFrame
-            SVI data with selected columns
+            SVI data for specified county
         """
-        self._log("Loading SVI data for Hamilton County, Tennessee...")
+        self._log(f"Loading SVI data for {county_name} County, {state_fips}...")
         
-        # Local file path
         svi_file = os.path.join(self.data_dir, 'raw', f'SVI_{year}_US.csv')
-        self._log(f"  Loading SVI data from: {svi_file}")
         
         try:
-            # Load SVI data
+            # Load SVI data with proper types
             if os.path.exists(svi_file):
-                # CRITICAL FIX: Force FIPS to be read as string
-                svi_data = pd.read_csv(svi_file, dtype={'FIPS': str, 'ST': str, 'COUNTY': str})
-                self._log(f"  ✓ Loaded local SVI data ({len(svi_data)} total records)")
+                svi_data = pd.read_csv(svi_file, dtype={'FIPS': str, 'ST': str})
+                self._log(f"Loaded local SVI data ({len(svi_data)} records)")
             else:
-                # Download if not available locally
-                svi_url = f"https://www.atsdr.cdc.gov/placeandhealth/centerforsvi/csv/SVI{year}_US.csv"
-                svi_data = pd.read_csv(svi_url, dtype={'FIPS': str, 'ST': str, 'COUNTY': str})
-                self._log(f"  ✓ Downloaded SVI data ({len(svi_data)} total records)")
-                
-                # Save locally for future use
-                os.makedirs(os.path.dirname(svi_file), exist_ok=True)
-                svi_data.to_csv(svi_file, index=False)
-                self._log(f"  ✓ Saved SVI data to {svi_file}")
+                # Download from CDC
+                url = f"https://www.atsdr.cdc.gov/placeandhealth/svi/data_documentation_download/{year}.html"
+                self._log(f"Local file not found. Please download SVI data from: {url}")
+                raise FileNotFoundError(f"SVI data not found at {svi_file}")
             
-            # **CRITICAL FIX**: Filter by county NAME, not FIPS code
+            # Filter to county
             county_svi = svi_data[
                 (svi_data['ST'] == state_fips) & 
-                (svi_data['COUNTY'] == county_name)  # Use 'Hamilton' not '065'
+                (svi_data['COUNTY'] == county_name)
             ].copy()
             
-            # **CRITICAL FIX**: Ensure FIPS is string type to match census tracts
+            # Ensure FIPS is string
             county_svi['FIPS'] = county_svi['FIPS'].astype(str)
             
             # Select relevant columns
-            columns = ['FIPS', 'LOCATION', 'RPL_THEMES', 'RPL_THEME1', 
-                    'RPL_THEME2', 'RPL_THEME3', 'RPL_THEME4', 
-                    'E_TOTPOP', 'E_HU', 'E_POV', 'E_UNEMP', 'E_NOHSDP',
-                    'E_AGE65', 'E_AGE17', 'E_DISABL', 'E_SNGPNT', 
-                    'E_MINRTY', 'E_LIMENG', 'E_MUNIT', 'E_MOBILE',
-                    'E_CROWD', 'E_NOVEH', 'E_GROUPQ']
-            
-            available_cols = [col for col in columns if col in county_svi.columns]
-            county_svi = county_svi[available_cols]
+            columns = ['FIPS', 'LOCATION', 'RPL_THEMES', 'E_TOTPOP']
+            county_svi = county_svi[columns]
             
             # Handle missing values
             county_svi['RPL_THEMES'] = county_svi['RPL_THEMES'].replace(-999, np.nan)
             
-            # Statistics
-            valid_svi = county_svi['RPL_THEMES'].dropna()
-            self._log(f"  ✓ Loaded SVI data for {len(county_svi)} census tracts")
-            self._log(f"    - Valid SVI scores: {len(valid_svi)}")
-            self._log(f"    - Mean SVI: {valid_svi.mean():.3f}")
-            self._log(f"    - SVI Range: [{valid_svi.min():.3f}, {valid_svi.max():.3f}]")
+            valid_count = county_svi['RPL_THEMES'].notna().sum()
+            self._log(f"Loaded {len(county_svi)} tracts ({valid_count} with valid SVI)")
             
             return county_svi
             
         except Exception as e:
-            self._log(f"  ✗ Error loading SVI data: {str(e)}")
+            self._log(f"Error loading SVI data: {str(e)}")
             raise
     
-    def load_census_tracts(self, state_fips='47', county_fips='065', year=2020):
+    def load_census_tracts(self, state_fips: str = '47', county_fips: str = '065', 
+                          year: int = 2020) -> gpd.GeoDataFrame:
         """
-        Load census tract geometries from Census TIGER files
+        Load census tract geometries
         
         Parameters:
         -----------
         state_fips : str
-            State FIPS code (e.g., '47' for Tennessee)
+            State FIPS code
         county_fips : str
-            County FIPS code (e.g., '065' for Hamilton)
+            County FIPS code
         year : int
             Census year
             
@@ -124,51 +119,45 @@ class DataLoader:
         gpd.GeoDataFrame
             Census tract geometries
         """
-        self._log(f"Loading census tracts for state {state_fips}, county {county_fips}...")
+        self._log(f"Loading census tracts for {state_fips}-{county_fips}...")
         
-        # Local file path
         local_file = os.path.join(self.data_dir, 'raw', f'tl_{year}_{state_fips}_tract.shp')
         
         try:
             if os.path.exists(local_file):
-                # Load from local file
                 tracts = gpd.read_file(local_file)
-                self._log(f"  ✓ Loaded {len(tracts)} census tracts from local file")
+                self._log(f"Loaded {len(tracts)} tracts from local file")
             else:
-                # Download from Census TIGER
-                census_url = f"https://www2.census.gov/geo/tiger/TIGER{year}/TRACT/tl_{year}_{state_fips}_tract.zip"
-                tracts = gpd.read_file(census_url)
-                self._log(f"  ✓ Downloaded {len(tracts)} tracts for state {state_fips}")
-                
-                # Save locally for future use
-                os.makedirs(os.path.dirname(local_file), exist_ok=True)
-                tracts.to_file(local_file)
-                self._log(f"  ✓ Saved census tracts to {local_file}")
+                # User needs to download from Census
+                url = f"https://www2.census.gov/geo/tiger/TIGER{year}/TRACT/"
+                self._log(f"Local file not found. Please download from: {url}")
+                raise FileNotFoundError(f"Census tracts not found at {local_file}")
             
-            # Filter for specific county
+            # Filter to county
             county_tracts = tracts[tracts['COUNTYFP'] == county_fips].copy()
             county_tracts['FIPS'] = county_tracts['GEOID'].astype(str)
             
-            # Set CRS
+            # Ensure CRS
             if county_tracts.crs is None:
                 county_tracts.set_crs(epsg=4326, inplace=True)
                 
-            self._log(f"  ✓ Filtered to {len(county_tracts)} tracts for county {county_fips}")
+            self._log(f"Filtered to {len(county_tracts)} tracts")
             
             return county_tracts
             
         except Exception as e:
-            self._log(f"  ✗ Error loading census tracts: {str(e)}")
+            self._log(f"Error loading census tracts: {str(e)}")
             raise
     
-    def load_road_network(self, roads_file=None, state_fips='47', county_fips='065'):
+    def load_road_network(self, roads_file: Optional[str] = None, 
+                         state_fips: str = '47', county_fips: str = '065') -> gpd.GeoDataFrame:
         """
-        Load road network from TIGER/Line shapefiles
+        Load road network data
         
         Parameters:
         -----------
         roads_file : str, optional
-            Path to roads shapefile. If None, downloads from Census.
+            Path to roads shapefile
         state_fips : str
             State FIPS code
         county_fips : str
@@ -183,39 +172,217 @@ class DataLoader:
         
         try:
             if roads_file and os.path.exists(roads_file):
-                # Load from provided file
                 roads = gpd.read_file(roads_file)
-                self._log(f"  ✓ Loaded {len(roads)} road segments from {roads_file}")
+                self._log(f"Loaded {len(roads)} road segments from {roads_file}")
             else:
-                # Load from Census TIGER
-                local_file = os.path.join(self.data_dir, 'raw', f'tl_2023_{state_fips}{county_fips}_roads.shp')
+                # Try default location
+                default_file = os.path.join(
+                    self.data_dir, 'raw', 
+                    f'tl_2023_{state_fips}{county_fips}_roads.shp'
+                )
                 
-                if os.path.exists(local_file):
-                    roads = gpd.read_file(local_file)
-                    self._log(f"  ✓ Loaded {len(roads)} road segments from local file")
+                if os.path.exists(default_file):
+                    roads = gpd.read_file(default_file)
+                    self._log(f"Loaded {len(roads)} road segments")
                 else:
-                    # Download roads
-                    roads_url = f"https://www2.census.gov/geo/tiger/TIGER2023/ROADS/tl_2023_{state_fips}{county_fips}_roads.zip"
-                    roads = gpd.read_file(roads_url)
-                    self._log(f"  ✓ Downloaded {len(roads)} road segments")
-                    
-                    # Save locally
-                    os.makedirs(os.path.dirname(local_file), exist_ok=True)
-                    roads.to_file(local_file)
-                    self._log(f"  ✓ Saved roads to {local_file}")
+                    url = f"https://www2.census.gov/geo/tiger/TIGER2023/ROADS/"
+                    self._log(f"Road file not found. Please download from: {url}")
+                    raise FileNotFoundError(f"Roads not found")
             
-            # Set CRS if not present
+            # Ensure CRS
             if roads.crs is None:
                 roads.set_crs(epsg=4326, inplace=True)
             
             return roads
             
         except Exception as e:
-            self._log(f"  ✗ Error loading road network: {str(e)}")
-            # Return empty GeoDataFrame as fallback
+            self._log(f"Error loading roads: {str(e)}")
+            # Return empty GeoDataFrame
             return gpd.GeoDataFrame(geometry=[])
     
-    def load_transit_stops(self):
+    def create_network_graph(self, roads: gpd.GeoDataFrame) -> nx.Graph:
+        """
+        Create NetworkX graph from road geometries
+        
+        Parameters:
+        -----------
+        roads : gpd.GeoDataFrame
+            Road geometries
+            
+        Returns:
+        --------
+        nx.Graph
+            Network graph
+        """
+        if len(roads) == 0:
+            self._log("No roads provided for network creation")
+            return nx.Graph()
+        
+        self._log("Creating network graph...")
+        
+        G = nx.Graph()
+        
+        # Process each road segment
+        for idx, road in roads.iterrows():
+            if road.geometry.geom_type == 'LineString':
+                coords = list(road.geometry.coords)
+                
+                # Add edges between consecutive points
+                for i in range(len(coords) - 1):
+                    u, v = coords[i], coords[i + 1]
+                    
+                    # Calculate edge length
+                    length = Point(u).distance(Point(v))
+                    
+                    # Add edge
+                    G.add_edge(u, v, length=length, road_id=idx)
+        
+        # Add node attributes
+        for node in G.nodes():
+            G.nodes[node]['x'] = node[0]
+            G.nodes[node]['y'] = node[1]
+        
+        self._log(f"Created network: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+        
+        return G
+    
+    def get_available_fips_codes(self, state_fips: str = '47', 
+                                county_fips: str = '065') -> List[str]:
+        """
+        Get list of available FIPS codes
+        
+        Parameters:
+        -----------
+        state_fips : str
+            State FIPS code
+        county_fips : str
+            County FIPS code
+            
+        Returns:
+        --------
+        List[str]
+            Available FIPS codes
+        """
+        tracts = self.load_census_tracts(state_fips, county_fips)
+        return sorted(tracts['FIPS'].tolist())
+    
+    def load_single_tract_data(self, fips_code: str, buffer_degrees: float = 0.01,
+                              max_nodes: Optional[int] = None, 
+                              max_edges: Optional[int] = None) -> Dict:
+        """
+        Load data for a single census tract
+        
+        This is the key function for FIPS-based processing. It loads only
+        the data needed for a single tract, with proper spatial filtering.
+        
+        Parameters:
+        -----------
+        fips_code : str
+            11-digit FIPS code
+        buffer_degrees : float
+            Buffer around tract boundary
+        max_nodes : int, optional
+            Maximum nodes (for memory management)
+        max_edges : int, optional
+            Maximum edges (for memory management)
+            
+        Returns:
+        --------
+        Dict
+            Tract-specific data
+        """
+        self._log(f"Loading data for tract {fips_code}")
+        
+        try:
+            # Parse FIPS components
+            state_fips = fips_code[:2]
+            county_fips = fips_code[2:5]
+            
+            # Load tract geometry
+            all_tracts = self.load_census_tracts(state_fips, county_fips)
+            tract = all_tracts[all_tracts['FIPS'] == fips_code]
+            
+            if len(tract) == 0:
+                raise ValueError(f"Tract {fips_code} not found")
+            
+            tract_geom = tract.geometry.iloc[0]
+            
+            # Create buffered boundary
+            buffered_geom = tract_geom.buffer(buffer_degrees)
+            bbox = buffered_geom.bounds  # (minx, miny, maxx, maxy)
+            
+            # Load and filter roads
+            all_roads = self.load_road_network(None, state_fips, county_fips)
+            
+            # Spatial filter - roads intersecting buffered tract
+            roads_filtered = all_roads[all_roads.geometry.intersects(buffered_geom)]
+            self._log(f"Filtered to {len(roads_filtered)} road segments")
+            
+            # Create network from filtered roads
+            road_network = self.create_network_graph(roads_filtered)
+            
+            # Apply size limits if specified
+            if max_nodes and road_network.number_of_nodes() > max_nodes:
+                self._log(f"Network exceeds {max_nodes} nodes, may need simplification")
+            
+            # Load SVI data for tract
+            all_svi = self.load_svi_data(state_fips, self._get_county_name(state_fips, county_fips))
+            tract_svi = all_svi[all_svi['FIPS'] == fips_code]
+            
+            # Generate addresses within tract
+            addresses = self._generate_tract_addresses(tract_geom, bbox, n_addresses=100)
+            
+            return {
+                'fips_code': fips_code,
+                'tract_geometry': tract_geom,
+                'road_network': road_network,
+                'roads_gdf': roads_filtered,
+                'svi_data': tract_svi,
+                'addresses': addresses,
+                'bbox': bbox
+            }
+            
+        except Exception as e:
+            self._log(f"Error loading tract data: {str(e)}")
+            raise
+    
+    def _generate_tract_addresses(self, tract_geom, bbox: Tuple, 
+                                 n_addresses: int = 100) -> gpd.GeoDataFrame:
+        """Generate synthetic addresses within tract"""
+        np.random.seed(42)  # For reproducibility
+        
+        minx, miny, maxx, maxy = bbox
+        addresses = []
+        
+        # Generate random points within bbox, keep those in tract
+        attempts = 0
+        while len(addresses) < n_addresses and attempts < n_addresses * 10:
+            x = np.random.uniform(minx, maxx)
+            y = np.random.uniform(miny, maxy)
+            point = Point(x, y)
+            
+            if tract_geom.contains(point):
+                addresses.append({
+                    'address_id': len(addresses),
+                    'geometry': point
+                })
+            
+            attempts += 1
+        
+        if not addresses:
+            # Fallback: use tract centroid
+            centroid = tract_geom.centroid
+            addresses = [{
+                'address_id': 0,
+                'geometry': centroid
+            }]
+        
+        gdf = gpd.GeoDataFrame(addresses, crs='EPSG:4326')
+        self._log(f"Generated {len(gdf)} addresses")
+        
+        return gdf
+    
+    def load_transit_stops(self) -> gpd.GeoDataFrame:
         """
         Load or create transit stop locations
         
@@ -224,14 +391,16 @@ class DataLoader:
         gpd.GeoDataFrame
             Transit stop locations
         """
-        self._log("Creating mock transit stops...")
+        self._log("Loading transit stops...")
         
-        # Create mock transit stops for Hamilton County
-        # In practice, load from GTFS or other transit data
+        # For now, create mock transit stops
+        # In production, load from GTFS or other transit data source
         stops = [
             Point(-85.3096, 35.0456),  # Downtown Chattanooga
             Point(-85.2967, 35.0722),  # North Chattanooga
             Point(-85.2580, 35.0456),  # East Chattanooga
+            Point(-85.3365, 35.0175),  # South Chattanooga
+            Point(-85.1938, 35.0495),  # East Ridge
         ]
         
         transit_stops = gpd.GeoDataFrame(
@@ -240,11 +409,11 @@ class DataLoader:
             crs='EPSG:4326'
         )
         
-        self._log(f"  ✓ Created {len(transit_stops)} mock transit stops")
+        self._log(f"Created {len(transit_stops)} transit stops")
         
         return transit_stops
     
-    def load_address_points(self, n_points=1000):
+    def load_address_points(self, n_points: int = 1000) -> gpd.GeoDataFrame:
         """
         Generate or load address point locations
         
@@ -258,12 +427,13 @@ class DataLoader:
         gpd.GeoDataFrame
             Address point locations
         """
-        self._log(f"Generating {n_points} synthetic address points...")
+        self._log(f"Generating {n_points} address points...")
         
-        # Bounding box for Hamilton County, TN
+        # Hamilton County bounding box
         bbox = [-85.5, 35.0, -85.0, 35.5]
         
         # Generate random points
+        np.random.seed(42)  # For reproducibility
         lons = np.random.uniform(bbox[0], bbox[2], n_points)
         lats = np.random.uniform(bbox[1], bbox[3], n_points)
         
@@ -275,680 +445,26 @@ class DataLoader:
             crs='EPSG:4326'
         )
         
-        self._log(f"  ✓ Generated {len(addresses)} address points")
+        self._log(f"Generated {len(addresses)} address points")
         
         return addresses
     
-    def create_network_graph(self, roads, directed=False):
-        """
-        Create NetworkX graph from road geometries
-        
-        Parameters:
-        -----------
-        roads : gpd.GeoDataFrame
-            Road network geometries
-        directed : bool
-            Whether to create directed graph
-            
-        Returns:
-        --------
-        nx.Graph or nx.DiGraph
-            Network graph
-        """
-        self._log("Creating network graph from road geometries...")
-        
-        if len(roads) == 0:
-            self._log("  ✗ No road data provided")
-            return nx.Graph()
-        
-        # Create graph
-        G = nx.DiGraph() if directed else nx.Graph()
-        
-        # Add edges from road geometries
-        for idx, road in roads.iterrows():
-            if road.geometry.geom_type == 'LineString':
-                coords = list(road.geometry.coords)
-                
-                # Add edges between consecutive points
-                for i in range(len(coords) - 1):
-                    u, v = coords[i], coords[i + 1]
-                    
-                    # Calculate edge length
-                    length = Point(u).distance(Point(v))
-                    
-                    # Add edge with attributes
-                    G.add_edge(u, v, length=length, road_id=idx)
-                    
-                    # Add road type if available
-                    if 'MTFCC' in road:
-                        G[u][v]['road_type'] = road['MTFCC']
-        
-        # Add node attributes
-        for node in G.nodes():
-            G.nodes[node]['x'] = node[0]
-            G.nodes[node]['y'] = node[1]
-        
-        self._log(f"  ✓ Created network graph:")
-        self._log(f"    - Nodes: {G.number_of_nodes()}")
-        self._log(f"    - Edges: {G.number_of_edges()}")
-        self._log(f"    - Connected components: {nx.number_connected_components(G) if not directed else 'N/A'}")
-        
-        return G
-    
-    def load_tract_specific_roads(self, fips_code, buffer_degrees=0.01, roads_file=None):
-        """
-        Load road network filtered to specific tract + buffer
-        This is what FIPS mode should be doing!
-        
-        Parameters:
-        -----------
-        fips_code : str
-            FIPS code for specific tract (e.g., "47065001100")
-        buffer_degrees : float
-            Buffer around tract in degrees (default 0.01 ≈ 1km)
-        roads_file : str, optional
-            Path to roads shapefile
-            
-        Returns:
-        --------
-        gpd.GeoDataFrame
-            Roads within tract boundary + buffer
-        """
-        self._log(f"Loading road network for tract {fips_code}...")
-        
-        # Step 1: Get the specific tract geometry
-        tract_boundary = self._get_tract_boundary(fips_code)
-        if tract_boundary is None:
-            self._log(f"  ✗ Could not find tract {fips_code}")
-            return gpd.GeoDataFrame()
-        
-        # Step 2: Create buffered boundary
-        buffered_boundary = tract_boundary.buffer(buffer_degrees)
-        self._log(f"  - Tract boundary with {buffer_degrees:.3f}° buffer")
-        
-        # Step 3: Load full road network
-        all_roads = self.load_road_network(roads_file)
-        self._log(f"  - Loaded {len(all_roads)} total road segments")
-        
-        # Step 4: Spatial filter - only roads intersecting buffered tract
-        tract_roads = self._spatially_filter_roads(all_roads, buffered_boundary)
-        
-        self._log(f"  ✓ Filtered to {len(tract_roads)} road segments for tract {fips_code}")
-        
-        return tract_roads
-
-    def _get_tract_boundary(self, fips_code):
-        """Get the boundary geometry for a specific tract"""
-        try:
-            # Load census tracts if not already loaded
-            if not hasattr(self, '_census_tracts'):
-                self._census_tracts = self.load_census_tracts()
-            
-            # Find the specific tract
-            tract_row = self._census_tracts[self._census_tracts['FIPS'] == fips_code]
-            
-            if len(tract_row) == 0:
-                self._log(f"  ✗ Tract {fips_code} not found in census data")
-                return None
-            
-            # Get the geometry
-            tract_geometry = tract_row.geometry.iloc[0]
-            
-            self._log(f"  ✓ Found tract {fips_code} boundary")
-            return tract_geometry
-            
-        except Exception as e:
-            self._log(f"  ✗ Error getting tract boundary: {str(e)}")
-            return None
-
-    def _spatially_filter_roads(self, roads_gdf, boundary_geometry):
-        """Filter roads to only those intersecting the boundary"""
-        try:
-            # Ensure same CRS
-            if roads_gdf.crs != boundary_geometry.crs if hasattr(boundary_geometry, 'crs') else None:
-                # Assume boundary uses same CRS as roads for now
-                pass
-            
-            # Create GeoSeries for the boundary
-            if hasattr(boundary_geometry, 'geometry'):
-                boundary_geom = boundary_geometry.geometry.iloc[0]
-            else:
-                boundary_geom = boundary_geometry
-            
-            # Spatial intersection - roads that intersect the buffered tract
-            intersecting_roads = roads_gdf[roads_gdf.geometry.intersects(boundary_geom)].copy()
-            
-            self._log(f"  - Spatial filter: {len(roads_gdf)} → {len(intersecting_roads)} roads")
-            
-            return intersecting_roads
-            
-        except Exception as e:
-            self._log(f"  ✗ Error in spatial filtering: {str(e)}")
-            # Fallback: return all roads
-            return roads_gdf
-
-    # ==========================================
-    # NEW FIPS-BASED PROCESSING METHODS
-    # ==========================================
-    
-    def get_available_fips_codes(self, state_fips='47', county_fips='065'):
-        """
-        Get list of available FIPS codes for the county
-        
-        Parameters:
-        -----------
-        state_fips : str
-            State FIPS code
-        county_fips : str  
-            County FIPS code
-            
-        Returns:
-        --------
-        List[str]
-            List of available FIPS codes
-        """
-        tracts = self.load_census_tracts(state_fips, county_fips)
-        return sorted(tracts['FIPS'].tolist())
-    
-    def _create_preserved_network(self, roads, max_nodes=None, max_edges=None, preserve_network=True):
-        """
-        Create network graph with optional granularity preservation for disaggregation
-        
-        Parameters:
-        -----------
-        roads : gpd.GeoDataFrame
-            Road network geometries
-        max_nodes : int, optional
-            Maximum nodes (None = unlimited)
-        max_edges : int, optional
-            Maximum edges (None = unlimited)
-        preserve_network : bool
-            If True, preserves full network granularity
-            
-        Returns:
-        --------
-        nx.Graph
-            Network graph
-        """
-        if len(roads) == 0:
-            return nx.Graph()
-        
-        # Build initial network
-        G = self.create_network_graph(roads)
-        
-        original_nodes = G.number_of_nodes()
-        original_edges = G.number_of_edges()
-        
-        # CRITICAL FIX: Preserve network granularity for disaggregation
-        if preserve_network:
-            if max_nodes is not None and original_nodes > max_nodes:
-                self._log(f"    ⚠️  Network has {original_nodes} nodes (>{max_nodes} limit)")
-                self._log(f"    ✓ PRESERVING full network for disaggregation granularity")
-                self._log(f"    (Use preserve_network=False to enable simplification)")
-            
-            # Return full network without simplification
-            return G
-        
-        else:
-            # Legacy behavior with simplification (NOT recommended for disaggregation)
-            if (max_nodes is not None and original_nodes > max_nodes) or \
-            (max_edges is not None and original_edges > max_edges):
-                
-                import warnings
-                warnings.warn(
-                    f"Simplifying network from {original_nodes} nodes to {max_nodes} nodes. "
-                    "This reduces granularity needed for spatial disaggregation. "
-                    "Consider using preserve_network=True or removing node limits.",
-                    UserWarning
-                )
-                
-                self._log(f"    ⚠️  Network too large ({original_nodes} nodes, {original_edges} edges), simplifying...")
-                G = self._simplify_network(G, max_nodes or original_nodes, max_edges or original_edges)
-                self._log(f"    Simplified to {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
-                self._log(f"    ⚠️  GRANULARITY REDUCED - May impact disaggregation quality!")
-            
-            return G
-
-    def load_single_tract_data(self, fips_code, buffer_degrees=0.01, max_nodes=10000, max_edges=20000):
-        """
-        FIXED: Load data for a single tract with proper spatial filtering
-        
-        Parameters:
-        -----------
-        fips_code : str
-            FIPS code for the tract
-        buffer_degrees : float
-            Buffer around tract for road network (degrees)
-        max_nodes : int
-            Maximum nodes in road network (None = no limit)
-        max_edges : int  
-            Maximum edges in road network (None = no limit)
-            
-        Returns:
-        --------
-        dict
-            Tract data with spatially filtered roads
-        """
-        self._log(f"Loading data for tract {fips_code}")
-        
-        try:
-            # Step 1: Load tract-specific road network
-            roads_gdf = self.load_tract_specific_roads(
-                fips_code, 
-                buffer_degrees=buffer_degrees
-            )
-            
-            if len(roads_gdf) == 0:
-                self._log(f"  ✗ No roads found for tract {fips_code}")
-                return self._create_empty_tract_data(fips_code)
-            
-            # Step 2: Create network graph from filtered roads
-            road_network = self.create_network_graph(roads_gdf)
-            
-            # Step 3: Apply size limits if needed (with better logic)
-            original_nodes = road_network.number_of_nodes()
-            original_edges = road_network.number_of_edges()
-            
-            # FIXED: Only simplify if we actually exceed reasonable limits
-            if max_nodes is not None and original_nodes > max_nodes:
-                self._log(f"  ⚠️  Network has {original_nodes} nodes (>{max_nodes} limit)")
-                
-                # Only simplify if it's REALLY large (avoid unnecessary simplification)
-                if original_nodes > max_nodes * 2:  # Only if significantly over limit
-                    self._log(f"  🔧 Simplifying network due to size...")
-                    road_network = self._simplify_network_if_needed(road_network, max_nodes, max_edges)
-                else:
-                    self._log(f"  ✓ Keeping full network (moderate size)")
-            
-            # FIXED: Don't skip tracts just because they're large
-            # Only skip if there are truly no roads (< 10 nodes)
-            if road_network.number_of_nodes() < 10:
-                self._log(f"  ✗ Network too small ({road_network.number_of_nodes()} nodes), skipping")
-                return self._create_empty_tract_data(fips_code)
-            
-            # Step 4: Load other tract data
-            tract_data = self._load_tract_ancillary_data(fips_code, road_network)
-            
-            # Step 5: Compile results
-            result = {
-                'fips_code': fips_code,
-                'road_network': road_network,
-                'roads_gdf': roads_gdf,
-                'svi_data': tract_data['svi_data'],
-                'addresses': tract_data['addresses'],
-                'network_stats': {
-                    'nodes': road_network.number_of_nodes(),
-                    'edges': road_network.number_of_edges(),
-                    'roads_loaded': len(roads_gdf)
-                }
-            }
-            
-            self._log(f"  ✓ Tract data loaded:")
-            self._log(f"    - Road segments: {len(roads_gdf)}")
-            self._log(f"    - Network nodes: {road_network.number_of_nodes()}")
-            self._log(f"    - Network edges: {road_network.number_of_edges()}")
-            self._log(f"    - Addresses: {len(tract_data['addresses'])}")
-            
-            return result
-            
-        except Exception as e:
-            self._log(f"  ✗ Error loading tract data: {str(e)}")
-            import traceback
-            self._log(f"  Traceback: {traceback.format_exc()}")
-            return self._create_empty_tract_data(fips_code)
-        
-    def _load_tract_ancillary_data(self, fips_code, road_network):
-        """Load SVI data and generate addresses for the tract"""
-        
-        # Load SVI data for this tract
-        svi_data = self._get_tract_svi_data(fips_code)
-        
-        # Generate addresses within the tract
-        addresses = self._generate_tract_addresses(fips_code, road_network)
-        
-        return {
-            'svi_data': svi_data,
-            'addresses': addresses
-        }
-
-    def _get_tract_svi_data(self, fips_code):
-        """Get SVI data for specific tract"""
-        try:
-            # Load SVI data if not already loaded
-            if not hasattr(self, '_svi_data'):
-                self._svi_data = self.load_svi_data()
-            
-            # Filter to specific tract
-            tract_svi = self._svi_data[self._svi_data['FIPS'] == fips_code]
-            
-            if len(tract_svi) == 0:
-                self._log(f"  ⚠️  No SVI data for tract {fips_code}")
-                # Create dummy SVI data
-                tract_svi = pd.DataFrame({
-                    'FIPS': [fips_code],
-                    'RPL_THEMES': [0.5]  # Default SVI value
-                })
-            
-            return tract_svi
-            
-        except Exception as e:
-            self._log(f"  ✗ Error loading SVI data: {str(e)}")
-            return pd.DataFrame({'FIPS': [fips_code], 'RPL_THEMES': [0.5]})
-
-    def _create_empty_tract_data(self, fips_code):
-        """Create empty tract data structure for failed loads"""
-        import networkx as nx
-        
-        return {
-            'fips_code': fips_code,
-            'road_network': nx.Graph(),
-            'roads_gdf': gpd.GeoDataFrame(),
-            'svi_data': pd.DataFrame({'FIPS': [fips_code], 'RPL_THEMES': [0.5]}),
-            'addresses': gpd.GeoDataFrame(),
-            'network_stats': {'nodes': 0, 'edges': 0, 'roads_loaded': 0}
-        }
-
-    def load_batch_fips_data(self, fips_list, preserve_network=True, **kwargs):
-        """
-        Load data for multiple FIPS codes with granularity preservation
-        
-        Parameters:
-        -----------
-        fips_list : List[str]
-            List of FIPS codes to load
-        preserve_network : bool
-            If True, preserves full network granularity (recommended for disaggregation)
-        **kwargs
-            Arguments passed to load_single_tract_data
-            
-        Returns:
-        --------
-        dict
-            Dictionary with FIPS codes as keys, tract data as values
-        """
-        self._log(f"Loading data for {len(fips_list)} census tracts")
-        
-        # Set preserve_network parameter
-        kwargs['preserve_network'] = preserve_network
-        
-        batch_data = {}
-        successful = 0
-        failed = []
-        
-        for i, fips_code in enumerate(fips_list, 1):
-            self._log(f"  [{i}/{len(fips_list)}] Loading tract {fips_code}")
-            
-            try:
-                tract_data = self.load_single_tract_data(fips_code, **kwargs)
-                batch_data[fips_code] = tract_data
-                successful += 1
-                
-            except Exception as e:
-                self._log(f"    ✗ Failed to load {fips_code}: {str(e)}")
-                failed.append((fips_code, str(e)))
-                
-                # Store error info
-                batch_data[fips_code] = {
-                    'status': 'error',
-                    'error': str(e),
-                    'fips_code': fips_code
-                }
-        
-        self._log(f"Batch loading complete: {successful} successful, {len(failed)} failed")
-        
-        return batch_data
-
-    def _load_single_tract_geometry(self, fips_code):
-        """Load geometry for a single tract"""
-        state_fips = fips_code[:2]
-        county_fips = fips_code[2:5]
-        
-        tracts = self.load_census_tracts(state_fips, county_fips)
-        tract = tracts[tracts['FIPS'] == fips_code]
-        
-        if len(tract) == 0:
-            return None
-        
-        return tract.iloc[0].geometry
-
-    def _load_single_tract_svi(self, fips_code):
-        """Load SVI data for a single tract"""
-        state_fips = fips_code[:2]
-        county_name = self._get_county_name_from_fips(state_fips, fips_code[2:5])
-        
-        # Load county SVI data
-        county_svi = self.load_svi_data(state_fips, county_name)
-        
-        # Filter to specific tract
-        tract_svi = county_svi[county_svi['FIPS'] == fips_code]
-        
-        return tract_svi
-
-    def _load_roads_for_bbox(self, state_fips, county_fips, bbox):
-        """Load roads within bounding box"""
-        # Load full county roads
-        roads = self.load_road_network(None, state_fips, county_fips)
-        
-        if len(roads) == 0:
-            return roads
-        
-        # Create bbox polygon for spatial filtering
-        minx, miny, maxx, maxy = bbox
-        from shapely.geometry import box
-        bbox_poly = box(minx, miny, maxx, maxy)
-        
-        # Spatial filter
-        roads_clipped = roads[roads.geometry.intersects(bbox_poly)].copy()
-        
-        return roads_clipped
-
-    def _create_limited_network(self, roads, max_nodes, max_edges):
-        """Create network graph with size limits"""
-        if len(roads) == 0:
-            return nx.Graph()
-        
-        # Build initial network
-        G = self.create_network_graph(roads)
-        
-        # Apply size limits
-        original_nodes = G.number_of_nodes()
-        original_edges = G.number_of_edges()
-        
-        if original_nodes > max_nodes or original_edges > max_edges:
-            self._log(f"    Network too large ({original_nodes} nodes, {original_edges} edges), simplifying...")
-            G = self._simplify_network(G, max_nodes, max_edges)
-            self._log(f"    Simplified to {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
-        
-        return G
-
-    def _simplify_network(self, G, max_nodes, max_edges):
-        """Simplify network by removing low-importance nodes and edges"""
-        import random
-        
-        # Strategy 1: Remove degree-2 nodes (pass-through intersections)
-        nodes_to_remove = []
-        for node in list(G.nodes()):
-            if G.degree(node) == 2:
-                neighbors = list(G.neighbors(node))
-                if len(neighbors) == 2:
-                    # Connect neighbors directly
-                    n1, n2 = neighbors
-                    # Combine edge weights
-                    w1 = G[node][n1].get('weight', 1)
-                    w2 = G[node][n2].get('weight', 1)
-                    G.add_edge(n1, n2, weight=w1 + w2)
-                    nodes_to_remove.append(node)
-        
-        G.remove_nodes_from(nodes_to_remove)
-        
-        # Strategy 2: If still too large, randomly sample nodes
-        if G.number_of_nodes() > max_nodes:
-            # Sample nodes to keep (prefer high-degree nodes)
-            node_degrees = dict(G.degree())
-            sorted_nodes = sorted(node_degrees.items(), key=lambda x: x[1], reverse=True)
-            
-            # Keep top max_nodes nodes
-            nodes_to_keep = [node for node, degree in sorted_nodes[:max_nodes]]
-            G = G.subgraph(nodes_to_keep).copy()
-        
-        # Strategy 3: If too many edges, remove lowest-weight edges
-        if G.number_of_edges() > max_edges:
-            # Get edges with weights
-            edge_weights = []
-            for u, v, data in G.edges(data=True):
-                weight = data.get('weight', 1)
-                edge_weights.append((weight, u, v))
-            
-            # Sort by weight (keep highest weight edges)
-            edge_weights.sort(reverse=True)
-            
-            # Keep only top max_edges edges
-            edges_to_keep = edge_weights[:max_edges]
-            
-            # Create new graph with selected edges
-            G_simplified = nx.Graph()
-            G_simplified.add_nodes_from(G.nodes(data=True))
-            for weight, u, v in edges_to_keep:
-                G_simplified.add_edge(u, v, weight=weight)
-            
-            G = G_simplified
-        
-        return G
-
-    def _generate_tract_addresses(self, fips_code, road_network, n_addresses=100):
-        """Generate synthetic addresses within the tract using road network bounds"""
-        try:
-            # Get network bounds
-            nodes = list(road_network.nodes())
-            if len(nodes) == 0:
-                return gpd.GeoDataFrame()
-            
-            x_coords = [node[0] for node in nodes]
-            y_coords = [node[1] for node in nodes]
-            
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            # Generate random points within network bounds
-            np.random.seed(42)  # Reproducible addresses
-            
-            addresses_data = []
-            for i in range(n_addresses):
-                x = np.random.uniform(x_min, x_max)
-                y = np.random.uniform(y_min, y_max)
-                
-                addresses_data.append({
-                    'address_id': i,
-                    'x': x,
-                    'y': y
-                })
-            
-            # Create GeoDataFrame
-            addresses_gdf = gpd.GeoDataFrame(
-                addresses_data,
-                geometry=gpd.points_from_xy([addr['x'] for addr in addresses_data],
-                                        [addr['y'] for addr in addresses_data]),
-                crs='EPSG:4326'
-            )
-            
-            self._log(f"  ✓ Generated {len(addresses_gdf)} synthetic addresses")
-            return addresses_gdf
-            
-        except Exception as e:
-            self._log(f"  ✗ Error generating addresses: {str(e)}")
-            return gpd.GeoDataFrame()
-
-    def _simplify_network_if_needed(self, road_network, max_nodes, max_edges):
-        """Simplify network if it exceeds size limits"""
-        
-        current_nodes = road_network.number_of_nodes()
-        current_edges = road_network.number_of_edges()
-        
-        if current_nodes <= max_nodes and current_edges <= max_edges:
-            return road_network
-        
-        self._log(f"  Simplifying network: {current_nodes} → {max_nodes} nodes")
-        
-        try:
-            import networkx as nx
-            
-            # FIXED: Convert nodes to indices for np.random.choice
-            all_nodes = list(road_network.nodes())
-            node_indices = np.arange(len(all_nodes))  # Create 1D array of indices
-            
-            # Sample node indices, not the actual node coordinates
-            keep_count = min(max_nodes, len(all_nodes))
-            np.random.seed(42)  # Reproducible simplification
-            
-            # Sample indices
-            selected_indices = np.random.choice(
-                node_indices, 
-                size=keep_count, 
-                replace=False
-            )
-            
-            # Convert back to actual nodes
-            nodes_to_keep = [all_nodes[i] for i in selected_indices]
-            
-            # Create subgraph
-            simplified_network = road_network.subgraph(nodes_to_keep).copy()
-            
-            # Ensure connectivity - if disconnected, keep largest component
-            if not nx.is_connected(simplified_network):
-                # Find largest component
-                largest_component = max(nx.connected_components(simplified_network), key=len)
-                simplified_network = road_network.subgraph(largest_component).copy()
-            
-            self._log(f"  ✓ Simplified to {simplified_network.number_of_nodes()} nodes, {simplified_network.number_of_edges()} edges")
-            
-            return simplified_network
-            
-        except Exception as e:
-            self._log(f"  ✗ Network simplification failed: {str(e)}")
-            # Return original network if simplification fails
-            return road_network
-
-    def _create_tract_transit_stops(self, tract_geometry, n_stops=3):
-        """Create mock transit stops for tract"""
-        centroid = tract_geometry.centroid
-        
-        stops = []
-        for i in range(n_stops):
-            # Random offset around centroid
-            offset_x = np.random.uniform(-0.005, 0.005)
-            offset_y = np.random.uniform(-0.005, 0.005)
-            stop_point = Point(centroid.x + offset_x, centroid.y + offset_y)
-            
-            # Ensure stop is within tract
-            if tract_geometry.contains(stop_point):
-                stops.append(stop_point)
-            else:
-                # Fallback to centroid
-                stops.append(centroid)
-        
-        return gpd.GeoDataFrame(
-            {'stop_id': range(len(stops))},
-            geometry=stops,
-            crs='EPSG:4326'
-        )
-
-    def _get_county_name_from_fips(self, state_fips, county_fips):
-        """Get county name from FIPS codes"""
-        # Simple mapping - extend as needed
+    def _get_county_name(self, state_fips: str, county_fips: str) -> str:
+        """Map FIPS codes to county name"""
+        # This should be expanded based on your needs
         county_map = {
-            ('47', '065'): 'Hamilton',
-            # Add more counties as needed
+            ('47', '065'): 'Hamilton'
         }
-        
-        return county_map.get((state_fips, county_fips), 'Hamilton')  # Default to Hamilton
-
-    def resolve_fips_list(self, fips_config, state_fips='47', county_fips='065'):
+        return county_map.get((state_fips, county_fips), 'Unknown')
+    
+    def resolve_fips_list(self, fips_config: Dict, state_fips: str, 
+                         county_fips: str) -> List[str]:
         """
-        Resolve FIPS configuration to actual list of FIPS codes
+        Resolve FIPS configuration to list of codes
         
         Parameters:
         -----------
-        fips_config : dict
+        fips_config : Dict
             FIPS configuration from config file
         state_fips : str
             State FIPS code
@@ -958,18 +474,18 @@ class DataLoader:
         Returns:
         --------
         List[str]
-            Resolved list of FIPS codes
+            Resolved FIPS codes
         """
-        # Handle single FIPS
-        if fips_config.get('single_fips'):
-            return [fips_config['single_fips']]
-        
-        # Handle explicit list
+        # Check for explicit list
         target_list = fips_config.get('batch', {}).get('target_list', [])
         if target_list:
             return target_list
         
-        # Handle auto-selection
+        # Check for single FIPS
+        if fips_config.get('single_fips'):
+            return [fips_config['single_fips']]
+        
+        # Auto-selection
         auto_config = fips_config.get('batch', {}).get('auto_select', {})
         if auto_config.get('enabled', True):
             all_fips = self.get_available_fips_codes(state_fips, county_fips)
@@ -979,45 +495,43 @@ class DataLoader:
             if mode == 'all':
                 return all_fips
             elif mode == 'range':
-                start = auto_config.get('range_start', 1) - 1  # 0-indexed
+                start = auto_config.get('range_start', 1) - 1
                 end = auto_config.get('range_end', 5)
                 return all_fips[start:end]
             elif mode == 'sample':
-                sample_size = min(auto_config.get('sample_size', 10), len(all_fips))
-                return np.random.choice(all_fips, size=sample_size, replace=False).tolist()
+                size = min(auto_config.get('sample_size', 10), len(all_fips))
+                return np.random.choice(all_fips, size=size, replace=False).tolist()
         
-        # Default fallback
+        # Default: first 5 tracts
         all_fips = self.get_available_fips_codes(state_fips, county_fips)
-        return all_fips[:5]  # First 5 tracts
+        return all_fips[:5]
 
 
-# Convenience functions for direct imports
-def load_hamilton_county_data(data_dir='./data', roads_file=None, preserve_network=True):
+# Convenience function for backward compatibility
+def load_hamilton_county_data(data_dir: str = './data', 
+                            roads_file: Optional[str] = None) -> Dict:
     """
-    Load all data for Hamilton County analysis with granularity preservation
+    Load all data for Hamilton County analysis
+    
+    This function is used by other modules and must be maintained
+    for backward compatibility.
     
     Parameters:
     -----------
     data_dir : str
         Directory containing data files
     roads_file : str, optional
-        Path to roads shapefile (e.g., 'tl_2023_47065_roads.shp')
-    preserve_network : bool
-        If True, preserves full network granularity (recommended for disaggregation)
+        Path to roads shapefile
         
     Returns:
     --------
-    dict
+    Dict
         Dictionary containing all loaded datasets
     """
     loader = DataLoader(data_dir=data_dir)
     
     print("\n" + "="*60)
     print("GRANITE: Loading Hamilton County Data")
-    if preserve_network:
-        print("Network Granularity: PRESERVED for disaggregation")
-    else:
-        print("Network Granularity: SIMPLIFIED (not recommended)")
     print("="*60 + "\n")
     
     # Load all datasets
@@ -1029,14 +543,15 @@ def load_hamilton_county_data(data_dir='./data', roads_file=None, preserve_netwo
         'addresses': loader.load_address_points()
     }
     
-    # Create network graph with granularity preservation
-    if preserve_network:
-        data['road_network'] = loader.create_network_graph(data['roads'])
-    else:
-        # Use the old limited approach
-        data['road_network'] = loader._create_preserved_network(
-            data['roads'], max_nodes=10000, max_edges=20000, preserve_network=False
-        )
+    # Create network graph
+    data['road_network'] = loader.create_network_graph(data['roads'])
+    
+    # Merge SVI with census tracts
+    data['tracts_with_svi'] = data['census_tracts'].merge(
+        data['svi'],
+        on='FIPS',
+        how='inner'
+    )
     
     print("\n" + "="*60)
     print("Data Loading Complete!")

@@ -1,12 +1,4 @@
-"""
-Main disaggregation pipeline for GRANITE
-"""
-from .pipeline import (
-    GRANITEPipeline,
-    run_granite_pipeline
-)
+"""Disaggregation pipeline module for GRANITE framework"""
+from .pipeline import GRANITEPipeline
 
-__all__ = [
-    'GRANITEPipeline',
-    'run_granite_pipeline'
-]
+__all__ = ['GRANITEPipeline']

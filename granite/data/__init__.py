@@ -1,6 +1,4 @@
-"""
-Data loading and preprocessing modules for GRANITE
-"""
+"""Data loading module for GRANITE framework"""
 from .loaders import (
     DataLoader,
     load_hamilton_county_data

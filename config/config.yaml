@@ -1,144 +1,94 @@
-# GRANITE Framework Configuration - Optimized Version
-# Updated: 2025-07-07 with R optimizations and smart sampling
+# GRANITE Framework Configuration
+# Graph-Refined Accessibility Network for Integrated Transit Equity
+# All parameters in this file are functional and used by the codebase
 
 data:
+  # Geographic scope
   state: "Tennessee"
   state_fips: "47"
   county: "Hamilton"
   county_fips: "065"
   census_year: 2020
   
-  # Processing mode selection
-  processing_mode: "fips"  # "county" (original, memory-intensive) or "fips" (memory-efficient)
+  # Processing mode: "county" or "fips"
+  processing_mode: "fips"
   
   # FIPS-based processing configuration
   fips_config:
-    # Single tract processing
-    single_fips: null  # e.g., "47065001100" for specific tract
+    # Single tract processing (set to FIPS code or null)
+    single_fips: null
     
     # Batch processing options
     batch:
-      # Explicit list of FIPS codes to process
-      target_list: []  # e.g., ["47065001100", "47065001200", "47065001300"]
-      
-      # Auto-selection for batch processing
+      target_list: []  # Explicit FIPS codes, e.g., ["47065001100", "47065001200"]
       auto_select:
         enabled: true
-        mode: "range"        # "all", "range", or "sample"
-        range_start: 1       # Start from tract 1
-        range_end: 5         # Process first 5 tracts
-        sample_size: 10      # If mode is "sample", how many random tracts
+        mode: "range"  # "all", "range", or "sample"
+        range_start: 1
+        range_end: 5
+        sample_size: 10  # Only used if mode is "sample"
     
-    # Memory management settings
+    # Memory management
     memory:
-      tract_buffer_degrees: 0.01    # Buffer around each tract (degrees)
-      max_network_nodes: 10000      # Maximum nodes per tract network
-      max_network_edges: 20000      # Maximum edges per tract network
+      tract_buffer_degrees: 0.01  # Buffer around tract boundary
+      max_network_nodes: 10000    # Maximum nodes per tract
+      max_network_edges: 20000    # Maximum edges per tract
+      preserve_network: true      # Preserve full network granularity
   
-  # Local data files (original settings)
+  # Data file paths
   svi_file: "data/raw/SVI2020_US_tract.csv"
-  roads_file: "data/raw/tl_2023_47065_roads.shp" 
+  roads_file: "data/raw/tl_2023_47065_roads.shp"
   census_tracts_file: "data/raw/tl_2020_47_tract.shp"
   
-  # Fallback settings for address generation
-  n_synthetic_addresses: 1000
-  bbox: [-85.5, 35.0, -85.0, 35.5]  # Hamilton County bounding box
-
-# GNN model settings
-model:
-  type: "standard"
-  input_dim: 5
-  hidden_dim: 64              # Will be reduced to 32 for FIPS mode automatically
-  output_dim: 3
-  dropout: 0.2
-  epochs: 100                 # Default epochs (can be overridden by command line)
-  learning_rate: 0.01
-
-# MetricGraph settings 
-metricgraph:
-  alpha: 1.5
-  mesh_resolution: 0.05       # Optimized resolution for efficiency
-  formula: "y ~ gnn_kappa + gnn_alpha + gnn_tau"
+  # Address generation
+  n_addresses_per_tract: 100
   
-  # R Processing Optimizations
-  r_optimizations:
-    enabled: true             # Enable R processing optimizations
-    max_edges: 300           # Maximum edges for MetricGraph (memory limit)
-    batch_size: 50           # R batch processing size
-    enable_gc: true           # Enable garbage collection in R
-    
-  # Smart Network Sampling 
-  smart_sampling:
-    enabled: true            # Enable smart network sampling (set to true to activate)
-    max_edges: 300            # Maximum edges after sampling
-    preserve_backbone: true   # Preserve high-centrality edges
-    spatial_coverage: true    # Maintain spatial coverage
-    connectivity_check: true  # Ensure network remains connected
-    
-  # FIPS-specific MetricGraph settings
-  fips_mode:
-    mesh_resolution: 0.05     # Coarser for efficiency
-    max_nodes_override: 8000  # Override for very large tracts
-    enable_smart_sampling: true  # Enable smart sampling for FIPS mode by default
-
-# Output settings
+# GNN model configuration
+model:
+  input_dim: 5      # Number of input features
+  hidden_dim: 64    # Hidden layer dimension
+  output_dim: 3     # SPDE parameters: kappa, alpha, tau
+  dropout: 0.2
+  epochs: 100
+  learning_rate: 0.01
+  
+  # Training parameters
+  spatial_weight: 1.0      # Weight for spatial smoothness loss
+  regularization_weight: 0.01  # Weight for parameter regularization
+  
+# MetricGraph configuration
+metricgraph:
+  # Whittle-Matérn parameters
+  alpha: 1.5              # Smoothness parameter
+  mesh_resolution: 0.05   # Mesh resolution for SPDE
+  
+  # R processing limits
+  max_edges: 2000         # Maximum edges for MetricGraph
+  batch_size: 300         # Edge batch processing size
+  
+  # Smart sampling (reduces network complexity)
+  enable_sampling: false   # Enable smart network sampling
+  sampling_strategy: "centrality"  # "centrality" or "spatial"
+  
+# Output configuration
 output:
   save_predictions: true
   save_features: true
-  save_validation: true
+  save_model: true
   save_plots: true
   
-  # FIPS-specific output options
-  fips_output:
-    individual_tract_folders: true    # Create separate folder for each tract
-    batch_summary: true              # Create batch processing summary
-    combined_predictions: true       # Combine all tract predictions into one file
-
-# Processing control settings 
+  # Output organization
+  create_tract_folders: true
+  save_batch_summary: true
+  
+# Processing configuration
 processing:
-  parallel_tracts: false      # Enable parallel processing of multiple tracts
-  max_workers: 4             # Number of parallel workers (if parallel enabled)
-  continue_on_error: true    # Continue batch processing if individual tracts fail
-  memory_monitoring: true    # Monitor memory usage during processing
+  continue_on_error: true  # Continue batch processing on individual failures
+  verbose: true            # Detailed logging
+  random_seed: 42         # For reproducibility
   
-  # Memory optimization settings
-  memory_optimization:
-    enable_sampling_auto: true    # Automatically enable sampling for large networks
-    sampling_threshold: 3000      # Auto-enable sampling above this many edges
-    force_gc_frequency: 5         # Force garbage collection every N operations
-    max_memory_gb: 8              # Memory limit before forcing optimizations
-
-# Logging and debugging
-logging:
-  level: "INFO"              # DEBUG, INFO, WARNING, ERROR
-  save_logs: true
-  log_file: "logs/granite.log"
-  
-  # NEW: Optimization logging
-  log_optimizations: true    # Log optimization decisions
-  log_memory_usage: true     # Log memory usage
-
-# Experimental features (placeholders only... not implemented yet)
-experimental:
-  advanced_network_simplification: false
-  custom_interpolation_methods: false
-  gpu_acceleration: false
-  
-  Advanced R optimizations
-  r_advanced:
-    custom_tolerance: false        
-    parallel_r_processing: false   
-    memory_mapped_edges: false    
-  
-# Model validation settings
+# Validation configuration
 validation:
-  cross_validation_folds: 5
-  test_split: 0.2
-  random_seed: 42
-  
-# Visualization settings
-visualization:
-  figure_size: [12, 8]
-  dpi: 300
-  color_scheme: "viridis"
-  save_intermediate_plots: false
+  compute_metrics: true
+  tract_aggregation: true  # Validate mass preservation
+  uncertainty_calibration: true

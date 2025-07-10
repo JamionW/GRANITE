@@ -1,544 +1,324 @@
 """
 MetricGraph R interface for GRANITE framework
+
+This module provides the interface to the R MetricGraph package for
+Whittle-Matérn spatial modeling on metric graphs.
 """
 import numpy as np
 import pandas as pd
 import warnings
+import time
+from datetime import datetime
+from typing import Optional, Tuple, Dict
+
+# Suppress R environment warnings
 warnings.filterwarnings("ignore", message="Environment variable.*redefined by R")
 warnings.filterwarnings("ignore", category=UserWarning, module="rpy2")
+
 import rpy2.robjects as ro
-from rpy2.robjects import pandas2ri, default_converter
-from rpy2.robjects.conversion import localconverter
+from rpy2.robjects import pandas2ri
 from rpy2.robjects.packages import importr
-from datetime import datetime
-import networkx as nx
-from sklearn.cluster import KMeans
-from scipy.spatial.distance import cdist
-import gc
+from rpy2.robjects.conversion import localconverter
 
 
 class MetricGraphInterface:
-    """Interface to R MetricGraph package for spatial modeling"""
+    """Interface to R MetricGraph package for Whittle-Matérn spatial modeling"""
     
-    def __init__(self, verbose=True):
-        self.verbose = verbose
+    def __init__(self, config: Dict = None, verbose: bool = True):
+        """
+        Initialize MetricGraph interface
         
-        # Import R packages
-        self._log("Initializing R interface...")
+        Parameters:
+        -----------
+        config : Dict
+            Configuration dictionary
+        verbose : bool
+            Enable verbose logging
+        """
+        self.verbose = verbose
+        self.config = config or {}
+        self.mg_config = self.config.get('metricgraph', {})
+        
+        # Initialize timing
+        self.timing_stats = {}
+        
+        self._log("Initializing MetricGraph R interface...")
         
         try:
-            import rpy2.robjects as ro
-            from rpy2.robjects.packages import importr
-            from rpy2.robjects.conversion import localconverter
-            import subprocess
-            import os
-            
-            # Use modern rpy2 converter
+            # Initialize R interface
             self.converter = ro.default_converter + pandas2ri.converter
-            self._log("  - Modern rpy2 converter initialized")
-            
-            # Force rpy2 to use same library paths as direct R
-            self._log("  Synchronizing R library paths...")
-            try:
-                result = subprocess.run(['R', '--slave', '-e', 'cat(.libPaths(), sep="\\n")'], 
-                                    capture_output=True, text=True, timeout=10)
-                if result.returncode == 0:
-                    r_lib_paths = [path.strip() for path in result.stdout.strip().split('\n') if path.strip()]
-                    
-                    # Set the same paths in rpy2 session
-                    path_str = ', '.join([f'"{path}"' for path in r_lib_paths])
-                    ro.r(f'.libPaths(c({path_str}))')
-                    self._log(f"  - Synchronized library paths: {r_lib_paths}")
-                else:
-                    self._log(f"  *!*  Could not sync library paths: {result.stderr}")
-            except Exception as e:
-                self._log(f"  *!*  Library path sync failed: {e}")
-            
             self.base = importr('base')
             
-            # Try to load MetricGraph
+            # Load MetricGraph package
             try:
                 self.mg = importr('MetricGraph')
-                self._log("  - MetricGraph package loaded")
+                self._log("MetricGraph package loaded successfully")
                 
-                # Define optimized R functions
-                self._define_optimized_r_functions()
-                self._log("  - Optimized R functions defined")
+                # Define R functions
+                self._define_r_functions()
                 
             except Exception as e:
-                self._log(f"  x!x MetricGraph failed to load: {e}")
-                self._log("  x!x  Skipping R function definitions (MetricGraph not available)")
+                self._log(f"Warning: MetricGraph package not available: {e}")
                 self.mg = None
                 
         except Exception as e:
-            self._log(f"  x!x Failed to initialize R interface: {str(e)}")
+            self._log(f"Error initializing R interface: {str(e)}")
             self.mg = None
-        
-    def _log(self, message):
-        """Logging with timestamp"""
+    
+    def _log(self, message: str):
+        """Log message with timestamp"""
         if self.verbose:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[{timestamp}] {message}")
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            print(f"[{timestamp}] MetricGraph: {message}")
     
-    def _define_optimized_r_functions(self):
-        """Define optimized R functions for MetricGraph operations"""
-        
+    def _log_timing(self, operation: str, start_time: float):
+        """Log operation timing"""
+        elapsed = time.time() - start_time
+        self.timing_stats[operation] = elapsed
+        if self.verbose:
+            self._log(f"{operation} completed in {elapsed:.2f}s")
+    
+    def _define_r_functions(self):
+        """Define R functions for MetricGraph operations"""
         if self.mg is None:
-            self._log("  *!*  Skipping R function definitions (MetricGraph not available)")
             return
         
-        # Test basic MetricGraph functionality first
-        try:
-            test_code = '''
-            test_mg <- function() {
-                tryCatch({
-                    edges <- list(matrix(c(0,0,1,0), nrow=2, ncol=2))
-                    graph <- metric_graph$new(edges = edges)
-                    return("SUCCESS")
-                }, error = function(e) {
-                    return(paste("ERROR:", e$message))
-                })
-            }
-            '''
-            ro.r(test_code)
-            result = ro.r('test_mg()')
-            
-            if "SUCCESS" not in str(result):
-                self._log(f"  x!x MetricGraph test failed: {result}")
-                self.mg = None
-                return
-            else:
-                self._log("  x!x MetricGraph basic test passed")
-                
-        except Exception as e:
-            self._log(f"  x!x MetricGraph test error: {e}")
-            self.mg = None
-            return
+        # Get configuration parameters
+        max_edges = self.mg_config.get('max_edges', 2000)
+        batch_size = self.mg_config.get('batch_size', 300)
         
-        try:
-            ro.r('''
-            create_optimized_metric_graph <- function(nodes, edges, batch_size = 300, max_edges = 2000) {
-                cat("Creating MetricGraph with", nrow(nodes), "nodes and", nrow(edges), "edges\\n")
-                
-                # Validate inputs
-                if(nrow(nodes) == 0 || nrow(edges) == 0) {
-                    cat("ERROR: Empty input data\\n")
-                    return(list(FALSE, "Empty input data"))
-                }
-                
-                # Ensure proper data types AND COLUMN NAMES
-                V <- as.matrix(nodes[, c("x", "y")])
-                E <- as.matrix(edges[, c("from", "to")])
-                colnames(V) <- c("x", "y")
-                colnames(E) <- c("from", "to")
-                
-                # Limit edges if too many
-                #if(nrow(E) > max_edges) {
-                #    cat("Limiting to", max_edges, "edges for memory efficiency\\n")
-                #    E <- E[1:max_edges, , drop = FALSE]
-                #}
-                
-                # OPTIMIZATION 1: Batch edge processing
-                n_edges <- nrow(E)
-                n_batches <- ceiling(n_edges / batch_size)
-                
-                cat("Processing", n_edges, "edges in", n_batches, "batches of size", batch_size, "\\n")
-                
-                edge_list <- vector("list", n_edges)
-                edge_count <- 0
-                
-                for(batch_idx in 1:n_batches) {
-                    start_idx <- (batch_idx - 1) * batch_size + 1
-                    end_idx <- min(batch_idx * batch_size, n_edges)
-                    
-                    # Process batch
-                    batch_edges <- E[start_idx:end_idx, , drop = FALSE]
-                    
-                    for(i in 1:nrow(batch_edges)) {
-                        from_idx <- batch_edges[i, 1]
-                        to_idx <- batch_edges[i, 2]
-                        
-                        if(from_idx > 0 && to_idx > 0 && from_idx <= nrow(V) && to_idx <= nrow(V)) {
-                            edge_count <- edge_count + 1
-                            
-                            # Create edge matrix more efficiently
-                            edge_matrix <- matrix(c(V[from_idx, ], V[to_idx, ]), nrow = 2, byrow = TRUE)
-                            colnames(edge_matrix) <- c("x", "y")
-                            edge_list[[edge_count]] <- edge_matrix
-                        }
-                    }
-                    
-                    # Memory management
-                    if(batch_idx %% 3 == 0) {
-                        gc()
-                        cat("Processed batch", batch_idx, "/", n_batches, "\\n")
-                    }
-                }
-                
-                if(edge_count == 0) {
-                    cat("ERROR: No valid edges found\\n")
-                    return(list(FALSE, "No valid edges"))
-                }
-                
-                # Trim edge list to actual size
-                edge_list <- edge_list[1:edge_count]
-                
-                cat("Creating MetricGraph object with", edge_count, "valid edges\n")
-                cat("This may take several minutes for large networks...\n")
-
-                tryCatch({
-                    cat("Step 1/3: Initializing MetricGraph...\n")
-                    graph <- metric_graph$new(
-                        edges = edge_list,
-                        longlat = FALSE,
-                        verbose = 1,
-                        perform_merges = TRUE,
-                        tolerance = list(
-                            vertex_vertex = 1e-6,
-                            vertex_edge = 1e-6,
-                            edge_edge = 1e-6
-                        )
-                    )
-                    cat("Step 2/3: MetricGraph created, finalizing...\n")
-                    cat("Step 3/3: MetricGraph ready!\n")
-                    cat("SUCCESS: MetricGraph created successfully\n")
-                    return(list(TRUE, graph))
-                    
-                }, error = function(e) {
-                    cat("ERROR in MetricGraph creation:", conditionMessage(e), "\n")
-                    
-                    # FALLBACK: Try with reduced network if still failing
-                    if(edge_count > 1000) {
-                        cat("Attempting fallback with first 1000 edges\n")
-                        fallback_edges <- edge_list[1:1000]
-                        
-                        tryCatch({
-                            graph <- metric_graph$new(
-                                edges = fallback_edges,
-                                longlat = FALSE,
-                                verbose = 0
-                            )
-                            cat("FALLBACK SUCCESS: Created graph with 1000 edges\n")
-                            return(list(TRUE, graph))
-                        }, error = function(e2) {
-                            cat("FALLBACK FAILED:", conditionMessage(e2), "\n")
-                            return(list(FALSE, paste("Creation failed:", conditionMessage(e))))
-                        })
-                    } else {
-                        return(list(FALSE, paste("Creation failed:", conditionMessage(e))))
-                    }
-                })
-            }
-            ''')
+        ro.r(f'''
+        create_metric_graph <- function(nodes, edges, max_edges = {max_edges}, batch_size = {batch_size}) {{
+            # Validate inputs
+            if(nrow(nodes) == 0 || nrow(edges) == 0) {{
+                return(list(success = FALSE, error = "Empty input data"))
+            }}
             
-            # Define fitting and prediction function
-            ro.r('''
-            fit_and_predict_optimized <- function(graph, observations, prediction_locations, 
-                                                 gnn_features = NULL, alpha = 1.5) {
-                
-                cat("Fitting Whittle-Matérn model with optimized parameters...\\n")
-                
-                tryCatch({
-                    # OPTIMIZATION 3: Streamlined model fitting
-                    
-                    # Build mesh with coarser resolution for efficiency
-                    graph$build_mesh(h = 0.05)  # Coarser than default
-                    
-                    # Add observations to graph
-                    graph$add_observations(
-                        data = observations,
-                        tolerance = 1e-6
-                    )
-                    
-                    # Prepare model formula
-                    if(!is.null(gnn_features) && ncol(gnn_features) >= 3) {
-                        # Include GNN features as covariates
-                        formula_str <- "y ~ gnn_kappa + gnn_alpha + gnn_tau"
-                        
-                        # Add GNN features to graph data
-                        graph_data <- graph$get_data()
-                        graph_data$gnn_kappa <- gnn_features[, 1]
-                        graph_data$gnn_alpha <- gnn_features[, 2] 
-                        graph_data$gnn_tau <- gnn_features[, 3]
-                        
-                        graph$clear_observations()
-                        graph$add_observations(data = graph_data, tolerance = 1e-6)
-                    } else {
-                        formula_str <- "y ~ 1"  # Intercept only
-                    }
-                    
-                    # Fit model
-                    model <- graph_spde(
-                        graph = graph,
-                        alpha = alpha,
-                        model = list(formula = as.formula(formula_str))
-                    )
-                    
-                    # Project prediction locations
-                    pred_projected <- graph$project_observations(
-                        prediction_locations,
-                        tolerance = 1e-6
-                    )
-                    
-                    # Make predictions
-                    preds <- predict(model, 
-                                    newdata = pred_projected,
-                                    normalized = TRUE)
-                    
-                    result <- data.frame(
-                        mean = preds$mean,
-                        sd = sqrt(pmax(preds$variance, 1e-8)),
-                        q025 = preds$mean - 1.96 * sqrt(pmax(preds$variance, 1e-8)),
-                        q975 = preds$mean + 1.96 * sqrt(pmax(preds$variance, 1e-8))
-                    )
-                    
-                    cat("Predictions completed successfully\\n")
-                    return(result)
-                    
-                }, error = function(e) {
-                    cat("Error in fitting/prediction:", conditionMessage(e), "\\n")
-                    
-                    # Enhanced fallback using observation statistics
-                    n_pred <- nrow(prediction_locations)
-                    obs_mean <- mean(observations$y, na.rm = TRUE)
-                    obs_sd <- sd(observations$y, na.rm = TRUE)
-                    
-                    fallback_result <- data.frame(
-                        mean = rep(obs_mean, n_pred),
-                        sd = rep(obs_sd * 0.5, n_pred),  # Conservative uncertainty
-                        q025 = rep(obs_mean - 1.96 * obs_sd * 0.5, n_pred),
-                        q975 = rep(obs_mean + 1.96 * obs_sd * 0.5, n_pred)
-                    )
-                    
-                    cat("Using enhanced statistical fallback\\n")
-                    return(fallback_result)
-                })
-            }
-            ''')
+            # Prepare data
+            V <- as.matrix(nodes[, c("x", "y")])
+            E <- as.matrix(edges[, c("from", "to")])
             
-            self._log("  - Optimized R functions defined successfully")
+            # Check size constraints
+            if(nrow(E) > max_edges) {{
+                cat("Warning: Network has", nrow(E), "edges, exceeding limit of", max_edges, "\\n")
+            }}
             
-        except Exception as e:
-            self._log(f"  x!x Error defining optimized R functions: {e}")
-            self.mg = None
+            # Process edges in batches
+            n_edges <- nrow(E)
+            edge_list <- vector("list", n_edges)
+            
+            for(i in 1:n_edges) {{
+                from_idx <- E[i, 1]
+                to_idx <- E[i, 2]
+                
+                if(from_idx > 0 && to_idx > 0 && from_idx <= nrow(V) && to_idx <= nrow(V)) {{
+                    edge_matrix <- matrix(c(V[from_idx, ], V[to_idx, ]), nrow = 2, byrow = TRUE)
+                    colnames(edge_matrix) <- c("x", "y")
+                    edge_list[[i]] <- edge_matrix
+                }}
+                
+                # Progress reporting
+                if(i %% batch_size == 0) {{
+                    cat("Processed", i, "/", n_edges, "edges\\n")
+                }}
+            }}
+            
+            # Remove NULL entries
+            edge_list <- edge_list[!sapply(edge_list, is.null)]
+            
+            if(length(edge_list) == 0) {{
+                return(list(success = FALSE, error = "No valid edges"))
+            }}
+            
+            # Create MetricGraph
+            tryCatch({{
+                graph <- metric_graph$new(
+                    edges = edge_list,
+                    longlat = FALSE,
+                    verbose = 0
+                )
+                return(list(success = TRUE, graph = graph))
+            }}, error = function(e) {{
+                return(list(success = FALSE, error = conditionMessage(e)))
+            }})
+        }}
+        
+        fit_whittle_matern <- function(graph, observations, gnn_features = NULL, 
+                                     alpha = 1.5, mesh_resolution = 0.05) {{
+            tryCatch({{
+                # Build mesh
+                graph$build_mesh(h = mesh_resolution)
+                
+                # Add observations
+                graph$add_observations(
+                    data = observations,
+                    tolerance = 1e-6
+                )
+                
+                # Prepare formula
+                if(!is.null(gnn_features) && ncol(gnn_features) >= 3) {{
+                    # Add GNN features as covariates
+                    graph_data <- graph$get_data()
+                    graph_data$gnn_kappa <- gnn_features[, 1]
+                    graph_data$gnn_alpha <- gnn_features[, 2] 
+                    graph_data$gnn_tau <- gnn_features[, 3]
+                    
+                    graph$clear_observations()
+                    graph$add_observations(data = graph_data, tolerance = 1e-6)
+                    
+                    formula_str <- "y ~ gnn_kappa + gnn_alpha + gnn_tau"
+                }} else {{
+                    formula_str <- "y ~ 1"
+                }}
+                
+                # Fit Whittle-Matérn model
+                model <- graph_spde(
+                    graph = graph,
+                    alpha = alpha,
+                    model = list(formula = as.formula(formula_str))
+                )
+                
+                return(list(success = TRUE, model = model))
+                
+            }}, error = function(e) {{
+                return(list(success = FALSE, error = conditionMessage(e)))
+            }})
+        }}
+        
+        predict_whittle_matern <- function(model, graph, prediction_locations) {{
+            tryCatch({{
+                # Project prediction locations
+                pred_projected <- graph$project_observations(
+                    prediction_locations,
+                    tolerance = 1e-6
+                )
+                
+                # Make predictions
+                preds <- predict(model, 
+                               newdata = pred_projected,
+                               normalized = TRUE)
+                
+                # Format results
+                result <- data.frame(
+                    mean = preds$mean,
+                    sd = sqrt(pmax(preds$variance, 1e-8)),
+                    q025 = preds$mean - 1.96 * sqrt(pmax(preds$variance, 1e-8)),
+                    q975 = preds$mean + 1.96 * sqrt(pmax(preds$variance, 1e-8))
+                )
+                
+                return(result)
+                
+            }}, error = function(e) {{
+                cat("Prediction error:", conditionMessage(e), "\\n")
+                return(NULL)
+            }})
+        }}
+        ''')
     
-    def create_graph(self, nodes_df, edges_df, enable_sampling=False, max_edges=2000, batch_size=300):
+    def create_graph(self, nodes_df: pd.DataFrame, edges_df: pd.DataFrame, 
+                    enable_sampling: bool = None) -> Optional[object]:
         """
-        Create MetricGraph object with optimized processing
+        Create MetricGraph object from network data
         
         Parameters:
         -----------
         nodes_df : pd.DataFrame
-            Nodes with x, y coordinates  
+            Nodes with x, y coordinates
         edges_df : pd.DataFrame
-            Edges with from, to indices
-        enable_sampling : bool
-            Whether to enable smart network sampling (NEW PARAMETER)
-        max_edges : int
-            Maximum edges to process (for memory management)
-        batch_size : int
-            Batch size for R processing
+            Edges with from, to indices (0-based)
+        enable_sampling : bool, optional
+            Override config setting for smart sampling
             
         Returns:
         --------
-        R object or None
-            MetricGraph object or None if failed
+        R MetricGraph object or None if failed
         """
         if self.mg is None:
-            self._log("*!*  MetricGraph not available - returning None")
+            self._log("MetricGraph not available")
             return None
-            
-        self._log("Creating MetricGraph object with optimized processing...")
         
+        start_time = time.time()
+        self._log(f"Creating MetricGraph from {len(nodes_df)} nodes, {len(edges_df)} edges")
+        
+        # Check if sampling should be enabled
+        if enable_sampling is None:
+            enable_sampling = self.mg_config.get('enable_sampling', False)
+        
+        # Apply smart sampling if enabled
+        if enable_sampling and len(edges_df) > self.mg_config.get('max_edges', 2000):
+            nodes_df, edges_df = self._apply_smart_sampling(nodes_df, edges_df)
+        
+        # Prepare data
+        nodes_clean = nodes_df[['x', 'y']].copy()
+        edges_clean = edges_df[['from', 'to']].copy()
+        
+        # Adjust indices for R (1-based)
+        edges_clean['from'] += 1
+        edges_clean['to'] += 1
+        
+        # Call R function
         try:
-            # Validate input data
-            if nodes_df.empty or edges_df.empty:
-                self._log("  ✗ Empty input data")
-                return None
-                
-            # Apply smart sampling if enabled
-            if enable_sampling and len(edges_df) > max_edges:
-                self._log(f"  Applying smart network sampling (>{max_edges} edges)")
-                nodes_df, edges_df = self._apply_smart_sampling(
-                    nodes_df, edges_df, max_edges
-                )
-                
-            # Ensure proper data types and column names
-            nodes_clean = nodes_df[['x', 'y']].copy().astype(float)
-            edges_clean = edges_df[['from', 'to']].copy().astype(int)
-            
-            # Adjust indices to be 1-based for R
-            edges_clean['from'] += 1
-            edges_clean['to'] += 1
-            
-            # Log data info
-            self._log(f"  - Nodes: {len(nodes_clean)} points")
-            self._log(f"  - Edges: {len(edges_clean)} connections")
-            self._log(f"  - Node bounds: x=[{nodes_clean.x.min():.3f}, {nodes_clean.x.max():.3f}], "
-                    f"y=[{nodes_clean.y.min():.3f}, {nodes_clean.y.max():.3f}]")
-            
-            # Convert to R and call optimized function
             with localconverter(self.converter):
                 r_nodes = ro.conversion.py2rpy(nodes_clean)
                 r_edges = ro.conversion.py2rpy(edges_clean)
                 
-                create_func = ro.r['create_optimized_metric_graph']
-                result = create_func(r_nodes, r_edges, batch_size, max_edges)
+                create_func = ro.r['create_metric_graph']
+                result = create_func(
+                    r_nodes, 
+                    r_edges,
+                    self.mg_config.get('max_edges', 2000),
+                    self.mg_config.get('batch_size', 300)
+                )
                 
-                # Extract success status and graph
-                success = result[0][0]  # First element of result list
+                success = result[0][0]
                 
                 if success:
-                    graph = result[1]  # Second element is the graph
-                    self._log("  - MetricGraph created successfully")
+                    graph = result[1]
+                    self._log_timing("Graph creation", start_time)
                     return graph
                 else:
                     error_msg = str(result[1])
-                    self._log(f"  x!x MetricGraph creation failed: {error_msg}")
+                    self._log(f"Graph creation failed: {error_msg}")
                     return None
                     
         except Exception as e:
-            self._log(f"  x!x Error in optimized graph creation: {str(e)}")
+            self._log(f"Error creating graph: {str(e)}")
             return None
-            
-    def _apply_smart_sampling(self, nodes_df, edges_df, max_edges):
-        """
-        Apply smart network sampling while preserving important connections
-        This is a CONFIGURABLE smart sampling feature
-        """
-        self._log(f"  Smart sampling: {len(edges_df)} -> {max_edges} edges")
-        
-        # Create networkx graph for analysis
-        G = nx.Graph()
-        
-        # Add nodes
-        for idx, row in nodes_df.iterrows():
-            G.add_node(idx, pos=(row['x'], row['y']))
-            
-        # Add edges
-        for _, row in edges_df.iterrows():
-            G.add_edge(row['from'], row['to'])
-            
-        # Strategy 1: Keep high-centrality edges
-        try:
-            edge_centrality = nx.edge_betweenness_centrality(G, k=min(500, G.number_of_nodes()))
-            high_centrality_edges = sorted(edge_centrality.items(), key=lambda x: x[1], reverse=True)
-            backbone_edges = [edge for edge, _ in high_centrality_edges[:max_edges//3]]
-        except:
-            # Fallback if centrality calculation fails
-            backbone_edges = list(G.edges())[:max_edges//3]
-            
-        # Strategy 2: Spatial sampling for coverage
-        edge_positions = []
-        edge_list = list(G.edges())
-        
-        for edge in edge_list:
-            node1_pos = G.nodes[edge[0]]['pos']
-            node2_pos = G.nodes[edge[1]]['pos']
-            edge_center = ((node1_pos[0] + node2_pos[0])/2, (node1_pos[1] + node2_pos[1])/2)
-            edge_positions.append(edge_center)
-            
-        # Cluster edges spatially
-        n_spatial_edges = max_edges - len(backbone_edges)
-        if n_spatial_edges > 0 and len(edge_list) > n_spatial_edges:
-            n_clusters = min(n_spatial_edges, len(edge_list)//2)
-            if n_clusters > 1:
-                try:
-                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-                    clusters = kmeans.fit_predict(edge_positions)
-                    
-                    spatial_edges = []
-                    for cluster_id in range(n_clusters):
-                        cluster_indices = np.where(clusters == cluster_id)[0]
-                        if len(cluster_indices) > 0:
-                            # Take edge closest to cluster center
-                            cluster_center = kmeans.cluster_centers_[cluster_id]
-                            distances = [np.linalg.norm(np.array(edge_positions[i]) - cluster_center) 
-                                       for i in cluster_indices]
-                            best_idx = cluster_indices[np.argmin(distances)]
-                            spatial_edges.append(edge_list[best_idx])
-                except:
-                    # Fallback: uniform sampling
-                    spatial_edges = edge_list[:n_spatial_edges]
-        else:
-            spatial_edges = edge_list[:n_spatial_edges] if n_spatial_edges > 0 else []
-            
-        # Combine selected edges
-        selected_edges = set(backbone_edges + spatial_edges)
-        
-        # Create filtered dataframes
-        edge_set = set()
-        for edge in selected_edges:
-            edge_set.add((min(edge), max(edge)))  # Normalize edge direction
-            
-        # Filter edges dataframe
-        filtered_edges = []
-        for _, row in edges_df.iterrows():
-            edge_tuple = (min(row['from'], row['to']), max(row['from'], row['to']))
-            if edge_tuple in edge_set:
-                filtered_edges.append(row)
-                
-        if filtered_edges:
-            sampled_edges_df = pd.DataFrame(filtered_edges)
-        else:
-            # Fallback: take first max_edges
-            sampled_edges_df = edges_df.head(max_edges)
-            
-        # Keep all nodes (they'll be filtered automatically by MetricGraph)
-        if len(sampled_edges_df) > 0:
-            # Quick connectivity check using sampled edges
-            sampled_network = nx.Graph()
-            for _, edge in sampled_edges_df.iterrows():
-                sampled_network.add_edge(edge['from'], edge['to'])
-            
-            # If disconnected, add connecting edges
-            if not nx.is_connected(sampled_network):
-                self._log(f"  Network disconnected, adding connecting edges...")
-                components = list(nx.connected_components(sampled_network))
-                
-                # Connect largest component to others
-                largest_component = max(components, key=len)
-                for component in components:
-                    if component != largest_component:
-                        # Find shortest path in original network
-                        try:
-                            comp_node = list(component)[0]
-                            large_node = list(largest_component)[0]
-                            
-                            # Add edge connecting components
-                            connecting_edge = {
-                                'from': comp_node,
-                                'to': large_node
-                            }
-                            sampled_edges_df = pd.concat([
-                                sampled_edges_df, 
-                                pd.DataFrame([connecting_edge])
-                            ], ignore_index=True)
-                        except:
-                            pass  # Skip if connection fails
-
-        reduction = 1 - (len(sampled_edges_df) / len(edges_df))
-        self._log(f"  Sampling result: {reduction:.1%} reduction")
-
-        return nodes_df, sampled_edges_df
     
-    def disaggregate_svi(self, metric_graph, observations, prediction_locations, 
-                        nodes_df, gnn_features=None, alpha=1.5):
+    def disaggregate_svi(self, metric_graph: object, observations: pd.DataFrame,
+                        prediction_locations: pd.DataFrame, 
+                        gnn_features: Optional[pd.DataFrame] = None) -> pd.DataFrame:
         """
-        Perform SVI disaggregation using MetricGraph with optimizations
+        Perform SVI disaggregation using Whittle-Matérn model
+        
+        Parameters:
+        -----------
+        metric_graph : R MetricGraph object
+            The metric graph
+        observations : pd.DataFrame
+            Tract-level SVI observations with x, y, value columns
+        prediction_locations : pd.DataFrame
+            Address locations for prediction with x, y columns
+        gnn_features : pd.DataFrame, optional
+            GNN-learned SPDE parameters
+            
+        Returns:
+        --------
+        pd.DataFrame
+            Predictions with mean, sd, q025, q975 columns
         """
         if metric_graph is None:
-            self._log("*!*  Graph is None - using fallback prediction")
+            self._log("No MetricGraph provided, using fallback")
             return self._fallback_prediction(observations, prediction_locations)
-            
+        
+        start_time = time.time()
+        self._log("Starting Whittle-Matérn disaggregation")
+        
         try:
-            self._log("Performing optimized SVI disaggregation...")
-            
-            # Prepare observations for R
+            # Prepare data
             obs_for_r = observations[['x', 'y']].copy()
-            obs_for_r['y'] = observations.get('svi_score', observations.get('value', 0.5))
+            obs_for_r['y'] = observations['value']
             
-            # Prepare prediction locations
             pred_locs = prediction_locations[['x', 'y']].copy()
             
             with localconverter(self.converter):
@@ -550,37 +330,147 @@ class MetricGraphInterface:
                 if gnn_features is not None:
                     r_gnn_features = ro.conversion.py2rpy(gnn_features)
                 
-                # Call optimized R function
-                fit_predict_func = ro.r['fit_and_predict_optimized']
-                r_result = fit_predict_func(metric_graph, r_obs, r_pred_locs, r_gnn_features, alpha)
+                # Fit model
+                self._log("Fitting Whittle-Matérn model...")
+                fit_func = ro.r['fit_whittle_matern']
+                fit_result = fit_func(
+                    metric_graph,
+                    r_obs,
+                    r_gnn_features,
+                    self.mg_config.get('alpha', 1.5),
+                    self.mg_config.get('mesh_resolution', 0.05)
+                )
+                
+                if not fit_result[0][0]:
+                    self._log(f"Model fitting failed: {fit_result[1]}")
+                    return self._fallback_prediction(observations, prediction_locations)
+                
+                model = fit_result[1]
+                
+                # Make predictions
+                self._log(f"Predicting at {len(prediction_locations)} locations...")
+                predict_func = ro.r['predict_whittle_matern']
+                r_result = predict_func(model, metric_graph, r_pred_locs)
+                
+                if r_result is None:
+                    self._log("Prediction failed, using fallback")
+                    return self._fallback_prediction(observations, prediction_locations)
                 
                 # Convert back to pandas
                 result_df = ro.conversion.rpy2py(r_result)
                 
-                self._log("  - Optimized disaggregation completed")
+                self._log_timing("Disaggregation", start_time)
+                self._log(f"Successfully predicted {len(result_df)} values")
+                
                 return result_df
                 
         except Exception as e:
-            self._log(f"  x!x Error in optimized disaggregation: {str(e)}")
+            self._log(f"Error in disaggregation: {str(e)}")
             return self._fallback_prediction(observations, prediction_locations)
-
-    def _fallback_prediction(self, observations, prediction_locations):
-        """Enhanced fallback prediction using spatial interpolation"""
-        self._log("  Using spatial interpolation fallback")
+    
+    def _apply_smart_sampling(self, nodes_df: pd.DataFrame, 
+                            edges_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Apply smart network sampling to reduce complexity
+        
+        Uses centrality-based or spatial sampling based on configuration
+        """
+        strategy = self.mg_config.get('sampling_strategy', 'centrality')
+        max_edges = self.mg_config.get('max_edges', 2000)
+        
+        self._log(f"Applying {strategy} sampling: {len(edges_df)} -> {max_edges} edges")
+        
+        if strategy == 'centrality':
+            return self._centrality_sampling(nodes_df, edges_df, max_edges)
+        else:
+            return self._spatial_sampling(nodes_df, edges_df, max_edges)
+    
+    def _centrality_sampling(self, nodes_df: pd.DataFrame, 
+                           edges_df: pd.DataFrame, max_edges: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Sample edges based on network centrality"""
+        import networkx as nx
+        
+        # Create networkx graph
+        G = nx.Graph()
+        for _, edge in edges_df.iterrows():
+            G.add_edge(edge['from'], edge['to'])
+        
+        # Calculate edge betweenness centrality
+        try:
+            centrality = nx.edge_betweenness_centrality(G, k=min(100, G.number_of_nodes()))
+            
+            # Sort edges by centrality
+            edge_scores = []
+            for _, edge in edges_df.iterrows():
+                edge_tuple = (edge['from'], edge['to'])
+                score = centrality.get(edge_tuple, centrality.get((edge['to'], edge['from']), 0))
+                edge_scores.append(score)
+            
+            # Select top edges
+            edges_df['centrality'] = edge_scores
+            sampled_edges = edges_df.nlargest(max_edges, 'centrality').drop('centrality', axis=1)
+            
+        except:
+            # Fallback to random sampling
+            sampled_edges = edges_df.sample(n=min(max_edges, len(edges_df)))
+        
+        return nodes_df, sampled_edges
+    
+    def _spatial_sampling(self, nodes_df: pd.DataFrame, 
+                         edges_df: pd.DataFrame, max_edges: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Sample edges based on spatial distribution"""
+        # Calculate edge midpoints
+        edge_midpoints = []
+        for _, edge in edges_df.iterrows():
+            from_node = nodes_df.iloc[edge['from']]
+            to_node = nodes_df.iloc[edge['to']]
+            midpoint = [(from_node['x'] + to_node['x'])/2, (from_node['y'] + to_node['y'])/2]
+            edge_midpoints.append(midpoint)
+        
+        # Use k-means to find representative edges
+        from sklearn.cluster import KMeans
+        n_clusters = min(max_edges, len(edges_df))
+        
+        try:
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            clusters = kmeans.fit_predict(edge_midpoints)
+            
+            # Select one edge per cluster (closest to center)
+            sampled_indices = []
+            for i in range(n_clusters):
+                cluster_edges = np.where(clusters == i)[0]
+                if len(cluster_edges) > 0:
+                    # Find edge closest to cluster center
+                    center = kmeans.cluster_centers_[i]
+                    distances = [np.linalg.norm(np.array(edge_midpoints[j]) - center) 
+                               for j in cluster_edges]
+                    best_idx = cluster_edges[np.argmin(distances)]
+                    sampled_indices.append(best_idx)
+            
+            sampled_edges = edges_df.iloc[sampled_indices]
+            
+        except:
+            # Fallback to random sampling
+            sampled_edges = edges_df.sample(n=min(max_edges, len(edges_df)))
+        
+        return nodes_df, sampled_edges
+    
+    def _fallback_prediction(self, observations: pd.DataFrame, 
+                           prediction_locations: pd.DataFrame) -> pd.DataFrame:
+        """
+        Fallback prediction using inverse distance weighting
+        
+        This maintains the spatial nature of the problem when MetricGraph fails
+        """
+        self._log("Using inverse distance weighting fallback")
         
         n_pred = len(prediction_locations)
-        obs_values = observations.get('svi_score', observations.get('value', [0.5] * len(observations)))
+        obs_values = observations['value'].values
         
-        if isinstance(obs_values, pd.Series):
-            obs_values = obs_values.values
-        elif not isinstance(obs_values, np.ndarray):
-            obs_values = np.array(obs_values)
-            
-        # Simple inverse distance weighting
         predictions = []
         
         for _, pred_loc in prediction_locations.iterrows():
-            # Calculate distances to all observations
+            # Calculate distances to observations
             distances = np.sqrt(
                 (observations['x'] - pred_loc['x'])**2 + 
                 (observations['y'] - pred_loc['y'])**2
@@ -591,7 +481,7 @@ class MetricGraphInterface:
             weights /= weights.sum()
             
             pred_value = np.sum(weights * obs_values)
-            pred_uncertainty = np.std(obs_values) * 0.3  # Conservative uncertainty
+            pred_uncertainty = np.std(obs_values) * 0.3
             
             predictions.append({
                 'mean': pred_value,
@@ -599,16 +489,23 @@ class MetricGraphInterface:
                 'q025': pred_value - 1.96 * pred_uncertainty,
                 'q975': pred_value + 1.96 * pred_uncertainty
             })
-            
+        
         return pd.DataFrame(predictions)
-
-# Convenience function (MISSING from original optimization)
-def create_metricgraph_interface(verbose=True):
-    """Create MetricGraph interface instance with error handling"""
-    try:
-        return MetricGraphInterface(verbose=verbose)
-    except Exception as e:
-        if verbose:
-            print(f"Warning: Could not create MetricGraph interface: {e}")
-            print("Falling back to limited functionality mode")
-        return MetricGraphInterface(verbose=False)  # Try again with minimal setup
+    
+    def get_timing_report(self) -> str:
+        """Get timing statistics report"""
+        if not self.timing_stats:
+            return "No timing data available"
+        
+        report = "\nTiming Report:\n"
+        report += "-" * 30 + "\n"
+        total_time = sum(self.timing_stats.values())
+        
+        for operation, time_taken in self.timing_stats.items():
+            percentage = (time_taken / total_time) * 100
+            report += f"{operation}: {time_taken:.2f}s ({percentage:.1f}%)\n"
+        
+        report += "-" * 30 + "\n"
+        report += f"Total: {total_time:.2f}s\n"
+        
+        return report

@@ -1,8 +1,4 @@
-"""
-Visualization utilities for GRANITE
-"""
+"""Visualization module for GRANITE framework"""
 from .plots import DisaggregationVisualizer
 
-__all__ = [
-    'DisaggregationVisualizer'
-]
+__all__ = ['DisaggregationVisualizer']

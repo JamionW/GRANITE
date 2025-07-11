@@ -59,7 +59,7 @@ model:
 # MetricGraph configuration
 metricgraph:
   # Whittle-Matérn parameters
-  alpha: 1.5              # Smoothness parameter
+  alpha: 1               # Smoothness parameter
   mesh_resolution: 0.05   # Mesh resolution for SPDE
   
   # R processing limits

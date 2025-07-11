@@ -149,7 +149,7 @@ class MetricGraphInterface:
         }}
         
         fit_whittle_matern <- function(graph, observations, gnn_features = NULL, 
-                                     alpha = 1.5, mesh_resolution = 0.05) {{
+                                     alpha = 1, mesh_resolution = 0.05) {{
             tryCatch({{
                 # Build mesh
                 graph$build_mesh(h = mesh_resolution)
@@ -160,16 +160,24 @@ class MetricGraphInterface:
                     data_coords = "spatial",  
                     coord_x = "coord_x",     
                     coord_y = "coord_y",     
-                    tolerance = 1e-6
+                    tolerance = 0.01
                 )
                 
                 # Prepare formula
-                if(!is.null(gnn_features) && ncol(gnn_features) >= 3) {{
+                if(FALSE) {{
+                #if(!is.null(gnn_features) && ncol(gnn_features) >= 3) {{
                     # Add GNN features as covariates
                     graph_data <- graph$get_data()
-                    graph_data$gnn_kappa <- gnn_features[, 1]
-                    graph_data$gnn_alpha <- gnn_features[, 2] 
-                    graph_data$gnn_tau <- gnn_features[, 3]
+                    
+                    # Aggregate GNN features to observation level
+                    gnn_mean_kappa <- mean(gnn_features[, 1], na.rm = TRUE)
+                    gnn_mean_alpha <- mean(gnn_features[, 2], na.rm = TRUE) 
+                    gnn_mean_tau <- mean(gnn_features[, 3], na.rm = TRUE)
+
+                    # Assign single values to single observation
+                    graph_data$gnn_kappa <- gnn_mean_kappa
+                    graph_data$gnn_alpha <- gnn_mean_alpha
+                    graph_data$gnn_tau <- gnn_mean_tau
                     
                     graph$clear_observations()
                     graph$add_observations(
@@ -177,19 +185,19 @@ class MetricGraphInterface:
                         data_coords = "spatial",
                         coord_x = "coord_x", 
                         coord_y = "coord_y",
-                        tolerance = 1e-6
+                        tolerance = 0.01
                     )
                     
-                    formula_str <- "y ~ gnn_kappa + gnn_alpha + gnn_tau"
+                    formula_str <- "svi_value ~ gnn_kappa + gnn_alpha + gnn_tau"
                 }} else {{
-                    formula_str <- "y ~ 1"
+                    formula_str <- "svi_value ~ 1"
                 }}
                 
                 # Fit Whittle-Matérn model
-                model <- graph_spde(
+                model <- graph_lme(
+                    formula = as.formula(formula_str),
                     graph = graph,
-                    alpha = alpha,
-                    model = list(formula = as.formula(formula_str))
+                    model = 'WM1'  # Whittle-Matérn with alpha=1
                 )
                 
                 return(list(success = TRUE, model = model))
@@ -204,7 +212,7 @@ class MetricGraphInterface:
                 # Project prediction locations
                 pred_projected <- graph$project_observations(
                     prediction_locations,
-                    tolerance = 1e-6
+                    tolerance = 0.01
                 )
                 
                 # Make predictions
@@ -354,7 +362,7 @@ class MetricGraphInterface:
                     metric_graph,
                     r_obs,
                     r_gnn_features,
-                    self.mg_config.get('alpha', 1.5),
+                    self.mg_config.get('alpha', 1),
                     self.mg_config.get('mesh_resolution', 0.05)
                 )
                 

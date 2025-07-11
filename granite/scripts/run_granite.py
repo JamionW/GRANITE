@@ -72,7 +72,7 @@ def load_config(config_path: str = 'config/config.yaml') -> Dict:
             'output_dim': 3
         },
         'metricgraph': {
-            'alpha': 1.5,
+            'alpha': 1,
             'mesh_resolution': 0.05,
             'max_edges': 2000,
             'enable_sampling': False

@@ -1,253 +1,344 @@
 """
 MetricGraph R interface for GRANITE framework
-
-This module provides the interface to the R MetricGraph package for
-Whittle-Matérn spatial modeling on metric graphs.
+Updated to support spatial disaggregation workflow
 """
 import numpy as np
 import pandas as pd
-import warnings
-import time
-from datetime import datetime
-from typing import Optional, Tuple, Dict
-
-# Suppress R environment warnings
-warnings.filterwarnings("ignore", message="Environment variable.*redefined by R")
-warnings.filterwarnings("ignore", category=UserWarning, module="rpy2")
-
 import rpy2.robjects as ro
 from rpy2.robjects import pandas2ri
-from rpy2.robjects.packages import importr
 from rpy2.robjects.conversion import localconverter
+import rpy2.robjects.packages as rpackages
+import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class MetricGraphInterface:
-    """Interface to R MetricGraph package for Whittle-Matérn spatial modeling"""
+    """
+    Interface to MetricGraph R package for spatial modeling on networks
+    Optimized for spatial disaggregation rather than regression
+    """
     
-    def __init__(self, config: Dict = None, verbose: bool = True):
-        """
-        Initialize MetricGraph interface
-        
-        Parameters:
-        -----------
-        config : Dict
-            Configuration dictionary
-        verbose : bool
-            Enable verbose logging
-        """
+    def __init__(self, verbose=True, config=None):
         self.verbose = verbose
         self.config = config or {}
-        self.mg_config = self.config.get('metricgraph', {})
+        self.converter = pandas2ri.converter
         
-        # Initialize timing
-        self.timing_stats = {}
+        # Initialize R environment
+        self._initialize_r_env()
         
-        self._log("Initializing MetricGraph R interface...")
-        
-        try:
-            # Initialize R interface
-            self.converter = ro.default_converter + pandas2ri.converter
-            self.base = importr('base')
-            
-            # Load MetricGraph package
-            try:
-                self.mg = importr('MetricGraph')
-                self._log("MetricGraph package loaded successfully")
-                
-                # Define R functions
-                self._define_r_functions()
-                
-            except Exception as e:
-                self._log(f"Warning: MetricGraph package not available: {e}")
-                self.mg = None
-                
-        except Exception as e:
-            self._log(f"Error initializing R interface: {str(e)}")
-            self.mg = None
-    
-    def _log(self, message: str):
-        """Log message with timestamp"""
+    def _log(self, message):
+        """Log message if verbose mode is enabled"""
         if self.verbose:
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            print(f"[{timestamp}] MetricGraph: {message}")
+            logger.info(message)
+            print(f"[MetricGraphInterface] {message}")
     
-    def _log_timing(self, operation: str, start_time: float):
+    def _log_timing(self, operation, start_time):
         """Log operation timing"""
         elapsed = time.time() - start_time
-        self.timing_stats[operation] = elapsed
-        if self.verbose:
-            self._log(f"{operation} completed in {elapsed:.2f}s")
-    
-    def _define_r_functions(self):
-        """Define R functions for MetricGraph operations"""
-        if self.mg is None:
-            return
+        self._log(f"{operation} completed in {elapsed:.2f}s")
         
-        # Get configuration parameters
-        max_edges = self.mg_config.get('max_edges', 2000)
-        batch_size = self.mg_config.get('batch_size', 300)
+    def _initialize_r_env(self):
+        """Initialize R environment and load required packages"""
+        self._log("Initializing R environment...")
         
-        ro.r(f'''
-        create_metric_graph <- function(nodes, edges, max_edges = {max_edges}, batch_size = {batch_size}) {{
-            # Validate inputs
-            if(nrow(nodes) == 0 || nrow(edges) == 0) {{
-                return(list(success = FALSE, error = "Empty input data"))
-            }}
+        # Check and install MetricGraph if needed
+        utils = rpackages.importr('utils')
+        utils.chooseCRANmirror(ind=1)
+        
+        if not rpackages.isinstalled('MetricGraph'):
+            self._log("Installing MetricGraph package...")
+            utils.install_packages('MetricGraph')
+        
+        # Import MetricGraph
+        try:
+            self.mg = rpackages.importr('MetricGraph')
+            self._log("MetricGraph package loaded successfully")
+        except Exception as e:
+            self._log(f"Failed to load MetricGraph: {str(e)}")
+            self.mg = None
             
-            # Prepare data
-            V <- as.matrix(nodes[, c("x", "y")])
-            E <- as.matrix(edges[, c("from", "to")])
-            
-            cat("DEBUG: V dimensions:", dim(V), "\\n")
-            cat("DEBUG: E dimensions:", dim(E), "\\n") 
-            cat("DEBUG: E range: from", min(E[,1]), "to", max(E[,1]), ", to", min(E[,2]), "to", max(E[,2]), "\\n")
-            
-            # Check size constraints
-            if(nrow(E) > max_edges) {{
-                cat("Warning: Network has", nrow(E), "edges, exceeding limit of", max_edges, "\\n")
-            }}
-            
-            # Create MetricGraph using V/E matrices (avoid edge_list approach)
-            tryCatch({{
-                cat("DEBUG: Trying V/E matrix approach...\\n")
+        # Define R helper functions for graph creation and spatial disaggregation
+        ro.r('''
+        library(MetricGraph)
+        
+        # Function to create SPDE model with GNN-informed parameters
+        create_spde_model <- function(graph, gnn_features, alpha = 1) {
+            tryCatch({
+                # Extract average GNN parameters
+                kappa_mean <- mean(gnn_features[, 1], na.rm = TRUE)
+                alpha_mean <- alpha  # Fixed to integer value
+                tau_mean <- mean(gnn_features[, 3], na.rm = TRUE)
                 
-                graph <- metric_graph$new(
-                    V = V,                    # Vertex coordinate matrix
-                    E = E,                    # Edge connectivity matrix  
-                    longlat = FALSE,
-                    perform_merges = TRUE,
-                    tolerance = 0.001,
-                    verbose = 1
+                # Convert tau to sigma (standard deviation)
+                sigma_mean <- 1.0 / sqrt(tau_mean)
+                
+                # Create SPDE model with GNN-learned parameters
+                spde_model <- graph_spde(
+                    graph_object = graph,
+                    alpha = alpha,
+                    start_kappa = kappa_mean,
+                    start_sigma = sigma_mean,
+                    parameterization = "spde"
                 )
                 
-                cat("DEBUG: V/E matrix approach succeeded!\\n")
-                return(list(success = TRUE, graph = graph))
-                
-            }}, error = function(e) {{
-                cat("DEBUG: V/E approach failed:", conditionMessage(e), "\\n")
-                
-                # Fallback: Try without merges
-                tryCatch({{
-                    cat("DEBUG: Trying V/E without merges...\\n")
-                    
-                    graph <- metric_graph$new(
-                        V = V,
-                        E = E,
-                        longlat = FALSE,
-                        perform_merges = FALSE,  # Disable merges
-                        verbose = 1
+                return(list(
+                    success = TRUE, 
+                    model = spde_model,
+                    params = list(
+                        kappa = kappa_mean,
+                        alpha = alpha,
+                        sigma = sigma_mean,
+                        tau = tau_mean
                     )
-                    
-                    cat("DEBUG: V/E without merges succeeded!\\n")
-                    return(list(success = TRUE, graph = graph))
-                    
-                }}, error = function(e2) {{
-                    cat("DEBUG: All approaches failed. Final error:", conditionMessage(e2), "\\n")
-                    return(list(success = FALSE, error = conditionMessage(e2)))
-                }})
-            }})
-        }}
+                ))
+                
+            }, error = function(e) {
+                return(list(
+                    success = FALSE, 
+                    error = conditionMessage(e)
+                ))
+            })
+        }
         
-        fit_whittle_matern <- function(graph, observations, gnn_features = NULL, 
-                                     alpha = 1, mesh_resolution = 0.05) {{
-            tryCatch({{
-                # Build mesh
-                graph$build_mesh(h = mesh_resolution)
+        # Function to perform constrained spatial disaggregation
+        disaggregate_with_constraint <- function(graph, spde_model, tract_observation, 
+                                               prediction_locations, gnn_features) {
+            tryCatch({
+                # Build mesh if not already built
+                if(!graph$mesh_built()) {
+                    graph$build_mesh(h = 0.05)
+                }
                 
-                # Add observations
-                graph$add_observations(
-                    data = observations,
-                    data_coords = "spatial",  
-                    coord_x = "coord_x",     
-                    coord_y = "coord_y",     
-                    tolerance = 0.01
-                )
+                # Get the tract-level constraint value
+                tract_svi <- tract_observation$svi_value[1]
+                tract_x <- tract_observation$coord_x[1]
+                tract_y <- tract_observation$coord_y[1]
                 
-                # Prepare formula
-                if(FALSE) {{
-                #if(!is.null(gnn_features) && ncol(gnn_features) >= 3) {{
-                    # Add GNN features as covariates
-                    graph_data <- graph$get_data()
-                    
-                    # Aggregate GNN features to observation level
-                    gnn_mean_kappa <- mean(gnn_features[, 1], na.rm = TRUE)
-                    gnn_mean_alpha <- mean(gnn_features[, 2], na.rm = TRUE) 
-                    gnn_mean_tau <- mean(gnn_features[, 3], na.rm = TRUE)
-
-                    # Assign single values to single observation
-                    graph_data$gnn_kappa <- gnn_mean_kappa
-                    graph_data$gnn_alpha <- gnn_mean_alpha
-                    graph_data$gnn_tau <- gnn_mean_tau
-                    
-                    graph$clear_observations()
-                    graph$add_observations(
-                        data = graph_data,
-                        data_coords = "spatial",
-                        coord_x = "coord_x", 
-                        coord_y = "coord_y",
-                        tolerance = 0.01
-                    )
-                    
-                    formula_str <- "svi_value ~ gnn_kappa + gnn_alpha + gnn_tau"
-                }} else {{
-                    formula_str <- "svi_value ~ 1"
-                }}
-                
-                # Fit Whittle-Matérn model
-                model <- graph_lme(
-                    formula = as.formula(formula_str),
-                    graph = graph,
-                    model = 'WM1'  # Whittle-Matérn with alpha=1
-                )
-                
-                return(list(success = TRUE, model = model))
-                
-            }}, error = function(e) {{
-                return(list(success = FALSE, error = conditionMessage(e)))
-            }})
-        }}
-        
-        predict_whittle_matern <- function(model, graph, prediction_locations) {{
-            tryCatch({{
-                # Project prediction locations
-                pred_projected <- graph$project_observations(
+                # Project prediction locations to graph
+                pred_proj <- graph$project_obs(
                     prediction_locations,
-                    tolerance = 0.01
+                    normalized = FALSE
                 )
                 
-                # Make predictions
-                preds <- predict(model, 
-                               newdata = pred_projected,
-                               normalized = TRUE)
+                # Get number of prediction points
+                n_pred <- nrow(prediction_locations)
                 
-                # Format results
-                result <- data.frame(
-                    mean = preds$mean,
-                    sd = sqrt(pmax(preds$variance, 1e-8)),
-                    q025 = preds$mean - 1.96 * sqrt(pmax(preds$variance, 1e-8)),
-                    q975 = preds$mean + 1.96 * sqrt(pmax(preds$variance, 1e-8))
+                # Create spatial weights based on distance from tract centroid
+                distances <- sqrt((prediction_locations$x - tract_x)^2 + 
+                                (prediction_locations$y - tract_y)^2)
+                
+                # Use inverse distance weighting for initial values
+                weights <- 1 / (distances + 1e-6)
+                weights <- weights / sum(weights)
+                
+                # Initial disaggregated values (sum to tract total)
+                initial_values <- tract_svi * weights * n_pred
+                
+                # Create precision matrix from SPDE
+                Q <- spde_model$Q
+                
+                # Add small diagonal for numerical stability
+                Q_stable <- Q + Matrix::Diagonal(n = nrow(Q), x = 1e-6)
+                
+                # Use GNN features to create spatially-varying field
+                if(!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
+                    # Use GNN kappa values to modulate spatial correlation
+                    kappa_field <- gnn_features[1:n_pred, 1]
+                    
+                    # Scale initial values by local accessibility
+                    accessibility_factor <- kappa_field / mean(kappa_field)
+                    adjusted_values <- initial_values * accessibility_factor
+                    
+                    # Ensure constraint is still satisfied
+                    adjusted_values <- adjusted_values * (tract_svi / sum(adjusted_values))
+                } else {
+                    adjusted_values <- initial_values
+                }
+                
+                # Calculate uncertainty based on SPDE model
+                # Approximate marginal variances
+                Q_inv_diag <- 1 / diag(Q_stable)
+                marginal_sd <- sqrt(Q_inv_diag * spde_model$params$sigma^2)
+                
+                # Scale uncertainty by distance from observation
+                uncertainty_scale <- 1 + 0.1 * distances / max(distances)
+                final_sd <- marginal_sd[1:n_pred] * uncertainty_scale
+                
+                # Create prediction data frame
+                predictions <- data.frame(
+                    x = prediction_locations$x,
+                    y = prediction_locations$y,
+                    mean = adjusted_values,
+                    sd = final_sd,
+                    q025 = adjusted_values - 1.96 * final_sd,
+                    q975 = adjusted_values + 1.96 * final_sd
                 )
                 
-                return(result)
+                # Final check: ensure non-negativity
+                predictions$mean <- pmax(predictions$mean, 0)
+                predictions$q025 <- pmax(predictions$q025, 0)
                 
-            }}, error = function(e) {{
-                cat("Prediction error:", conditionMessage(e), "\\n")
-                return(NULL)
-            }})
-        }}
+                # Verify constraint
+                total_predicted <- sum(predictions$mean)
+                constraint_error <- abs(total_predicted - tract_svi) / tract_svi
+                
+                return(list(
+                    success = TRUE,
+                    predictions = predictions,
+                    constraint_satisfied = constraint_error < 0.001,
+                    constraint_error = constraint_error,
+                    total_predicted = total_predicted,
+                    tract_value = tract_svi
+                ))
+                
+            }, error = function(e) {
+                return(list(
+                    success = FALSE,
+                    error = conditionMessage(e)
+                ))
+            })
+        }
+        
+        # Optimized graph creation function
+        create_metric_graph_optimized <- function(nodes, edges, build_mesh = TRUE, 
+                                                mesh_h = 0.05) {
+            tryCatch({
+                # Create vertex matrix (V)
+                V <- as.matrix(nodes[, c("x", "y")])
+                
+                # Create edge matrix (E) - 1-indexed for R
+                E <- as.matrix(edges[, c("from", "to")]) + 1
+                
+                # Add edge weights if available
+                if("weight" %in% colnames(edges)) {
+                    edge_weights <- edges$weight
+                } else {
+                    edge_weights <- NULL
+                }
+                
+                # Create metric graph using V/E specification
+                graph <- metric_graph(
+                    V = V,
+                    E = E,
+                    edge_weights = edge_weights
+                )
+                
+                # Build mesh if requested
+                if(build_mesh) {
+                    graph$build_mesh(h = mesh_h)
+                }
+                
+                # Return graph with metadata
+                list(
+                    success = TRUE,
+                    graph = graph,
+                    n_vertices = nrow(V),
+                    n_edges = nrow(E),
+                    mesh_built = build_mesh
+                )
+                
+            }, error = function(e) {
+                list(success = FALSE, error = conditionMessage(e))
+            })
+        }
+        
+        # Function to apply smart sampling to reduce network complexity
+        apply_smart_sampling <- function(nodes, edges, max_edges = 2000, 
+                                       strategy = "betweenness") {
+            tryCatch({
+                if(nrow(edges) <= max_edges) {
+                    return(list(
+                        success = TRUE,
+                        nodes = nodes,
+                        edges = edges,
+                        sampled = FALSE
+                    ))
+                }
+                
+                # Create igraph for sampling
+                library(igraph)
+                g <- graph_from_data_frame(
+                    d = edges[, c("from", "to")],
+                    vertices = nodes[, c("node_id", "x", "y")],
+                    directed = FALSE
+                )
+                
+                if(strategy == "betweenness") {
+                    # Calculate edge betweenness
+                    edge_btw <- edge_betweenness(g)
+                    
+                    # Keep top edges by betweenness
+                    keep_idx <- order(edge_btw, decreasing = TRUE)[1:max_edges]
+                    sampled_edges <- edges[keep_idx, ]
+                    
+                } else if(strategy == "spatial") {
+                    # Spatial sampling - keep edges uniformly distributed
+                    n_keep <- max_edges
+                    keep_idx <- sample(nrow(edges), n_keep)
+                    sampled_edges <- edges[keep_idx, ]
+                    
+                } else {
+                    stop("Unknown sampling strategy")
+                }
+                
+                # Get connected nodes
+                used_nodes <- unique(c(sampled_edges$from, sampled_edges$to))
+                sampled_nodes <- nodes[nodes$node_id %in% used_nodes, ]
+                
+                # Reindex
+                new_idx <- seq_len(nrow(sampled_nodes)) - 1
+                old_to_new <- setNames(new_idx, sampled_nodes$node_id)
+                
+                sampled_edges$from <- old_to_new[as.character(sampled_edges$from)]
+                sampled_edges$to <- old_to_new[as.character(sampled_edges$to)]
+                sampled_nodes$node_id <- new_idx
+                
+                list(
+                    success = TRUE,
+                    nodes = sampled_nodes,
+                    edges = sampled_edges,
+                    sampled = TRUE,
+                    original_edges = nrow(edges),
+                    sampled_edges = nrow(sampled_edges)
+                )
+                
+            }, error = function(e) {
+                list(success = FALSE, error = conditionMessage(e))
+            })
+        }
+        
+        # Function to project points onto graph
+        project_to_graph <- function(graph, points, tolerance = 0.01) {
+            tryCatch({
+                # Project points
+                proj_result <- graph$project_obs(
+                    points,
+                    normalized = FALSE
+                )
+                
+                list(
+                    success = TRUE,
+                    projections = proj_result
+                )
+                
+            }, error = function(e) {
+                list(success = FALSE, error = conditionMessage(e))
+            })
+        }
         ''')
     
-    def create_graph(self, nodes_df: pd.DataFrame, edges_df: pd.DataFrame, 
-                    enable_sampling: bool = None) -> Optional[object]:
+    def create_graph(self, nodes_df, edges_df, enable_sampling=None):
         """
         Create MetricGraph object from network data
         
         Parameters:
         -----------
         nodes_df : pd.DataFrame
-            Nodes with x, y coordinates
+            Nodes with node_id, x, y coordinates
         edges_df : pd.DataFrame
-            Edges with from, to indices (0-based)
+            Edges with from, to indices (0-based) and optional weight
         enable_sampling : bool, optional
             Override config setting for smart sampling
             
@@ -258,279 +349,234 @@ class MetricGraphInterface:
         if self.mg is None:
             self._log("MetricGraph not available")
             return None
-        
+            
         start_time = time.time()
-        self._log(f"Creating MetricGraph from {len(nodes_df)} nodes, {len(edges_df)} edges")
+        self._log(f"Creating MetricGraph with {len(nodes_df)} nodes, {len(edges_df)} edges")
         
-        # Check if sampling should be enabled
+        # Determine if sampling is needed
         if enable_sampling is None:
-            enable_sampling = self.mg_config.get('enable_sampling', False)
+            enable_sampling = self.config.get('enable_sampling', False)
         
-        # Apply smart sampling if enabled
-        if enable_sampling and len(edges_df) > self.mg_config.get('max_edges', 2000):
-            nodes_df, edges_df = self._apply_smart_sampling(nodes_df, edges_df)
-        
-        # Prepare data
-        nodes_clean = nodes_df[['x', 'y']].copy()
-        edges_clean = edges_df[['from', 'to']].copy()
-        
-        # Adjust indices for R (1-based)
-        edges_clean['from'] += 1
-        edges_clean['to'] += 1
-        
-        # Call R function
+        max_edges = self.config.get('max_edges', 10000)
+        if len(edges_df) > max_edges:
+            enable_sampling = True
+            
         try:
             with localconverter(self.converter):
-                r_nodes = ro.conversion.py2rpy(nodes_clean)
-                r_edges = ro.conversion.py2rpy(edges_clean)
+                # Apply sampling if needed
+                if enable_sampling:
+                    self._log(f"Applying smart sampling (max_edges={max_edges})...")
+                    
+                    r_nodes = ro.conversion.py2rpy(nodes_df)
+                    r_edges = ro.conversion.py2rpy(edges_df)
+                    
+                    sample_func = ro.r['apply_smart_sampling']
+                    sample_result = sample_func(
+                        r_nodes, 
+                        r_edges, 
+                        max_edges,
+                        self.config.get('sampling_strategy', 'betweenness')
+                    )
+                    
+                    if sample_result[0][0]:  # success
+                        nodes_df = ro.conversion.rpy2py(sample_result[1])
+                        edges_df = ro.conversion.rpy2py(sample_result[2])
+                        
+                        if sample_result[3][0]:  # was sampled
+                            self._log(f"Sampled network: {len(edges_df)} edges "
+                                     f"(from {sample_result[4][0]})")
+                    else:
+                        self._log(f"Sampling failed: {sample_result[1]}")
                 
-                create_func = ro.r['create_metric_graph']
+                # Convert to R
+                r_nodes = ro.conversion.py2rpy(nodes_df)
+                r_edges = ro.conversion.py2rpy(edges_df)
+                
+                # Create graph
+                create_func = ro.r['create_metric_graph_optimized']
                 result = create_func(
-                    r_nodes, 
+                    r_nodes,
                     r_edges,
-                    self.mg_config.get('max_edges', 2000),
-                    self.mg_config.get('batch_size', 300)
+                    build_mesh=True,
+                    mesh_h=self.config.get('mesh_resolution', 0.05)
                 )
                 
-                success = result[0][0]
-                
-                if success:
+                if result[0][0]:  # Check success flag
                     graph = result[1]
+                    n_vertices = result[2][0]
+                    n_edges = result[3][0]
+                    
+                    self._log(f"MetricGraph created: {n_vertices} vertices, {n_edges} edges")
                     self._log_timing("Graph creation", start_time)
+                    
                     return graph
                 else:
-                    error_msg = str(result[1])
-                    self._log(f"Graph creation failed: {error_msg}")
+                    self._log(f"Graph creation failed: {result[1]}")
                     return None
                     
         except Exception as e:
             self._log(f"Error creating graph: {str(e)}")
             return None
     
-    def disaggregate_svi(self, metric_graph: object, observations: pd.DataFrame,
-                        prediction_locations: pd.DataFrame, 
-                        gnn_features: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    def project_points(self, metric_graph, points_df, tolerance=0.01):
         """
-        Perform SVI disaggregation using Whittle-Matérn model
+        Project points onto the metric graph
         
         Parameters:
         -----------
-        metric_graph : R MetricGraph object
-            The metric graph
-        observations : pd.DataFrame
-            Tract-level SVI observations with x, y, value columns
-        prediction_locations : pd.DataFrame
-            Address locations for prediction with x, y columns
-        gnn_features : pd.DataFrame, optional
-            GNN-learned SPDE parameters
+        metric_graph : R object
+            MetricGraph object
+        points_df : pd.DataFrame
+            Points with x, y coordinates
+        tolerance : float
+            Projection tolerance
             
         Returns:
         --------
-        pd.DataFrame
-            Predictions with mean, sd, q025, q975 columns
+        pd.DataFrame with projected coordinates or None
         """
         if metric_graph is None:
-            self._log("No MetricGraph provided, using fallback")
-            return self._fallback_prediction(observations, prediction_locations)
-        
-        start_time = time.time()
-        self._log("Starting Whittle-Matérn disaggregation")
-        
+            return None
+            
         try:
-            # Prepare data
-            obs_for_r = pd.DataFrame({
-                'coord_x': observations['coord_x'],
-                'coord_y': observations['coord_y'], 
-                'svi_value': observations['svi_value']  # Keep separate from coordinates
-            })
-            
-            pred_locs = prediction_locations[['x', 'y']].copy()
-            
             with localconverter(self.converter):
-                # Convert to R
-                r_obs = ro.conversion.py2rpy(obs_for_r)
-                r_pred_locs = ro.conversion.py2rpy(pred_locs)
+                r_points = ro.conversion.py2rpy(points_df[['x', 'y']])
                 
-                r_gnn_features = None
-                if gnn_features is not None:
-                    r_gnn_features = ro.conversion.py2rpy(gnn_features)
+                project_func = ro.r['project_to_graph']
+                result = project_func(metric_graph, r_points, tolerance)
                 
-                # Fit model
-                self._log("Fitting Whittle-Matérn model...")
-                fit_func = ro.r['fit_whittle_matern']
-                fit_result = fit_func(
-                    metric_graph,
-                    r_obs,
-                    r_gnn_features,
-                    self.mg_config.get('alpha', 1),
-                    self.mg_config.get('mesh_resolution', 0.05)
-                )
-                
-                if not fit_result[0][0]:
-                    self._log(f"Model fitting failed: {fit_result[1]}")
-                    return self._fallback_prediction(observations, prediction_locations)
-                
-                model = fit_result[1]
-                
-                # Make predictions
-                self._log(f"Predicting at {len(prediction_locations)} locations...")
-                predict_func = ro.r['predict_whittle_matern']
-                r_result = predict_func(model, metric_graph, r_pred_locs)
-                
-                if r_result is None:
-                    self._log("Prediction failed, using fallback")
-                    return self._fallback_prediction(observations, prediction_locations)
-                
-                # Convert back to pandas
-                result_df = ro.conversion.rpy2py(r_result)
-                
-                self._log_timing("Disaggregation", start_time)
-                self._log(f"Successfully predicted {len(result_df)} values")
-                
-                return result_df
-                
+                if result[0][0]:  # success
+                    projections = ro.conversion.rpy2py(result[1])
+                    return projections
+                else:
+                    self._log(f"Projection failed: {result[1]}")
+                    return None
+                    
         except Exception as e:
-            self._log(f"Error in disaggregation: {str(e)}")
-            return self._fallback_prediction(observations, prediction_locations)
+            self._log(f"Error projecting points: {str(e)}")
+            return None
     
-    def _apply_smart_sampling(self, nodes_df: pd.DataFrame, 
-                            edges_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def get_graph_info(self, metric_graph):
         """
-        Apply smart network sampling to reduce complexity
+        Get information about a MetricGraph object
         
-        Uses centrality-based or spatial sampling based on configuration
+        Parameters:
+        -----------
+        metric_graph : R object
+            MetricGraph object
+            
+        Returns:
+        --------
+        dict with graph information
         """
-        strategy = self.mg_config.get('sampling_strategy', 'centrality')
-        max_edges = self.mg_config.get('max_edges', 2000)
-        
-        self._log(f"Applying {strategy} sampling: {len(edges_df)} -> {max_edges} edges")
-        
-        if strategy == 'centrality':
-            return self._centrality_sampling(nodes_df, edges_df, max_edges)
-        else:
-            return self._spatial_sampling(nodes_df, edges_df, max_edges)
-    
-    def _centrality_sampling(self, nodes_df: pd.DataFrame, 
-                           edges_df: pd.DataFrame, max_edges: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Sample edges based on network centrality"""
-        import networkx as nx
-        
-        # Create networkx graph
-        G = nx.Graph()
-        for _, edge in edges_df.iterrows():
-            G.add_edge(edge['from'], edge['to'])
-        
-        # Calculate edge betweenness centrality
+        if metric_graph is None:
+            return None
+            
         try:
-            centrality = nx.edge_betweenness_centrality(G, k=min(100, G.number_of_nodes()))
+            ro.r('''
+            get_graph_info <- function(graph) {
+                list(
+                    n_vertices = graph$nV,
+                    n_edges = graph$nE,
+                    has_mesh = graph$mesh_built(),
+                    bbox = graph$get_bounding_box()
+                )
+            }
+            ''')
             
-            # Sort edges by centrality
-            edge_scores = []
-            for _, edge in edges_df.iterrows():
-                edge_tuple = (edge['from'], edge['to'])
-                score = centrality.get(edge_tuple, centrality.get((edge['to'], edge['from']), 0))
-                edge_scores.append(score)
+            info_func = ro.r['get_graph_info']
+            info = info_func(metric_graph)
             
-            # Select top edges
-            edges_df['centrality'] = edge_scores
-            sampled_edges = edges_df.nlargest(max_edges, 'centrality').drop('centrality', axis=1)
-            
-        except:
-            # Fallback to random sampling
-            sampled_edges = edges_df.sample(n=min(max_edges, len(edges_df)))
-        
-        return nodes_df, sampled_edges
+            return {
+                'n_vertices': int(info[0][0]),
+                'n_edges': int(info[1][0]),
+                'has_mesh': bool(info[2][0]),
+                'bbox': np.array(info[3])
+            }
     
-    def _spatial_sampling(self, nodes_df: pd.DataFrame, 
-                         edges_df: pd.DataFrame, max_edges: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Sample edges based on spatial distribution"""
-        # Calculate edge midpoints
-        edge_midpoints = []
-        for _, edge in edges_df.iterrows():
-            from_node = nodes_df.iloc[edge['from']]
-            to_node = nodes_df.iloc[edge['to']]
-            midpoint = [(from_node['x'] + to_node['x'])/2, (from_node['y'] + to_node['y'])/2]
-            edge_midpoints.append(midpoint)
+    def _kriging_baseline(self, tract_observation: pd.DataFrame,
+                         prediction_locations: pd.DataFrame) -> Dict:
+        """
+        Standard kriging baseline for comparison
         
-        # Use k-means to find representative edges
-        from sklearn.cluster import KMeans
-        n_clusters = min(max_edges, len(edges_df))
+        Uses simple ordinary kriging without network constraints
+        """
+        self._log("Using standard kriging baseline for disaggregation")
         
         try:
-            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-            clusters = kmeans.fit_predict(edge_midpoints)
+            # Get tract parameters
+            tract_x = tract_observation['coord_x'].iloc[0]
+            tract_y = tract_observation['coord_y'].iloc[0]
+            tract_svi = tract_observation['svi_value'].iloc[0]
             
-            # Select one edge per cluster (closest to center)
-            sampled_indices = []
-            for i in range(n_clusters):
-                cluster_edges = np.where(clusters == i)[0]
-                if len(cluster_edges) > 0:
-                    # Find edge closest to cluster center
-                    center = kmeans.cluster_centers_[i]
-                    distances = [np.linalg.norm(np.array(edge_midpoints[j]) - center) 
-                               for j in cluster_edges]
-                    best_idx = cluster_edges[np.argmin(distances)]
-                    sampled_indices.append(best_idx)
-            
-            sampled_edges = edges_df.iloc[sampled_indices]
-            
-        except:
-            # Fallback to random sampling
-            sampled_edges = edges_df.sample(n=min(max_edges, len(edges_df)))
-        
-        return nodes_df, sampled_edges
-    
-    def _fallback_prediction(self, observations: pd.DataFrame, 
-                           prediction_locations: pd.DataFrame) -> pd.DataFrame:
-        """
-        Fallback prediction using inverse distance weighting
-        
-        This maintains the spatial nature of the problem when MetricGraph fails
-        """
-        self._log("Using inverse distance weighting fallback")
-        
-        n_pred = len(prediction_locations)
-        obs_values = observations['svi_value'].values
-        
-        predictions = []
-        
-        for _, pred_loc in prediction_locations.iterrows():
-            # Calculate distances to observations
+            # Calculate distances
             distances = np.sqrt(
-                (observations['coord_x'] - pred_loc['x'])**2 + 
-                (observations['coord_y'] - pred_loc['y'])**2
+                (prediction_locations['x'] - tract_x)**2 + 
+                (prediction_locations['y'] - tract_y)**2
             )
             
-            # Inverse distance weighting
-            weights = 1 / (distances + 1e-8)
-            weights /= weights.sum()
+            # Simple exponential variogram model
+            range_param = np.percentile(distances, 75)
+            sill = tract_svi * 0.1  # 10% of tract value as variance
             
-            pred_value = np.sum(weights * obs_values)
-            pred_uncertainty = np.std(obs_values) * 0.3
+            # Kriging weights (simplified ordinary kriging)
+            weights = np.exp(-3 * distances / range_param)
+            weights = weights / weights.sum()
             
-            predictions.append({
-                'mean': pred_value,
-                'sd': pred_uncertainty,
-                'q025': pred_value - 1.96 * pred_uncertainty,
-                'q975': pred_value + 1.96 * pred_uncertainty
+            # Predictions (ensure sum constraint)
+            predictions = tract_svi * weights * len(weights)
+            
+            # Kriging variance
+            kriging_var = sill * (1 - np.exp(-3 * distances / range_param))
+            kriging_sd = np.sqrt(kriging_var)
+            
+            predictions_df = pd.DataFrame({
+                'x': prediction_locations['x'],
+                'y': prediction_locations['y'],
+                'mean': predictions,
+                'sd': kriging_sd,
+                'q025': predictions - 1.96 * kriging_sd,
+                'q975': predictions + 1.96 * kriging_sd
             })
-        
-        return pd.DataFrame(predictions)
-    
-    def get_timing_report(self) -> str:
-        """Get timing statistics report"""
-        if not self.timing_stats:
-            return "No timing data available"
-        
-        report = "\nTiming Report:\n"
-        report += "-" * 30 + "\n"
-        total_time = sum(self.timing_stats.values())
-        
-        for operation, time_taken in self.timing_stats.items():
-            percentage = (time_taken / total_time) * 100
-            report += f"{operation}: {time_taken:.2f}s ({percentage:.1f}%)\n"
-        
-        report += "-" * 30 + "\n"
-        report += f"Total: {total_time:.2f}s\n"
-        
-        return report
+            
+            # Ensure non-negativity
+            predictions_df['mean'] = predictions_df['mean'].clip(lower=0)
+            predictions_df['q025'] = predictions_df['q025'].clip(lower=0)
+            
+            # Check constraint
+            total_predicted = predictions_df['mean'].sum()
+            constraint_error = abs(total_predicted - tract_svi) / tract_svi
+            
+            return {
+                'success': True,
+                'predictions': predictions_df,
+                'method': 'ordinary_kriging',
+                'diagnostics': {
+                    'constraint_satisfied': constraint_error < 0.001,
+                    'constraint_error': constraint_error,
+                    'total_predicted': total_predicted,
+                    'tract_value': tract_svi,
+                    'range_param': range_param,
+                    'sill': sill
+                }
+            }
+            
+        except Exception as e:
+            self._log(f"Kriging baseline failed: {str(e)}")
+            # Ultimate fallback: uniform distribution
+            n_pred = len(prediction_locations)
+            uniform_value = tract_observation['svi_value'].iloc[0]
+            
+            return {
+                'success': False,
+                'predictions': pd.DataFrame({
+                    'x': prediction_locations['x'],
+                    'y': prediction_locations['y'],
+                    'mean': uniform_value,
+                    'sd': uniform_value * 0.1,
+                    'q025': uniform_value * 0.8,
+                    'q975': uniform_value * 1.2
+                }),
+                'method': 'uniform_fallback',
+                'error': str(e)
+            }

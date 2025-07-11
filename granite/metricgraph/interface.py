@@ -98,48 +98,53 @@ class MetricGraphInterface:
             V <- as.matrix(nodes[, c("x", "y")])
             E <- as.matrix(edges[, c("from", "to")])
             
+            cat("DEBUG: V dimensions:", dim(V), "\\n")
+            cat("DEBUG: E dimensions:", dim(E), "\\n") 
+            cat("DEBUG: E range: from", min(E[,1]), "to", max(E[,1]), ", to", min(E[,2]), "to", max(E[,2]), "\\n")
+            
             # Check size constraints
             if(nrow(E) > max_edges) {{
                 cat("Warning: Network has", nrow(E), "edges, exceeding limit of", max_edges, "\\n")
             }}
             
-            # Process edges in batches
-            n_edges <- nrow(E)
-            edge_list <- vector("list", n_edges)
-            
-            for(i in 1:n_edges) {{
-                from_idx <- E[i, 1]
-                to_idx <- E[i, 2]
-                
-                if(from_idx > 0 && to_idx > 0 && from_idx <= nrow(V) && to_idx <= nrow(V)) {{
-                    edge_matrix <- matrix(c(V[from_idx, ], V[to_idx, ]), nrow = 2, byrow = TRUE)
-                    colnames(edge_matrix) <- c("x", "y")
-                    edge_list[[i]] <- edge_matrix
-                }}
-                
-                # Progress reporting
-                if(i %% batch_size == 0) {{
-                    cat("Processed", i, "/", n_edges, "edges\\n")
-                }}
-            }}
-            
-            # Remove NULL entries
-            edge_list <- edge_list[!sapply(edge_list, is.null)]
-            
-            if(length(edge_list) == 0) {{
-                return(list(success = FALSE, error = "No valid edges"))
-            }}
-            
-            # Create MetricGraph
+            # Create MetricGraph using V/E matrices (avoid edge_list approach)
             tryCatch({{
+                cat("DEBUG: Trying V/E matrix approach...\\n")
+                
                 graph <- metric_graph$new(
-                    edges = edge_list,
+                    V = V,                    # Vertex coordinate matrix
+                    E = E,                    # Edge connectivity matrix  
                     longlat = FALSE,
-                    verbose = 0
+                    perform_merges = TRUE,
+                    tolerance = 0.001,
+                    verbose = 1
                 )
+                
+                cat("DEBUG: V/E matrix approach succeeded!\\n")
                 return(list(success = TRUE, graph = graph))
+                
             }}, error = function(e) {{
-                return(list(success = FALSE, error = conditionMessage(e)))
+                cat("DEBUG: V/E approach failed:", conditionMessage(e), "\\n")
+                
+                # Fallback: Try without merges
+                tryCatch({{
+                    cat("DEBUG: Trying V/E without merges...\\n")
+                    
+                    graph <- metric_graph$new(
+                        V = V,
+                        E = E,
+                        longlat = FALSE,
+                        perform_merges = FALSE,  # Disable merges
+                        verbose = 1
+                    )
+                    
+                    cat("DEBUG: V/E without merges succeeded!\\n")
+                    return(list(success = TRUE, graph = graph))
+                    
+                }}, error = function(e2) {{
+                    cat("DEBUG: All approaches failed. Final error:", conditionMessage(e2), "\\n")
+                    return(list(success = FALSE, error = conditionMessage(e2)))
+                }})
             }})
         }}
         
@@ -152,6 +157,9 @@ class MetricGraphInterface:
                 # Add observations
                 graph$add_observations(
                     data = observations,
+                    data_coords = "spatial",  
+                    coord_x = "coord_x",     
+                    coord_y = "coord_y",     
                     tolerance = 1e-6
                 )
                 
@@ -164,7 +172,13 @@ class MetricGraphInterface:
                     graph_data$gnn_tau <- gnn_features[, 3]
                     
                     graph$clear_observations()
-                    graph$add_observations(data = graph_data, tolerance = 1e-6)
+                    graph$add_observations(
+                        data = graph_data,
+                        data_coords = "spatial",
+                        coord_x = "coord_x", 
+                        coord_y = "coord_y",
+                        tolerance = 1e-6
+                    )
                     
                     formula_str <- "y ~ gnn_kappa + gnn_alpha + gnn_tau"
                 }} else {{
@@ -316,8 +330,11 @@ class MetricGraphInterface:
         
         try:
             # Prepare data
-            obs_for_r = observations[['x', 'y']].copy()
-            obs_for_r['y'] = observations['value']
+            obs_for_r = pd.DataFrame({
+                'coord_x': observations['coord_x'],
+                'coord_y': observations['coord_y'], 
+                'svi_value': observations['svi_value']  # Keep separate from coordinates
+            })
             
             pred_locs = prediction_locations[['x', 'y']].copy()
             
@@ -465,15 +482,15 @@ class MetricGraphInterface:
         self._log("Using inverse distance weighting fallback")
         
         n_pred = len(prediction_locations)
-        obs_values = observations['value'].values
+        obs_values = observations['svi_value'].values
         
         predictions = []
         
         for _, pred_loc in prediction_locations.iterrows():
             # Calculate distances to observations
             distances = np.sqrt(
-                (observations['x'] - pred_loc['x'])**2 + 
-                (observations['y'] - pred_loc['y'])**2
+                (observations['coord_x'] - pred_loc['x'])**2 + 
+                (observations['coord_y'] - pred_loc['y'])**2
             )
             
             # Inverse distance weighting

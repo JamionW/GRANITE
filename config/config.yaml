@@ -63,7 +63,7 @@ metricgraph:
   mesh_resolution: 0.05   # Mesh resolution for SPDE
   
   # R processing limits
-  max_edges: 2000         # Maximum edges for MetricGraph
+  max_edges: 50000        # Maximum edges for MetricGraph
   batch_size: 300         # Edge batch processing size
   
   # Smart sampling (reduces network complexity)

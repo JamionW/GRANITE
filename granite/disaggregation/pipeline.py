@@ -279,9 +279,9 @@ class GRANITEPipeline:
             centroid = node_coords.mean(axis=0)
             
             observations = pd.DataFrame({
-                'x': [centroid[0]],
-                'y': [centroid[1]],
-                'value': [svi_value]
+                'coord_x': [centroid[0]],  
+                'coord_y': [centroid[1]],
+                'svi_value': [svi_value] 
             })
             
             # Prepare prediction locations (addresses)

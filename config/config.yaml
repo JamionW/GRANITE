@@ -9,6 +9,10 @@ data:
   county: "Hamilton"
   county_fips: "065"
   census_year: 2020
+  address_file: "chattanooga.geojson"
+  use_real_addresses: true
+  address_buffer_meters: 200
+  target_fips: "47065000600" 
   
   # Processing mode: "county" or "fips"
   processing_mode: "fips"

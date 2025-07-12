@@ -30,6 +30,8 @@ class DataLoader:
         """
         self.data_dir = data_dir
         self.verbose = verbose
+
+        self._address_cache = None
         
         # Create data directories if needed
         os.makedirs(os.path.join(data_dir, 'raw'), exist_ok=True)
@@ -135,7 +137,7 @@ class DataLoader:
             
             # Filter to county
             county_tracts = tracts[tracts['COUNTYFP'] == county_fips].copy()
-            county_tracts['FIPS'] = county_tracts['GEOID'].astype(str)
+            county_tracts['FIPS'] = county_tracts['GEOID'].astype(str).str.strip()
             
             # Ensure CRS
             if county_tracts.crs is None:
@@ -270,76 +272,84 @@ class DataLoader:
                               max_nodes: Optional[int] = None, 
                               max_edges: Optional[int] = None) -> Dict:
         """
-        Load data for a single census tract
-        
-        This is the key function for FIPS-based processing. It loads only
-        the data needed for a single tract, with proper spatial filtering.
+        UPDATED: Load data for a single census tract using real addresses
         
         Parameters:
         -----------
         fips_code : str
             11-digit FIPS code
         buffer_degrees : float
-            Buffer around tract boundary
+            Buffer around tract in degrees
         max_nodes : int, optional
-            Maximum nodes (for memory management)
-        max_edges : int, optional
-            Maximum edges (for memory management)
+            Maximum nodes in road network
+        max_edges : int, optional  
+            Maximum edges in road network
             
         Returns:
         --------
         Dict
-            Tract-specific data
+            Complete tract data including real addresses
         """
         self._log(f"Loading data for tract {fips_code}")
         
         try:
-            # Parse FIPS components
+            # Parse FIPS code
             state_fips = fips_code[:2]
             county_fips = fips_code[2:5]
             
-            # Load tract geometry
-            all_tracts = self.load_census_tracts(state_fips, county_fips)
-            tract = all_tracts[all_tracts['FIPS'] == fips_code]
+            # 1. Load tract geometry and SVI
+            tracts = self.load_census_tracts(state_fips, county_fips)
+            tract = tracts[tracts['FIPS'] == fips_code]
             
             if len(tract) == 0:
                 raise ValueError(f"Tract {fips_code} not found")
             
-            tract_geom = tract.geometry.iloc[0]
+            tract_geom = tract.iloc[0].geometry
             
-            # Create buffered boundary
-            buffered_geom = tract_geom.buffer(buffer_degrees)
-            bbox = buffered_geom.bounds  # (minx, miny, maxx, maxy)
+            # Load SVI data
+            county_name = self._get_county_name(state_fips, county_fips)
+            svi_data = self.load_svi_data(state_fips, county_name)
+            tract_svi = svi_data[svi_data['FIPS'] == fips_code]
             
-            # Load and filter roads
-            all_roads = self.load_road_network(None, state_fips, county_fips)
+            if len(tract_svi) == 0:
+                raise ValueError(f"No SVI data for tract {fips_code}")
             
-            # Spatial filter - roads intersecting buffered tract
-            roads_filtered = all_roads[all_roads.geometry.intersects(buffered_geom)]
-            self._log(f"Filtered to {len(roads_filtered)} road segments")
+            # 2. Create buffered bounding box
+            bounds = tract_geom.bounds
+            buffered_bbox = (
+                bounds[0] - buffer_degrees, bounds[1] - buffer_degrees,
+                bounds[2] + buffer_degrees, bounds[3] + buffer_degrees
+            )
             
-            # Create network from filtered roads
-            road_network = self.create_network_graph(roads_filtered)
+            # 3. Load roads within buffered area
+            roads = self._load_roads_for_bbox(state_fips, county_fips, buffered_bbox)
             
-            # Apply size limits if specified
-            if max_nodes and road_network.number_of_nodes() > max_nodes:
-                self._log(f"Network exceeds {max_nodes} nodes, may need simplification")
+            # 4. Create road network
+            road_network = self.create_network_graph(roads)
             
-            # Load SVI data for tract
-            all_svi = self.load_svi_data(state_fips, self._get_county_name(state_fips, county_fips))
-            tract_svi = all_svi[all_svi['FIPS'] == fips_code]
+            # 5. UPDATED: Get real addresses for this tract
+            addresses = self.get_addresses_for_tract(fips_code, buffer_meters=200)
             
-            # Generate addresses within tract
-            addresses = self._generate_tract_addresses(tract_geom, bbox, n_addresses=100)
+            # If no real addresses found, generate synthetic ones as fallback
+            if len(addresses) == 0:
+                self._log(f"No real addresses found for tract {fips_code}, generating synthetic ones")
+                addresses = self._generate_tract_addresses(tract_geom, buffered_bbox, n_addresses=100)
+                addresses['tract_fips'] = fips_code
             
             return {
                 'fips_code': fips_code,
                 'tract_geometry': tract_geom,
+                'svi_data': tract_svi.iloc[0],
+                'roads': roads,
                 'road_network': road_network,
-                'roads_gdf': roads_filtered,
-                'svi_data': tract_svi,
-                'addresses': addresses,
-                'bbox': bbox
+                'addresses': addresses,  # NOW CONTAINS REAL ADDRESSES
+                'bbox': buffered_bbox,
+                'network_stats': {
+                    'nodes': road_network.number_of_nodes(),
+                    'edges': road_network.number_of_edges(),
+                    'real_addresses': len(addresses),
+                    'address_source': 'real' if 'full_address' in addresses.columns else 'synthetic'
+                }
             }
             
         except Exception as e:
@@ -348,7 +358,9 @@ class DataLoader:
     
     def _generate_tract_addresses(self, tract_geom, bbox: Tuple, 
                                  n_addresses: int = 100) -> gpd.GeoDataFrame:
-        """Generate synthetic addresses within tract"""
+        """
+        UPDATED: Generate synthetic addresses within tract (fallback only)
+        """
         np.random.seed(42)  # For reproducibility
         
         minx, miny, maxx, maxy = bbox
@@ -364,7 +376,8 @@ class DataLoader:
             if tract_geom.contains(point):
                 addresses.append({
                     'address_id': len(addresses),
-                    'geometry': point
+                    'geometry': point,
+                    'full_address': f"Synthetic Address {len(addresses)}"
                 })
             
             attempts += 1
@@ -374,7 +387,8 @@ class DataLoader:
             centroid = tract_geom.centroid
             addresses = [{
                 'address_id': 0,
-                'geometry': centroid
+                'geometry': centroid,
+                'full_address': 'Tract Centroid Address'
             }]
         
         gdf = gpd.GeoDataFrame(addresses, crs='EPSG:4326')
@@ -413,41 +427,291 @@ class DataLoader:
         
         return transit_stops
     
-    def load_address_points(self, n_points: int = 1000) -> gpd.GeoDataFrame:
+    def load_address_points(self, state_fips: str = '47', county_fips: str = '065') -> gpd.GeoDataFrame:
         """
-        Generate or load address point locations
+        Load real Chattanooga address point locations
+        
+        UPDATED TO USE REAL GEOJSON DATA
         
         Parameters:
         -----------
-        n_points : int
-            Number of address points to generate
+        state_fips : str
+            State FIPS code (47 for Tennessee)
+        county_fips : str  
+            County FIPS code (065 for Hamilton County)
             
         Returns:
         --------
         gpd.GeoDataFrame
-            Address point locations
+            Real address point locations from chattanooga.geojson
         """
-        self._log(f"Generating {n_points} address points...")
+        # Check cache first
+        if self._address_cache is not None:
+            self._log(f"Using cached address data ({len(self._address_cache)} addresses)")
+            return self._address_cache
         
-        # Hamilton County bounding box
-        bbox = [-85.5, 35.0, -85.0, 35.5]
+        self._log("Loading real Chattanooga address data...")
         
-        # Generate random points
-        np.random.seed(42)  # For reproducibility
-        lons = np.random.uniform(bbox[0], bbox[2], n_points)
-        lats = np.random.uniform(bbox[1], bbox[3], n_points)
+        # Try multiple file locations
+        address_files = [
+            os.path.join(self.data_dir, 'chattanooga.geojson'),
+            os.path.join(self.data_dir, 'raw', 'chattanooga.geojson'),
+            os.path.join(self.data_dir, 'addresses', 'chattanooga.geojson'),
+            './chattanooga.geojson',  # Current directory
+            'chattanooga.geojson'     # Direct filename
+        ]
         
-        points = [Point(lon, lat) for lon, lat in zip(lons, lats)]
+        addresses_gdf = None
+        for address_file in address_files:
+            if os.path.exists(address_file):
+                addresses_gdf = self._load_chattanooga_geojson(address_file)
+                if len(addresses_gdf) > 0:
+                    self._log(f"Loaded {len(addresses_gdf)} real addresses from {address_file}")
+                    break
         
-        addresses = gpd.GeoDataFrame(
-            {'address_id': range(n_points)},
-            geometry=points,
-            crs='EPSG:4326'
-        )
+        if addresses_gdf is None or len(addresses_gdf) == 0:
+            self._log("WARNING: Real address data not found, using fallback synthetic generation")
+            return self._generate_tract_constrained_addresses(state_fips, county_fips)
         
-        self._log(f"Generated {len(addresses)} address points")
+        # Filter to Hamilton County bounds if needed
+        addresses_gdf = self._filter_to_hamilton_county(addresses_gdf, state_fips, county_fips)
         
-        return addresses
+        # Cache the result
+        self._address_cache = addresses_gdf
+        
+        self._log(f"Successfully loaded {len(addresses_gdf)} real Hamilton County addresses")
+        return addresses_gdf
+    
+    def _load_chattanooga_geojson(self, file_path: str) -> gpd.GeoDataFrame:
+        """
+        Load and standardize the chattanooga.geojson file
+        
+        Parameters:
+        -----------
+        file_path : str
+            Path to chattanooga.geojson file
+            
+        Returns:
+        --------
+        gpd.GeoDataFrame
+            Standardized address data
+        """
+        try:
+            # Load GeoJSON
+            addresses = gpd.read_file(file_path)
+            
+            if len(addresses) == 0:
+                self._log(f"No addresses found in {file_path}")
+                return gpd.GeoDataFrame(columns=['address_id', 'geometry'])
+            
+            # Standardize columns to match expected format
+            addresses = addresses.copy()
+            
+            # Create standardized address_id
+            if 'address_id' not in addresses.columns:
+                addresses['address_id'] = range(len(addresses))
+            
+            # Create full address field for reference
+            addresses['full_address'] = addresses.apply(self._create_full_address, axis=1)
+            
+            # Extract relevant fields from properties
+            if 'number' in addresses.columns:
+                addresses['house_number'] = addresses['number']
+            if 'street' in addresses.columns:
+                addresses['street_name'] = addresses['street']
+            if 'city' in addresses.columns:
+                addresses['city_name'] = addresses['city']
+            if 'postcode' in addresses.columns:
+                addresses['zipcode'] = addresses['postcode']
+            
+            # Ensure proper CRS (GeoJSON is typically WGS84)
+            if addresses.crs is None:
+                addresses.set_crs(epsg=4326, inplace=True)
+            elif addresses.crs != 'EPSG:4326':
+                addresses = addresses.to_crs('EPSG:4326')
+            
+            # Keep essential columns
+            essential_columns = ['address_id', 'geometry', 'full_address']
+            optional_columns = ['house_number', 'street_name', 'city_name', 'zipcode', 'hash']
+            
+            keep_columns = essential_columns + [col for col in optional_columns if col in addresses.columns]
+            addresses = addresses[keep_columns]
+            
+            return addresses
+            
+        except Exception as e:
+            self._log(f"Error loading {file_path}: {str(e)}")
+            return gpd.GeoDataFrame(columns=['address_id', 'geometry'])
+    
+    def _create_full_address(self, row) -> str:
+        """Create full address string from components"""
+        parts = []
+        
+        if pd.notna(row.get('number', '')) and row.get('number', '') != '':
+            parts.append(str(row['number']))
+        
+        if pd.notna(row.get('street', '')) and row.get('street', '') != '':
+            parts.append(str(row['street']))
+        
+        if pd.notna(row.get('unit', '')) and row.get('unit', '') != '':
+            parts.append(f"Unit {row['unit']}")
+        
+        if pd.notna(row.get('city', '')) and row.get('city', '') != '':
+            parts.append(str(row['city']))
+        
+        if pd.notna(row.get('postcode', '')) and row.get('postcode', '') != '':
+            parts.append(str(row['postcode']))
+        
+        return ', '.join(parts) if parts else 'Unknown Address'
+    
+    def _filter_to_hamilton_county(self, addresses: gpd.GeoDataFrame, 
+                                  state_fips: str, county_fips: str) -> gpd.GeoDataFrame:
+        """
+        Filter addresses to Hamilton County boundaries
+        
+        Parameters:
+        -----------
+        addresses : gpd.GeoDataFrame
+            Address data to filter
+        state_fips : str
+            State FIPS code
+        county_fips : str
+            County FIPS code
+            
+        Returns:
+        --------
+        gpd.GeoDataFrame
+            Addresses within Hamilton County
+        """
+        try:
+            # Load Hamilton County boundary
+            county_tracts = self.load_census_tracts(state_fips, county_fips)
+            if len(county_tracts) == 0:
+                self._log("Warning: Could not load county boundary for filtering")
+                return addresses
+            
+            # Create county boundary from tract union
+            county_boundary = county_tracts.geometry.unary_union
+            
+            # Spatial filter
+            within_county = addresses[addresses.geometry.within(county_boundary)]
+            
+            self._log(f"Filtered {len(addresses)} addresses to {len(within_county)} within Hamilton County")
+            
+            return within_county
+            
+        except Exception as e:
+            self._log(f"Error filtering to county boundary: {str(e)}")
+            return addresses
+    
+    def get_addresses_for_tract(self, fips_code: str, 
+                              buffer_meters: float = 100) -> gpd.GeoDataFrame:
+        """
+        Get real addresses within a specific census tract
+        
+        NEW METHOD FOR TRACT-SPECIFIC ADDRESS LOADING
+        
+        Parameters:
+        -----------
+        fips_code : str
+            11-digit FIPS code for census tract
+        buffer_meters : float
+            Buffer around tract boundary in meters
+            
+        Returns:
+        --------
+        gpd.GeoDataFrame
+            Addresses within the specified tract
+        """
+        self._log(f"Getting addresses for tract {fips_code}")
+        
+        try:
+            # Load all addresses
+            all_addresses = self.load_address_points()
+            
+            if len(all_addresses) == 0:
+                self._log(f"No addresses available for tract {fips_code}")
+                return gpd.GeoDataFrame(columns=['address_id', 'geometry'])
+            
+            # Load tract geometry
+            state_fips = fips_code[:2]
+            county_fips = fips_code[2:5]
+            tracts = self.load_census_tracts(state_fips, county_fips)
+            
+            tract = tracts[tracts['FIPS'] == fips_code]
+            if len(tract) == 0:
+                self._log(f"Tract {fips_code} not found")
+                return gpd.GeoDataFrame(columns=['address_id', 'geometry'])
+            
+            tract_geom = tract.iloc[0].geometry
+            
+            # Apply buffer if specified
+            if buffer_meters > 0:
+                # Convert to projected CRS for accurate buffering
+                tract_proj = tract.to_crs('EPSG:3857')  # Web Mercator
+                buffered = tract_proj.geometry.buffer(buffer_meters)
+                tract_geom = buffered.to_crs('EPSG:4326').iloc[0]
+            
+            # Spatial filter
+            tract_addresses = all_addresses[all_addresses.geometry.within(tract_geom)].copy()
+            
+            # Add tract FIPS to addresses
+            tract_addresses['tract_fips'] = fips_code
+            
+            self._log(f"Found {len(tract_addresses)} addresses in tract {fips_code}")
+            
+            return tract_addresses
+            
+        except Exception as e:
+            self._log(f"Error getting addresses for tract {fips_code}: {str(e)}")
+            return gpd.GeoDataFrame(columns=['address_id', 'geometry'])
+    
+    def _generate_tract_constrained_addresses(self, state_fips: str, county_fips: str, 
+                                            density_per_sq_km: int = 500) -> gpd.GeoDataFrame:
+        """
+        FALLBACK: Generate addresses constrained to tract boundaries
+        Only used if real address data is unavailable
+        """
+        self._log("Generating tract-constrained synthetic addresses as fallback...")
+        
+        try:
+            # Load census tracts
+            tracts = self.load_census_tracts(state_fips, county_fips)
+            
+            all_addresses = []
+            address_id = 0
+            
+            for _, tract in tracts.iterrows():
+                # Calculate number of addresses for this tract based on area
+                tract_area_sq_km = tract.geometry.area * 111**2  # Rough conversion to sq km
+                n_addresses = max(10, int(tract_area_sq_km * density_per_sq_km))
+                
+                # Generate addresses within this specific tract
+                tract_addresses = self._generate_tract_addresses(
+                    tract.geometry, 
+                    tract.geometry.bounds, 
+                    n_addresses=n_addresses
+                )
+                
+                # Update address IDs
+                tract_addresses['address_id'] = range(address_id, address_id + len(tract_addresses))
+                tract_addresses['tract_fips'] = tract['FIPS']
+                tract_addresses['full_address'] = f"Synthetic Address in {tract['FIPS']}"
+                
+                all_addresses.append(tract_addresses)
+                address_id += len(tract_addresses)
+            
+            if all_addresses:
+                combined = gpd.GeoDataFrame(pd.concat(all_addresses, ignore_index=True))
+                self._log(f"Generated {len(combined)} tract-constrained synthetic addresses")
+                return combined[['address_id', 'geometry', 'full_address', 'tract_fips']]
+            else:
+                self._log("Failed to generate any addresses")
+                return gpd.GeoDataFrame(columns=['address_id', 'geometry'])
+                
+        except Exception as e:
+            self._log(f"Error generating tract-constrained addresses: {str(e)}")
+            return gpd.GeoDataFrame(columns=['address_id', 'geometry'])
     
     def _get_county_name(self, state_fips: str, county_fips: str) -> str:
         """Map FIPS codes to county name"""
@@ -506,6 +770,40 @@ class DataLoader:
         all_fips = self.get_available_fips_codes(state_fips, county_fips)
         return all_fips[:5]
 
+# Helper function for addresses validation
+def analyze_address_coverage(data_loader, state_fips='47', county_fips='065'):
+    """
+    Analyze coverage of real address data across census tracts
+    """
+    print("Analyzing address coverage across Hamilton County...")
+    
+    # Load tracts and addresses
+    tracts = data_loader.load_census_tracts(state_fips, county_fips)
+    addresses = data_loader.load_address_points(state_fips, county_fips)
+    
+    coverage_stats = []
+    
+    for _, tract in tracts.iterrows():
+        fips_code = tract['FIPS']
+        tract_addresses = data_loader.get_addresses_for_tract(fips_code)
+        
+        coverage_stats.append({
+            'fips': fips_code,
+            'address_count': len(tract_addresses),
+            'tract_area_sq_km': tract.geometry.area * 111**2,
+            'address_density': len(tract_addresses) / (tract.geometry.area * 111**2) if tract.geometry.area > 0 else 0
+        })
+    
+    coverage_df = pd.DataFrame(coverage_stats)
+    
+    print(f"\nAddress Coverage Summary:")
+    print(f"Total tracts: {len(coverage_df)}")
+    print(f"Tracts with addresses: {sum(coverage_df['address_count'] > 0)}")
+    print(f"Total addresses: {coverage_df['address_count'].sum()}")
+    print(f"Mean addresses per tract: {coverage_df['address_count'].mean():.1f}")
+    print(f"Median addresses per tract: {coverage_df['address_count'].median():.1f}")
+    
+    return coverage_df
 
 # Convenience function for backward compatibility
 def load_hamilton_county_data(data_dir: str = './data', 

@@ -73,26 +73,33 @@ class GRANITEPipeline:
             print(f"[{timestamp}] {level}: {message}")
     
     def run(self):
-        """
-        Run the complete GRANITE pipeline with spatial disaggregation
-        """
+        """Run the complete GRANITE pipeline"""
         self._log("="*60)
-        self._log("GRANITE Pipeline - Spatial Disaggregation Mode")
+        self._log("GRANITE Pipeline - Spatial Disaggregation Mode") 
         self._log("="*60)
         
         start_time = time.time()
         
-        # Step 1: Load and prepare data
+        # Load data
         self._log("Loading data...")
         data = self._load_data()
         
-        # Step 2: Process by tract
-        if self.config['data']['processing_mode'] == 'fips':
+        # Check processing mode
+        processing_mode = self.config.get('data', {}).get('processing_mode', 'county')
+        target_fips = self.config.get('data', {}).get('target_fips')
+        
+        # CRITICAL DEBUG OUTPUT
+        self._log(f"Processing mode: {processing_mode}")
+        self._log(f"Target FIPS: {target_fips}")
+        
+        if processing_mode == 'fips' and target_fips:
+            self._log(f"Processing single FIPS: {target_fips}")
             results = self._process_fips_mode(data)
         else:
+            self._log("No FIPS codes specified, processing all tracts")
             results = self._process_county_mode(data)
         
-        # Step 3: Save results
+        # Save results
         self._save_results(results)
         
         elapsed_time = time.time() - start_time
@@ -101,45 +108,65 @@ class GRANITEPipeline:
         return results
     
     def _load_data(self):
-        """Load required datasets"""
-        state_fips = self.config['data']['state_fips']
-        county_fips = self.config['data']['county_fips']
+        """
+        UPDATED: Load data using real Chattanooga addresses
+        """
+        self._log("Loading data...")
+        
+        # Get FIPS configuration from config
+        state_fips = self.config.get('data', {}).get('state_fips', '47')
+        county_fips = self.config.get('data', {}).get('county_fips', '065')
+        
+        data = {}
         
         # Load census tracts
-        tracts = self.data_loader.load_census_tracts(state_fips, county_fips)
-        self._log(f"Loaded {len(tracts)} census tracts")
+        data['census_tracts'] = self.data_loader.load_census_tracts(
+            state_fips=state_fips, 
+            county_fips=county_fips
+        )
+        self._log(f"Loaded {len(data['census_tracts'])} census tracts")
         
         # Load SVI data
-        svi = self.data_loader.load_svi_data()
-        svi_filtered = svi[svi['FIPS'].str.startswith(f"{state_fips}{county_fips}")]
-        self._log(f"Loaded SVI data for {len(svi_filtered)} tracts")
-        
-        # Merge tracts with SVI
-        tracts_with_svi = tracts.merge(
-            svi_filtered[['FIPS', 'RPL_THEMES']], 
-            on='FIPS', 
-            how='inner'
+        county_name = self.data_loader._get_county_name(state_fips, county_fips)
+        data['svi'] = self.data_loader.load_svi_data(
+            state_fips=state_fips,
+            county_name=county_name
         )
+        self._log(f"Loaded SVI data for {len(data['svi'])} tracts")
         
         # Load road network
-        roads = self.data_loader.load_road_network(state_fips, county_fips)
-        self._log(f"Loaded road network with {len(roads)} segments")
+        data['roads'] = self.data_loader.load_road_network(
+            state_fips=state_fips,
+            county_fips=county_fips
+        )
+        self._log(f"Loaded road network with {len(data['roads'])} segments")
         
-        # Load addresses
-        addresses = self.data_loader.load_address_points(state_fips, county_fips)
-        if addresses is None:
-            self._log("No address points found, generating synthetic addresses...")
-            addresses = self.data_loader.generate_synthetic_addresses(
-                roads, tracts, density_per_km=50
-            )
-        self._log(f"Using {len(addresses)} address points")
+        # Load transit stops
+        data['transit_stops'] = self.data_loader.load_transit_stops()
+        self._log(f"Loaded {len(data['transit_stops'])} transit stops")
         
-        return {
-            'tracts': tracts_with_svi,
-            'roads': roads,
-            'addresses': addresses,
-            'svi_data': svi_filtered
-        }
+        # UPDATED: Load real address points
+        data['addresses'] = self.data_loader.load_address_points(
+            state_fips=state_fips, 
+            county_fips=county_fips
+        )
+        
+        address_source = 'real' if 'full_address' in data['addresses'].columns else 'synthetic'
+        self._log(f"Loaded {len(data['addresses'])} {address_source} address points")
+        
+        # Create road network graph
+        data['road_network'] = self.data_loader.create_network_graph(data['roads'])
+        self._log(f"Created network graph with {data['road_network'].number_of_nodes()} nodes")
+        
+        # Merge SVI with census tracts
+        data['tracts_with_svi'] = data['census_tracts'].merge(
+            data['svi'], on='FIPS', how='inner'
+        )
+
+        data['tracts'] = data['tracts_with_svi'] 
+        self._log(f"Merged data for {len(data['tracts_with_svi'])} tracts with SVI")
+        
+        return data
     
     def _process_county_mode(self, data):
         """Process entire county with tract-by-tract disaggregation"""
@@ -186,43 +213,89 @@ class GRANITEPipeline:
         return self._combine_results(all_results)
     
     def _process_fips_mode(self, data):
-        """Process specific FIPS codes"""
-        fips_list = self.config['data'].get('fips_list', [])
-        if not fips_list:
-            self._log("No FIPS codes specified, processing all tracts")
+        """
+        FIXED: Process specific FIPS codes with proper string handling
+        """
+        # Get target FIPS from config
+        target_fips = self.config.get('data', {}).get('target_fips')
+        
+        if not target_fips:
+            self._log("No target FIPS specified in config, processing all tracts")
             return self._process_county_mode(data)
         
-        self._log(f"Processing {len(fips_list)} specified FIPS codes")
+        # Ensure target_fips is string
+        target_fips = str(target_fips).strip()
+        self._log(f"Looking for target FIPS: '{target_fips}'")
         
-        # Filter to requested tracts
-        data['tracts'] = data['tracts'][data['tracts']['FIPS'].isin(fips_list)]
+        # Ensure FIPS column is string type for consistent matching
+        data['tracts']['FIPS'] = data['tracts']['FIPS'].astype(str).str.strip()
         
-        return self._process_county_mode(data)
+        # Check if target exists
+        available_fips = data['tracts']['FIPS'].tolist()
+        if target_fips not in available_fips:
+            self._log(f"Target FIPS {target_fips} not found in data")
+            self._log(f"Available FIPS (first 5): {available_fips[:5]}")
+            # Look for Hamilton County codes
+            hamilton_codes = [f for f in available_fips if f.startswith('47065')]
+            self._log(f"Hamilton County FIPS ({len(hamilton_codes)} total): {hamilton_codes[:10]}")
+            return {'success': False, 'error': f'FIPS {target_fips} not found'}
+        
+        # Filter to specific tract
+        target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips]
+        
+        if len(target_tract) == 0:
+            self._log(f"No tract found after filtering for FIPS {target_fips}")
+            return {'success': False, 'error': f'FIPS {target_fips} filtering failed'}
+        
+        self._log(f"✓ Found target tract: {target_fips}")
+        
+        # Create single-tract dataset
+        single_tract_data = data.copy()
+        single_tract_data['tracts'] = target_tract
+        
+        self._log(f"Processing {len(single_tract_data['tracts'])} tract (single FIPS mode)")
+        
+        # Process single tract
+        return self._process_county_mode(single_tract_data)
     
     def _prepare_tract_data(self, tract, county_data):
-        """Prepare data for a single tract"""
+        """
+        UPDATED: Prepare data for a single tract using real addresses
+        """
         # Get tract geometry
         tract_geom = tract.geometry
+        fips_code = tract['FIPS']
         
         # Get roads within tract
         tract_roads = county_data['roads'][
             county_data['roads'].intersects(tract_geom)
         ].copy()
         
-        # Get addresses within tract  
-        tract_addresses = county_data['addresses'][
-            county_data['addresses'].within(tract_geom)
-        ].copy()
+        # UPDATED: Get real addresses for this specific tract
+        tract_addresses = self.data_loader.get_addresses_for_tract(fips_code)
+        
+        # Fallback if no addresses found
+        if len(tract_addresses) == 0:
+            self._log(f"No addresses found for tract {fips_code}, using tract centroid")
+            centroid = tract_geom.centroid
+            tract_addresses = gpd.GeoDataFrame([{
+                'address_id': 0,
+                'geometry': centroid,
+                'full_address': f'Tract {fips_code} Centroid',
+                'tract_fips': fips_code
+            }], crs='EPSG:4326')
         
         # Build road network graph
-        road_network = self.data_loader.build_road_network_graph(tract_roads)
+        road_network = self.data_loader.create_network_graph(tract_roads)
         
         return {
             'tract_info': tract,
             'roads': tract_roads,
-            'addresses': tract_addresses,
+            'addresses': tract_addresses,  # NOW REAL ADDRESSES
             'road_network': road_network,
-            'svi_value': tract['RPL_THEMES']
+            'svi_value': tract['RPL_THEMES'],
+            'address_count': len(tract_addresses),
+            'address_source': 'real' if 'full_address' in tract_addresses.columns else 'synthetic'
         }
     
     def _process_single_tract(self, tract_data):

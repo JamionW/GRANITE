@@ -11,6 +11,10 @@ import rpy2.robjects.packages as rpackages
 import time
 import logging
 from typing import Dict, Optional, Tuple
+import warnings
+import os
+warnings.filterwarnings('ignore', category=UserWarning)
+os.environ['R_LIBS_SITE'] = '/usr/local/lib/R/site-library:/usr/lib/R/site-library:/usr/lib/R/library'
 
 logger = logging.getLogger(__name__)
 

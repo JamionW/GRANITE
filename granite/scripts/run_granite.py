@@ -6,6 +6,9 @@ Command-line entry point for GRANITE framework
 This module provides the main() function that serves as the entry point
 for the 'granite' command.
 """
+from granite.utils.suppress_warnings import suppress_all_r_warnings
+suppress_all_r_warnings()
+
 import os
 import sys
 import argparse
@@ -20,7 +23,6 @@ if parent_dir not in sys.path:
 
 from granite.disaggregation.pipeline import GRANITEPipeline
 from granite.data.loaders import DataLoader
-
 
 def load_config(config_path: str = 'config/config.yaml') -> Dict:
     """Load configuration from YAML file"""
@@ -297,89 +299,57 @@ def list_available_fips(data_dir: str, state_fips: str, county_fips: str):
 
 
 def main():
-    """Main entry point for granite command"""
-    # Parse arguments
-    args = parse_arguments()
+    """Main entry point for GRANITE pipeline"""
     
-    # Load configuration
-    config = load_config(args.config)
+    # Parse arguments FIRST
+    parser = argparse.ArgumentParser(description='GRANITE Pipeline')
+    parser.add_argument('--fips', type=str, help='Target FIPS code')
+    parser.add_argument('--epochs', type=int, help='Number of epochs')
+    args = parser.parse_args()
     
-    # Merge with command-line arguments
-    config = merge_config_with_args(config, args)
-    
-    # Handle list FIPS mode
-    if args.list_fips:
-        list_available_fips(
-            args.data_dir,
-            config['data']['state_fips'],
-            config['data']['county_fips']
-        )
-        return
-    
-    # Start time
-    start_time = datetime.now()
-    
-    print("\n" + "="*60)
+    print("=" * 60)
     print("GRANITE: Graph-Refined Accessibility Network")
     print("         for Integrated Transit Equity")
-    print("="*60)
-    print(f"Start time: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Print configuration
-    if not args.quiet:
-        print("\nConfiguration:")
-        print(f"  Processing mode: {config['data']['processing_mode']}")
-        print(f"  Model epochs: {config['model']['epochs']}")
-        print(f"  Output directory: {args.output_dir}")
-        
-        if config['data']['processing_mode'] == 'fips':
-            if args.fips:
-                print(f"  Target FIPS: {args.fips}")
-            else:
-                auto = config['data']['fips_config']['batch']['auto_select']
-                if auto['mode'] == 'range':
-                    print(f"  Auto-select: tracts {auto['range_start']} to {auto['range_end']}")
-    
-    # Dry run mode
-    if args.dry_run:
-        print("\nDRY RUN MODE - No processing will occur.")
-        return
+    print("=" * 60)
+    print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print()
     
     try:
+        # Load config
+        config = load_config('config/config.yaml')
+        
+        # CRITICAL: Override with command line args
+        if args.fips:
+            config['data']['target_fips'] = args.fips
+            config['data']['processing_mode'] = 'fips'
+            print(f"Configuration:")
+            print(f"  Processing mode: fips")
+            print(f"  Target FIPS: {args.fips}")
+        
+        if args.epochs:
+            config['model']['epochs'] = args.epochs
+            print(f"  Model epochs: {args.epochs}")
+        
+        print(f"  Output directory: ./output")
+        
         # Create pipeline
+        from granite.disaggregation.pipeline import GRANITEPipeline
+        
         pipeline = GRANITEPipeline(
             config=config,
-            data_dir=args.data_dir,
-            output_dir=args.output_dir,
-            verbose=not args.quiet
+            data_dir='./data',
+            output_dir='./output',
+            verbose=True
         )
         
-        # Run pipeline
         results = pipeline.run()
-        
-        # Calculate runtime
-        end_time = datetime.now()
-        runtime = end_time - start_time
-        
-        print("\n" + "="*60)
-        print("GRANITE pipeline completed successfully!")
-        print(f"Total runtime: {runtime}")
-        print(f"Results saved to: {args.output_dir}")
-        print("="*60)
-        
-    except KeyboardInterrupt:
-        print("\n\nProcessing interrupted by user")
-        sys.exit(1)
+        return results
         
     except Exception as e:
-        print(f"\nError: {str(e)}")
-        if not args.quiet:
-            import traceback
-            traceback.print_exc()
-        sys.exit(1)
-    
-    sys.exit(0)
-
+        print(f"Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'error': str(e)}
 
 if __name__ == "__main__":
     main()

@@ -1,42 +1,37 @@
 #!/usr/bin/env python
 """
-Verify clean code implementation
-Checks for removed defaults and proper structure
+Verify clean code implementation and check for syntax errors
 """
 import ast
 import os
 import sys
 
 
-def check_no_default_configs(filepath):
-    """Check that Python files don't contain default configurations"""
-    with open(filepath, 'r') as f:
-        content = f.read()
-    
-    # Parse AST
-    tree = ast.parse(content)
-    
-    # Look for _default_config methods
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
-            if node.name == '_default_config' or node.name == 'default_config':
-                return False, f"Found {node.name} method"
-    
-    # Look for hardcoded config dictionaries
-    suspicious_patterns = [
-        "'state_fips': '47'",
-        '"state_fips": "47"',
-        "'epochs': 100",
-        '"epochs": 100',
-        "'hidden_dim': 64",
-        '"hidden_dim": 64'
-    ]
-    
-    for pattern in suspicious_patterns:
-        if pattern in content and 'config.yaml' not in content:
-            return False, f"Found hardcoded config: {pattern}"
-    
-    return True, "No default configs found"
+def check_syntax_errors(filepath):
+    """Check for Python syntax errors"""
+    try:
+        with open(filepath, 'r') as f:
+            content = f.read()
+        
+        # Check for common syntax issues
+        if '*def*' in content or 'def *' in content:
+            return False, "Found asterisks in function definition"
+        
+        if '.*' in content and 'self.*' in content:
+            # Check if it's a method call with asterisks
+            lines = content.split('\n')
+            for i, line in enumerate(lines):
+                if 'self.*' in line and '*(' in line:
+                    return False, f"Found asterisks in method call on line {i+1}"
+        
+        # Try to parse the file
+        ast.parse(content)
+        return True, "Syntax OK"
+        
+    except SyntaxError as e:
+        return False, f"Syntax error on line {e.lineno}: {e.msg}"
+    except Exception as e:
+        return False, f"Error: {str(e)}"
 
 
 def check_spatial_disaggregation(filepath):
@@ -108,6 +103,34 @@ def verify_clean_implementation():
     print("GRANITE Clean Code Verification")
     print("="*60)
     
+    # First check for syntax errors
+    print("\n1. Checking for syntax errors...")
+    syntax_files = [
+        'granite/__init__.py',
+        'granite/metricgraph/__init__.py', 
+        'granite/metricgraph/interface.py',
+        'granite/disaggregation/pipeline.py',
+        'granite/visualization/plots.py'
+    ]
+    
+    syntax_ok = True
+    for filepath in syntax_files:
+        if os.path.exists(filepath):
+            passed, message = check_syntax_errors(filepath)
+            if passed:
+                print(f"  ✓ {filepath} - {message}")
+            else:
+                print(f"  ✗ {filepath} - {message}")
+                syntax_ok = False
+        else:
+            print(f"  ? {filepath} - File not found")
+    
+    if not syntax_ok:
+        print("\n✗ Fix syntax errors before proceeding with other checks")
+        return False
+    
+    print("\n2. Checking implementation requirements...")
+    
     # Define files to check
     checks = [
         {
@@ -134,20 +157,20 @@ def verify_clean_implementation():
         check_func = check_item['check']
         description = check_item['description']
         
-        print(f"\nChecking: {description}")
-        print(f"  File: {filepath}")
+        print(f"\n  Checking: {description}")
+        print(f"    File: {filepath}")
         
         if not os.path.exists(filepath):
-            print(f"  ✗ File not found")
+            print(f"    ✗ File not found")
             all_passed = False
             continue
         
         passed, message = check_func(filepath)
         
         if passed:
-            print(f"  ✓ {message}")
+            print(f"    ✓ {message}")
         else:
-            print(f"  ✗ {message}")
+            print(f"    ✗ {message}")
             all_passed = False
     
     print("\n" + "="*60)

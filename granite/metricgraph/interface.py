@@ -10,6 +10,7 @@ from rpy2.robjects.conversion import localconverter
 import rpy2.robjects.packages as rpackages
 import time
 import logging
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -483,6 +484,10 @@ class MetricGraphInterface:
                 )
             }
             ''')
+
+        except Exception as e:
+            self._log(f"Error retrieving graph info: {str(e)}")
+            return None
             
             info_func = ro.r['get_graph_info']
             info = info_func(metric_graph)

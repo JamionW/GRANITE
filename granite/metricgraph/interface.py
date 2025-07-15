@@ -83,30 +83,56 @@ class MetricGraphInterface:
         
         try:
             with localconverter(self.converter):
-                # Convert inputs to Rclear
-                
+                # Convert inputs to R
                 r_tract_observation = ro.conversion.py2rpy(tract_observation)
                 r_prediction_locations = ro.conversion.py2rpy(prediction_locations)
                 
-                # Convert GNN features if provided
+                # DEBUG: Log what we actually received for gnn_features
+                self._log(f"gnn_features type: {type(gnn_features)}")
                 if gnn_features is not None:
-                    # Handle both numpy arrays and DataFrames
-                    if isinstance(gnn_features, np.ndarray):
-                        # Convert numpy array to DataFrame
-                        gnn_df = pd.DataFrame(gnn_features, columns=['gnn_kappa', 'gnn_alpha', 'gnn_tau'])
-                    elif isinstance(gnn_features, pd.DataFrame):
-                        gnn_df = gnn_features.copy()
-                    else:
-                        # Convert whatever it is to DataFrame
-                        gnn_df = pd.DataFrame(gnn_features)
-                    
-                    # Convert to basic Python types for rpy2
-                    for col in gnn_df.columns:
-                        gnn_df[col] = gnn_df[col].astype(float)
-                    
-                    r_gnn_features = ro.conversion.py2rpy(gnn_df)
+                    if hasattr(gnn_features, 'shape'):
+                        self._log(f"gnn_features shape: {gnn_features.shape}")
+                    elif hasattr(gnn_features, 'columns'):
+                        self._log(f"gnn_features columns: {list(gnn_features.columns)}")
+                
+                # DEFENSIVE: Handle gnn_features regardless of type
+                if gnn_features is not None:
+                    try:
+                        # Case 1: It's already a DataFrame
+                        if hasattr(gnn_features, 'columns'):
+                            gnn_df = gnn_features.copy()
+                            self._log("gnn_features is DataFrame")
+                        
+                        # Case 2: It's a numpy array
+                        elif hasattr(gnn_features, 'shape'):
+                            if len(gnn_features.shape) == 2:
+                                gnn_df = pd.DataFrame(gnn_features, columns=['gnn_kappa', 'gnn_alpha', 'gnn_tau'])
+                                self._log(f"Converted 2D numpy array to DataFrame: {gnn_df.shape}")
+                            else:
+                                # 1D array - reshape it
+                                gnn_df = pd.DataFrame([gnn_features], columns=['gnn_kappa', 'gnn_alpha', 'gnn_tau'])
+                                self._log("Converted 1D array to DataFrame")
+                        
+                        # Case 3: It's a list or something else
+                        else:
+                            gnn_df = pd.DataFrame(gnn_features)
+                            if gnn_df.shape[1] == 3:
+                                gnn_df.columns = ['gnn_kappa', 'gnn_alpha', 'gnn_tau']
+                            self._log("Converted other type to DataFrame")
+                        
+                        # Ensure all values are basic Python floats (not numpy types)
+                        for col in gnn_df.columns:
+                            gnn_df[col] = gnn_df[col].astype(float)
+                        
+                        r_gnn_features = ro.conversion.py2rpy(gnn_df)
+                        self._log("Successfully converted gnn_features to R")
+                        
+                    except Exception as e:
+                        self._log(f"Error converting gnn_features: {str(e)}")
+                        r_gnn_features = ro.r('NULL')
                 else:
                     r_gnn_features = ro.r('NULL')
+                    self._log("gnn_features is None, using NULL")
                 
             # Call R disaggregation function (outside localconverter)
             disaggregate_func = ro.r['disaggregate_with_constraint']
@@ -143,9 +169,9 @@ class MetricGraphInterface:
                             'constraint_error': constraint_error,
                             'total_predicted': total_predicted,
                             'tract_value': tract_value,
-                            'mean_prediction': predictions_df['mean'].mean(),
-                            'std_prediction': predictions_df['mean'].std(),
-                            'mean_uncertainty': predictions_df['sd'].mean()
+                            'mean_prediction': float(predictions_df['mean'].mean()),
+                            'std_prediction': float(predictions_df['mean'].std()),
+                            'mean_uncertainty': float(predictions_df['sd'].mean())
                         }
                     }
                 else:
@@ -628,20 +654,15 @@ class MetricGraphInterface:
                 'bbox': np.array(info[3])
             }
     
-    def _kriging_baseline(self, tract_observation: pd.DataFrame,
-                     prediction_locations: pd.DataFrame) -> Dict:
-        """
-        Standard kriging baseline for comparison
-        Returns dict structure matching what calling code expects
-        """
+    def _kriging_baseline(self, tract_observation: pd.DataFrame, prediction_locations: pd.DataFrame) -> Dict:
+        """Standard kriging baseline - clean version with no undefined references"""
         self._log("Using standard kriging baseline for disaggregation")
-        clear
-
+        
         try:
             # Get tract parameters
-            tract_x = tract_observation['coord_x'].iloc[0]
-            tract_y = tract_observation['coord_y'].iloc[0]
-            tract_svi = tract_observation['svi_value'].iloc[0]
+            tract_x = float(tract_observation['coord_x'].iloc[0])
+            tract_y = float(tract_observation['coord_y'].iloc[0])
+            tract_svi = float(tract_observation['svi_value'].iloc[0])
             
             # Calculate distances
             distances = np.sqrt(
@@ -649,24 +670,25 @@ class MetricGraphInterface:
                 (prediction_locations['y'] - tract_y)**2
             )
             
-            # Simple exponential variogram model
-            range_param = np.percentile(distances, 75)
-            sill = tract_svi * 0.1  # 10% of tract value as variance
+            # Simple kriging model
+            range_param = float(np.percentile(distances, 75))
+            if range_param == 0:
+                range_param = 0.01  # Avoid division by zero
+                
+            sill = tract_svi * 0.1
             
-            # Kriging weights (simplified ordinary kriging)
+            # Kriging weights
             weights = np.exp(-3 * distances / range_param)
             weights = weights / weights.sum()
             
-            # Predictions (ensure sum constraint)
+            # Predictions
             predictions = tract_svi * weights * len(weights)
+            kriging_sd = np.sqrt(sill * (1 - np.exp(-3 * distances / range_param)))
             
-            # Kriging variance
-            kriging_var = sill * (1 - np.exp(-3 * distances / range_param))
-            kriging_sd = np.sqrt(kriging_var)
-            
+            # Create results DataFrame
             predictions_df = pd.DataFrame({
-                'x': prediction_locations['x'],
-                'y': prediction_locations['y'],
+                'x': prediction_locations['x'].values,
+                'y': prediction_locations['y'].values,
                 'mean': predictions,
                 'sd': kriging_sd,
                 'q025': predictions - 1.96 * kriging_sd,
@@ -677,9 +699,9 @@ class MetricGraphInterface:
             predictions_df['mean'] = predictions_df['mean'].clip(lower=0)
             predictions_df['q025'] = predictions_df['q025'].clip(lower=0)
             
-            # Check constraint
-            total_predicted = predictions_df['mean'].sum()
-            constraint_error = abs(total_predicted - tract_svi) / tract_svi
+            # Calculate diagnostics
+            total_predicted = float(predictions_df['mean'].sum())
+            constraint_error = abs(total_predicted - tract_svi) / max(tract_svi, 1e-6)
             
             return {
                 'success': True,
@@ -689,35 +711,32 @@ class MetricGraphInterface:
                     'constraint_error': constraint_error,
                     'total_predicted': total_predicted,
                     'tract_value': tract_svi,
-                    'mean_prediction': predictions_df['mean'].mean(),  # <-- THIS WAS MISSING
-                    'std_prediction': predictions_df['mean'].std(),   # <-- THIS WAS MISSING
-                    'mean_uncertainty': predictions_df['sd'].mean(),
-                    'range_param': range_param,
-                    'sill': sill,
+                    'mean_prediction': float(predictions_df['mean'].mean()),
+                    'std_prediction': float(predictions_df['mean'].std()),
+                    'mean_uncertainty': float(predictions_df['sd'].mean()),
                     'method': 'ordinary_kriging'
                 }
             }
             
         except Exception as e:
             self._log(f"Kriging baseline failed: {str(e)}")
-            # Ultimate fallback: uniform distribution
             n_pred = len(prediction_locations)
-            uniform_value = tract_observation['svi_value'].iloc[0] / n_pred
+            uniform_value = tract_observation['svi_value'].iloc[0] / max(n_pred, 1)
             
             return {
                 'success': False,
                 'predictions': pd.DataFrame({
-                    'x': prediction_locations['x'],
-                    'y': prediction_locations['y'],
-                    'mean': uniform_value,
-                    'sd': uniform_value * 0.1,
-                    'q025': uniform_value * 0.8,
-                    'q975': uniform_value * 1.2
+                    'x': prediction_locations['x'].values,
+                    'y': prediction_locations['y'].values,
+                    'mean': [uniform_value] * n_pred,
+                    'sd': [uniform_value * 0.1] * n_pred,
+                    'q025': [uniform_value * 0.8] * n_pred,
+                    'q975': [uniform_value * 1.2] * n_pred
                 }),
                 'diagnostics': {
                     'constraint_satisfied': False,
                     'constraint_error': 1.0,
-                    'mean_prediction': uniform_value,  # <-- ENSURE THIS IS ALWAYS PRESENT
+                    'mean_prediction': uniform_value,
                     'std_prediction': 0.0,
                     'mean_uncertainty': uniform_value * 0.1,
                     'method': 'uniform_fallback'

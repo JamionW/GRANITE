@@ -247,21 +247,53 @@ class MetricGraphInterface:
         """Initialize R environment and load required packages"""
         self._log("Initializing R environment...")
         
-        # Check and install MetricGraph if needed
-        utils = rpackages.importr('utils')
-        utils.chooseCRANmirror(ind=1)
+        # Set R options for quiet operation
+        ro.r('''
+        options(repos = c(CRAN = "https://cloud.r-project.org"))
+        options(warn = -1)
+        suppressPackageStartupMessages(library(methods))
+        options(warn = 0)
+        ''')
         
-        if not rpackages.isinstalled('MetricGraph'):
-            self._log("Installing MetricGraph package...")
-            utils.install_packages('MetricGraph')
-        
-        # Import MetricGraph
+        # Try to load MetricGraph - don't install automatically
         try:
+            # Check if MetricGraph is available
+            ro.r('''
+            if (!requireNamespace("MetricGraph", quietly = TRUE)) {
+                stop("MetricGraph package is not installed. Please install it using:\\n",
+                    "  R -e \\"install.packages('MetricGraph')\\"\\n",
+                    "  or in R: install.packages('MetricGraph')")
+            }
+            ''')
+            
+            # Load the packages
+            ro.r('''
+            suppressWarnings(suppressMessages({
+                library(MetricGraph, quietly = TRUE)
+                library(Matrix, quietly = TRUE)
+            }))
+            ''')
+            
+            # Import MetricGraph
             self.mg = rpackages.importr('MetricGraph')
             self._log("MetricGraph package loaded successfully")
+            
         except Exception as e:
-            self._log(f"Failed to load MetricGraph: {str(e)}")
+            error_msg = str(e)
+            if "MetricGraph package is not installed" in error_msg:
+                self._log("="*60)
+                self._log("ERROR: MetricGraph R package is not installed")
+                self._log("Please install it by running ONE of these commands:")
+                self._log("  1. In terminal: R -e \"install.packages('MetricGraph')\"")
+                self._log("  2. In R console: install.packages('MetricGraph')")
+                self._log("  3. With user library: R -e \"install.packages('MetricGraph', lib='~/R/library')\"")
+                self._log("="*60)
+            else:
+                self._log(f"Failed to load MetricGraph: {error_msg}")
             self.mg = None
+            
+            # Don't continue if MetricGraph isn't available
+            raise RuntimeError("MetricGraph R package is required but not available")
             
         # Define R helper functions for graph creation and spatial disaggregation
         ro.r('''

@@ -2,6 +2,20 @@
 MetricGraph R interface for GRANITE framework
 Updated to support spatial disaggregation workflow
 """
+import os
+import warnings
+
+# Suppress rpy2 warnings BEFORE any rpy2 imports
+os.environ['PYTHONWARNINGS'] = 'ignore'
+os.environ['R_LIBS_SITE'] = '/usr/local/lib/R/site-library:/usr/lib/R/site-library:/usr/lib/R/library'
+
+# Suppress specific rpy2 warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='rpy2')
+warnings.filterwarnings('ignore', message='.*LD_LIBRARY_PATH.*')
+warnings.filterwarnings('ignore', message='.*R_LIBS_SITE.*')
+warnings.filterwarnings('ignore', message='.*R_PAPERSIZE_USER.*')
+warnings.filterwarnings('ignore', message='.*R_SESSION_TMPDIR.*')
+
 import numpy as np
 import pandas as pd
 import rpy2.robjects as ro
@@ -11,13 +25,8 @@ import rpy2.robjects.packages as rpackages
 import time
 import logging
 from typing import Dict, Optional, Tuple
-import warnings
-import os
-warnings.filterwarnings('ignore', category=UserWarning)
-os.environ['R_LIBS_SITE'] = '/usr/local/lib/R/site-library:/usr/lib/R/site-library:/usr/lib/R/library'
 
-logger = logging.getLogger(__name__)
-
+logger = logging.getLogger(__name__)  # <-- THIS LINE WAS MISSING
 
 class MetricGraphInterface:
     """
@@ -43,6 +52,114 @@ class MetricGraphInterface:
         """Log operation timing"""
         elapsed = time.time() - start_time
         self._log(f"{operation} completed in {elapsed:.2f}s")
+
+    def disaggregate_svi(self, metric_graph, tract_observation, prediction_locations, gnn_features=None, alpha=1):
+        """
+        Perform SVI spatial disaggregation using MetricGraph with GNN features
+        
+        Parameters:
+        -----------
+        metric_graph : R object
+            MetricGraph object
+        tract_observation : pd.DataFrame
+            Tract-level observation with coord_x, coord_y, svi_value columns
+        prediction_locations : pd.DataFrame
+            Address coordinates for prediction with x, y columns
+        gnn_features : pd.DataFrame, optional
+            GNN-learned features with columns ['gnn_kappa', 'gnn_alpha', 'gnn_tau']
+        alpha : int
+            Alpha parameter for SPDE model
+            
+        Returns:
+        --------
+        dict : Disaggregation results
+        """
+        if metric_graph is None:
+            self._log("MetricGraph is None, using kriging baseline")
+            return self._kriging_baseline(tract_observation, prediction_locations)
+            
+        start_time = time.time()
+        self._log("Performing spatial disaggregation...")
+        
+        try:
+            with localconverter(self.converter):
+                # Convert inputs to Rclear
+                
+                r_tract_observation = ro.conversion.py2rpy(tract_observation)
+                r_prediction_locations = ro.conversion.py2rpy(prediction_locations)
+                
+                # Convert GNN features if provided
+                if gnn_features is not None:
+                    # Handle both numpy arrays and DataFrames
+                    if isinstance(gnn_features, np.ndarray):
+                        # Convert numpy array to DataFrame
+                        gnn_df = pd.DataFrame(gnn_features, columns=['gnn_kappa', 'gnn_alpha', 'gnn_tau'])
+                    elif isinstance(gnn_features, pd.DataFrame):
+                        gnn_df = gnn_features.copy()
+                    else:
+                        # Convert whatever it is to DataFrame
+                        gnn_df = pd.DataFrame(gnn_features)
+                    
+                    # Convert to basic Python types for rpy2
+                    for col in gnn_df.columns:
+                        gnn_df[col] = gnn_df[col].astype(float)
+                    
+                    r_gnn_features = ro.conversion.py2rpy(gnn_df)
+                else:
+                    r_gnn_features = ro.r('NULL')
+                
+            # Call R disaggregation function (outside localconverter)
+            disaggregate_func = ro.r['disaggregate_with_constraint']
+            result = disaggregate_func(
+                metric_graph,
+                ro.r('NULL'),  # spde_model will be created inside
+                r_tract_observation,
+                r_prediction_locations,
+                r_gnn_features
+            )
+            
+            # Extract results using rx2() to avoid conversion issues
+            try:
+                success = bool(result.rx2('success')[0])
+                if success:
+                    # Convert predictions back to pandas DataFrame
+                    with localconverter(self.converter):
+                        predictions_df = ro.conversion.rpy2py(result.rx2('predictions'))
+                    
+                    constraint_satisfied = bool(result.rx2('constraint_satisfied')[0])
+                    constraint_error = float(result.rx2('constraint_error')[0])
+                    total_predicted = float(result.rx2('total_predicted')[0])
+                    tract_value = float(result.rx2('tract_value')[0])
+                    
+                    self._log(f"Disaggregation completed: {len(predictions_df)} predictions")
+                    self._log(f"Constraint satisfied: {constraint_satisfied}")
+                    self._log_timing("Spatial disaggregation", start_time)
+                    
+                    return {
+                        'success': True,
+                        'predictions': predictions_df,
+                        'diagnostics': {
+                            'constraint_satisfied': constraint_satisfied,
+                            'constraint_error': constraint_error,
+                            'total_predicted': total_predicted,
+                            'tract_value': tract_value,
+                            'mean_prediction': predictions_df['mean'].mean(),
+                            'std_prediction': predictions_df['mean'].std(),
+                            'mean_uncertainty': predictions_df['sd'].mean()
+                        }
+                    }
+                else:
+                    error_msg = str(result.rx2('error')[0])
+                    self._log(f"Disaggregation failed: {error_msg}")
+                    return self._kriging_baseline(tract_observation, prediction_locations)
+                    
+            except Exception as e:
+                self._log(f"Error extracting disaggregation results: {str(e)}")
+                return self._kriging_baseline(tract_observation, prediction_locations)
+                
+        except Exception as e:
+            self._log(f"Error in spatial disaggregation: {str(e)}")
+            return self._kriging_baseline(tract_observation, prediction_locations)
         
     def _initialize_r_env(self):
         """Initialize R environment and load required packages"""
@@ -224,7 +341,7 @@ class MetricGraphInterface:
                 }
                 
                 # Create metric graph using V/E specification
-                graph <- metric_graph(
+                graph <- metric_graph$new(
                     V = V,
                     E = E,
                     edge_weights = edge_weights
@@ -389,35 +506,43 @@ class MetricGraphInterface:
                         
                         if sample_result[3][0]:  # was sampled
                             self._log(f"Sampled network: {len(edges_df)} edges "
-                                     f"(from {sample_result[4][0]})")
+                                    f"(from {sample_result[4][0]})")
                     else:
                         self._log(f"Sampling failed: {sample_result[1]}")
                 
-                # Convert to R
+                # Convert final data to R
                 r_nodes = ro.conversion.py2rpy(nodes_df)
                 r_edges = ro.conversion.py2rpy(edges_df)
-                
-                # Create graph
-                create_func = ro.r['create_metric_graph_optimized']
-                result = create_func(
-                    r_nodes,
-                    r_edges,
-                    build_mesh=True,
-                    mesh_h=self.config.get('mesh_resolution', 0.05)
-                )
-                
-                if result[0][0]:  # Check success flag
-                    graph = result[1]
-                    n_vertices = result[2][0]
-                    n_edges = result[3][0]
+
+            # Create graph OUTSIDE localconverter to avoid automatic conversion
+            create_func = ro.r['create_metric_graph_optimized']
+            result = create_func(
+                r_nodes,
+                r_edges,
+                build_mesh=True,
+                mesh_h=self.config.get('mesh_resolution', 0.05)
+            )
+
+            # Extract results using rx2() method to avoid automatic conversion
+            try:
+                success = bool(result.rx2('success')[0])
+                if success:
+                    graph = result.rx2('graph')  # Keep as R object - no conversion
+                    n_vertices = int(result.rx2('n_vertices')[0])
+                    n_edges = int(result.rx2('n_edges')[0])
                     
                     self._log(f"MetricGraph created: {n_vertices} vertices, {n_edges} edges")
                     self._log_timing("Graph creation", start_time)
                     
                     return graph
                 else:
-                    self._log(f"Graph creation failed: {result[1]}")
+                    error_msg = str(result.rx2('error')[0])
+                    self._log(f"Graph creation failed: {error_msg}")
                     return None
+                    
+            except Exception as e:
+                self._log(f"Error extracting graph result: {str(e)}")
+                return None
                     
         except Exception as e:
             self._log(f"Error creating graph: {str(e)}")
@@ -504,14 +629,14 @@ class MetricGraphInterface:
             }
     
     def _kriging_baseline(self, tract_observation: pd.DataFrame,
-                         prediction_locations: pd.DataFrame) -> Dict:
+                     prediction_locations: pd.DataFrame) -> Dict:
         """
         Standard kriging baseline for comparison
-        
-        Uses simple ordinary kriging without network constraints
+        Returns dict structure matching what calling code expects
         """
         self._log("Using standard kriging baseline for disaggregation")
-        
+        clear
+
         try:
             # Get tract parameters
             tract_x = tract_observation['coord_x'].iloc[0]
@@ -559,14 +684,17 @@ class MetricGraphInterface:
             return {
                 'success': True,
                 'predictions': predictions_df,
-                'method': 'ordinary_kriging',
                 'diagnostics': {
                     'constraint_satisfied': constraint_error < 0.001,
                     'constraint_error': constraint_error,
                     'total_predicted': total_predicted,
                     'tract_value': tract_svi,
+                    'mean_prediction': predictions_df['mean'].mean(),  # <-- THIS WAS MISSING
+                    'std_prediction': predictions_df['mean'].std(),   # <-- THIS WAS MISSING
+                    'mean_uncertainty': predictions_df['sd'].mean(),
                     'range_param': range_param,
-                    'sill': sill
+                    'sill': sill,
+                    'method': 'ordinary_kriging'
                 }
             }
             
@@ -574,7 +702,7 @@ class MetricGraphInterface:
             self._log(f"Kriging baseline failed: {str(e)}")
             # Ultimate fallback: uniform distribution
             n_pred = len(prediction_locations)
-            uniform_value = tract_observation['svi_value'].iloc[0]
+            uniform_value = tract_observation['svi_value'].iloc[0] / n_pred
             
             return {
                 'success': False,
@@ -586,6 +714,13 @@ class MetricGraphInterface:
                     'q025': uniform_value * 0.8,
                     'q975': uniform_value * 1.2
                 }),
-                'method': 'uniform_fallback',
+                'diagnostics': {
+                    'constraint_satisfied': False,
+                    'constraint_error': 1.0,
+                    'mean_prediction': uniform_value,  # <-- ENSURE THIS IS ALWAYS PRESENT
+                    'std_prediction': 0.0,
+                    'mean_uncertainty': uniform_value * 0.1,
+                    'method': 'uniform_fallback'
+                },
                 'error': str(e)
             }

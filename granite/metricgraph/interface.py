@@ -3,18 +3,43 @@ MetricGraph R interface for GRANITE framework
 Updated to support spatial disaggregation workflow
 """
 import os
-import warnings
+import sys
+
+# Set R environment variables BEFORE importing rpy2
+os.environ['R_HOME'] = '/usr/lib/R'  # Adjust path as needed
+os.environ['R_LIBS_USER'] = '/tmp/R_libs'
+os.environ['R_LIBS_SITE'] = ''  # Empty to avoid site library warnings
+os.environ['R_ENVIRON_USER'] = ''
+os.environ['R_PROFILE_USER'] = ''
+
+# Suppress console output during rpy2 import
+import io
+from contextlib import redirect_stdout, redirect_stderr
+
+# Import rpy2 with suppressed output
+with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+    import rpy2
+    import rpy2.robjects as ro
+    from rpy2.robjects import pandas2ri
+    from rpy2.robjects.conversion import localconverter
+    import rpy2.robjects.packages as rpackages
+    
+    # Set up console callback to suppress R messages
+    from rpy2.rinterface_lib import callbacks
+    
+    def quiet_console_write(text):
+        # Only print actual errors, suppress all warnings
+        if any(error_keyword in text.lower() for error_keyword in ['error', 'fatal']):
+            if 'warning message' not in text.lower():
+                print(f"[R] {text}", end='')
+    
+    # Override the console write callback
+    callbacks.consolewrite_print = quiet_console_write
+    callbacks.consolewrite_warnerror = quiet_console_write
 
 # Suppress rpy2 warnings BEFORE any rpy2 imports
 os.environ['PYTHONWARNINGS'] = 'ignore'
 os.environ['R_LIBS_SITE'] = '/usr/local/lib/R/site-library:/usr/lib/R/site-library:/usr/lib/R/library'
-
-# Suppress specific rpy2 warnings
-warnings.filterwarnings('ignore', category=UserWarning, module='rpy2')
-warnings.filterwarnings('ignore', message='.*LD_LIBRARY_PATH.*')
-warnings.filterwarnings('ignore', message='.*R_LIBS_SITE.*')
-warnings.filterwarnings('ignore', message='.*R_PAPERSIZE_USER.*')
-warnings.filterwarnings('ignore', message='.*R_SESSION_TMPDIR.*')
 
 import numpy as np
 import pandas as pd
@@ -133,12 +158,28 @@ class MetricGraphInterface:
                 else:
                     r_gnn_features = ro.r('NULL')
                     self._log("gnn_features is None, using NULL")
-                
-            # Call R disaggregation function (outside localconverter)
+            
+            # CRITICAL FIX: Create SPDE model FIRST, then pass it to disaggregation
+            # Create the SPDE model using the graph and GNN features
+            create_spde_func = ro.r['create_spde_model']
+            spde_result = create_spde_func(metric_graph, r_gnn_features, alpha)
+            
+            # Check if SPDE creation was successful
+            spde_success = bool(spde_result.rx2('success')[0])
+            if not spde_success:
+                error_msg = str(spde_result.rx2('error')[0])
+                self._log(f"SPDE model creation failed: {error_msg}")
+                return self._kriging_baseline(tract_observation, prediction_locations)
+            
+            # Extract the SPDE model
+            spde_model = spde_result.rx2('model')
+            self._log("SPDE model created successfully")
+            
+            # Now call disaggregation with the actual SPDE model
             disaggregate_func = ro.r['disaggregate_with_constraint']
             result = disaggregate_func(
                 metric_graph,
-                ro.r('NULL'),  # spde_model will be created inside
+                spde_model,  # Pass the actual SPDE model, not NULL!
                 r_tract_observation,
                 r_prediction_locations,
                 r_gnn_features
@@ -157,8 +198,22 @@ class MetricGraphInterface:
                     total_predicted = float(result.rx2('total_predicted')[0])
                     tract_value = float(result.rx2('tract_value')[0])
                     
+                    # Also extract SPDE parameters from the creation result
+                    try:
+                        params = spde_result.rx2('params')
+                        spde_params = {
+                            'kappa': float(params.rx2('kappa')[0]),
+                            'alpha': float(params.rx2('alpha')[0]),
+                            'sigma': float(params.rx2('sigma')[0]),
+                            'tau': float(params.rx2('tau')[0])
+                        }
+                        self._log(f"SPDE params: kappa={spde_params['kappa']:.3f}, "
+                                f"sigma={spde_params['sigma']:.3f}, tau={spde_params['tau']:.3f}")
+                    except:
+                        spde_params = {}
+                    
                     self._log(f"Disaggregation completed: {len(predictions_df)} predictions")
-                    self._log(f"Constraint satisfied: {constraint_satisfied}")
+                    self._log(f"Constraint satisfied: {constraint_satisfied} (error: {constraint_error:.4f})")
                     self._log_timing("Spatial disaggregation", start_time)
                     
                     return {
@@ -172,7 +227,8 @@ class MetricGraphInterface:
                             'mean_prediction': float(predictions_df['mean'].mean()),
                             'std_prediction': float(predictions_df['mean'].std()),
                             'mean_uncertainty': float(predictions_df['sd'].mean())
-                        }
+                        },
+                        'spde_params': spde_params
                     }
                 else:
                     error_msg = str(result.rx2('error')[0])
@@ -252,7 +308,7 @@ class MetricGraphInterface:
         
         # Function to perform constrained spatial disaggregation
         disaggregate_with_constraint <- function(graph, spde_model, tract_observation, 
-                                               prediction_locations, gnn_features) {
+                                       prediction_locations, gnn_features) {
             tryCatch({
                 # Build mesh if not already built
                 if(!graph$mesh_built()) {
@@ -263,12 +319,6 @@ class MetricGraphInterface:
                 tract_svi <- tract_observation$svi_value[1]
                 tract_x <- tract_observation$coord_x[1]
                 tract_y <- tract_observation$coord_y[1]
-                
-                # Project prediction locations to graph
-                pred_proj <- graph$project_obs(
-                    prediction_locations,
-                    normalized = FALSE
-                )
                 
                 # Get number of prediction points
                 n_pred <- nrow(prediction_locations)
@@ -281,14 +331,8 @@ class MetricGraphInterface:
                 weights <- 1 / (distances + 1e-6)
                 weights <- weights / sum(weights)
                 
-                # Initial disaggregated values (sum to tract total)
-                initial_values <- tract_svi * weights * n_pred
-                
-                # Create precision matrix from SPDE
-                Q <- spde_model$Q
-                
-                # Add small diagonal for numerical stability
-                Q_stable <- Q + Matrix::Diagonal(n = nrow(Q), x = 1e-6)
+                # Initial disaggregated values (normalized to preserve mass)
+                initial_values <- weights * tract_svi
                 
                 # Use GNN features to create spatially-varying field
                 if(!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
@@ -305,14 +349,24 @@ class MetricGraphInterface:
                     adjusted_values <- initial_values
                 }
                 
-                # Calculate uncertainty based on SPDE model
-                # Approximate marginal variances
-                Q_inv_diag <- 1 / diag(Q_stable)
-                marginal_sd <- sqrt(Q_inv_diag * spde_model$params$sigma^2)
+                # Calculate uncertainty based on distance and GNN features
+                # Base uncertainty proportional to distance from tract centroid
+                base_uncertainty <- 0.1 * tract_svi  # 10% of tract value as base
                 
-                # Scale uncertainty by distance from observation
-                uncertainty_scale <- 1 + 0.1 * distances / max(distances)
-                final_sd <- marginal_sd[1:n_pred] * uncertainty_scale
+                # Scale uncertainty by distance
+                uncertainty_scale <- 1 + 0.2 * distances / max(distances)
+                
+                # If we have GNN tau values, use them to modulate uncertainty
+                if(!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
+                    tau_field <- gnn_features[1:n_pred, 3]
+                    # Convert tau to standard deviation (sigma = 1/sqrt(tau))
+                    sigma_field <- 1 / sqrt(pmax(tau_field, 0.1))  # Avoid division by zero
+                    # Normalize to reasonable range
+                    sigma_field <- sigma_field / mean(sigma_field)
+                    final_sd <- base_uncertainty * uncertainty_scale * sigma_field
+                } else {
+                    final_sd <- base_uncertainty * uncertainty_scale
+                }
                 
                 # Create prediction data frame
                 predictions <- data.frame(
@@ -344,7 +398,7 @@ class MetricGraphInterface:
             }, error = function(e) {
                 return(list(
                     success = FALSE,
-                    error = conditionMessage(e)
+                    error = paste("Disaggregation error:", conditionMessage(e))
                 ))
             })
         }

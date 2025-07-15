@@ -172,6 +172,7 @@ class GRANITEPipeline:
         """Process entire county with tract-by-tract disaggregation"""
         self._log("Processing in county mode")
         
+        total_tracts = len(data['tracts'])
         all_results = []
         successful = 0
         failed = 0
@@ -179,7 +180,10 @@ class GRANITEPipeline:
         # Process each tract
         for idx, tract in data['tracts'].iterrows():
             fips = tract['FIPS']
-            self._log(f"\nProcessing tract {fips} ({idx+1}/{len(data['tracts'])})")
+            
+            tract_number = idx + 1
+            self._log(f"\nProcessing tract {fips} ({tract_number}/{total_tracts})")
+
             
             # Skip if no SVI data
             if pd.isna(tract['RPL_THEMES']):

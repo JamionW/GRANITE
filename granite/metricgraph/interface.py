@@ -253,8 +253,30 @@ class MetricGraphInterface:
         options(repos = c(CRAN = "https://cloud.r-project.org"))
         options(warn = -1)  # Suppress warnings temporarily
         options(menu.graphics = FALSE)  # No graphical menus
-        options(pkgType = "binary")  # Prefer binary packages
-        options(install.packages.compile.from.source = "never")
+        
+        # Platform-aware package installation settings
+        # Check if binary packages are supported
+        binary_supported <- tryCatch({
+            # Test if binary installation works
+            temp_result <- install.packages("help", 
+                                        repos = "https://cloud.r-project.org",
+                                        type = "binary", 
+                                        quiet = TRUE)
+            TRUE
+        }, error = function(e) {
+            # Binary not supported, fall back to source
+            FALSE
+        })
+        
+        if (binary_supported) {
+            options(pkgType = "binary")
+            options(install.packages.compile.from.source = "never")
+            message("Using binary package installation")
+        } else {
+            options(pkgType = "source")
+            options(install.packages.compile.from.source = "always")
+            message("Using source package installation (binary not supported)")
+        }
         
         # Create a writable library directory
         # Try multiple locations in order of preference
@@ -292,43 +314,86 @@ class MetricGraphInterface:
         options(warn = 0)
         
         message(paste("Using R library:", user_lib))
+        message(paste("Binary packages supported:", binary_supported))
         ''')
         
         # Now check for and install MetricGraph if needed
         try:
-            # Check if MetricGraph is already installed
+            # First install remotes if not available (platform-aware)
             ro.r('''
-            # Function to check and install packages
-            ensure_package <- function(pkg) {
-                if (!requireNamespace(pkg, quietly = TRUE)) {
-                    # Get the first writable library path
-                    lib_path <- .libPaths()[1]
-                    
-                    # Install without any prompts
+            if (!requireNamespace("remotes", quietly = TRUE)) {
+                message("Installing remotes package...")
+                # Determine installation type based on platform support
+                if (exists("binary_supported") && binary_supported) {
+                    install.packages("remotes", 
+                                repos = "https://cloud.r-project.org", 
+                                quiet = TRUE, 
+                                dependencies = TRUE,
+                                type = "binary")
+                } else {
+                    install.packages("remotes", 
+                                repos = "https://cloud.r-project.org", 
+                                quiet = TRUE, 
+                                dependencies = TRUE,
+                                type = "source")
+                }
+            }
+            ''')
+            
+            # Install Matrix if needed
+            ro.r('''
+            if (!requireNamespace("Matrix", quietly = TRUE)) {
+                message("Installing Matrix package...")
+                install.packages("Matrix", 
+                            repos = "https://cloud.r-project.org", 
+                            quiet = TRUE, 
+                            dependencies = TRUE)
+            }
+            ''')
+            
+            # Check if MetricGraph is already installed, if not install from GitHub
+            ro.r('''
+            # Function to check and install packages from GitHub
+            ensure_metricgraph <- function() {
+                if (!requireNamespace("MetricGraph", quietly = TRUE)) {
+                    message("Installing MetricGraph from GitHub...")
                     tryCatch({
-                        install.packages(pkg,
-                                    lib = lib_path,
-                                    repos = "https://cloud.r-project.org",
-                                    dependencies = TRUE,
-                                    quiet = TRUE,
-                                    type = "binary",  # Faster installation
-                                    INSTALL_opts = "--no-lock")  # Avoid file locking issues
+                        remotes::install_github("davidbolin/MetricGraph", 
+                                            quiet = TRUE, 
+                                            upgrade = "never",
+                                            dependencies = TRUE,
+                                            force = FALSE,
+                                            build_vignettes = FALSE)  # Skip vignettes for faster install
                         TRUE
                     }, error = function(e) {
-                        message(paste("Failed to install", pkg, ":", e$message))
-                        FALSE
+                        message(paste("Failed to install MetricGraph:", e$message))
+                        
+                        # Try alternative installation methods
+                        message("Trying alternative installation from stable branch...")
+                        tryCatch({
+                            remotes::install_github("davidbolin/MetricGraph@stable", 
+                                                quiet = TRUE, 
+                                                upgrade = "never",
+                                                dependencies = TRUE,
+                                                force = FALSE,
+                                                build_vignettes = FALSE)
+                            TRUE
+                        }, error = function(e2) {
+                            message(paste("Alternative installation also failed:", e2$message))
+                            FALSE
+                        })
                     })
                 } else {
+                    message("MetricGraph already installed")
                     TRUE
                 }
             }
             
-            # Ensure required packages are installed
-            metricgraph_available <- ensure_package("MetricGraph")
-            matrix_available <- ensure_package("Matrix")
+            # Install MetricGraph
+            metricgraph_available <- ensure_metricgraph()
             
             if (!metricgraph_available) {
-                stop("MetricGraph package could not be installed")
+                stop("MetricGraph package could not be installed from GitHub")
             }
             ''')
             
@@ -347,11 +412,31 @@ class MetricGraphInterface:
         except Exception as e:
             self._log(f"Failed to initialize R packages: {str(e)}")
             
-            # Try alternative: assume packages are pre-installed
+            # Try alternative: check if packages are already installed system-wide
             try:
+                # Check different R library paths
+                ro.r('''
+                # Search for MetricGraph in all library paths
+                all_libs <- .libPaths()
+                metricgraph_found <- FALSE
+                
+                for (lib_path in all_libs) {
+                    if (dir.exists(file.path(lib_path, "MetricGraph"))) {
+                        message(paste("Found MetricGraph in:", lib_path))
+                        metricgraph_found <- TRUE
+                        break
+                    }
+                }
+                
+                if (!metricgraph_found) {
+                    message("MetricGraph not found in any library path")
+                    message(paste("Searched paths:", paste(all_libs, collapse = ", ")))
+                }
+                ''')
+                
                 ro.r('library(MetricGraph)')
                 self.mg = rpackages.importr('MetricGraph')
-                self._log("MetricGraph loaded from pre-installed packages")
+                self._log("MetricGraph loaded from existing installation")
             except:
                 self._log("MetricGraph not available - spatial features will be limited")
                 self.mg = None
@@ -776,6 +861,7 @@ class MetricGraphInterface:
             return None
             
         try:
+            # Define R function
             ro.r('''
             get_graph_info <- function(graph) {
                 list(
@@ -786,11 +872,8 @@ class MetricGraphInterface:
                 )
             }
             ''')
-
-        except Exception as e:
-            self._log(f"Error retrieving graph info: {str(e)}")
-            return None
             
+            # Call the R function and extract results
             info_func = ro.r['get_graph_info']
             info = info_func(metric_graph)
             
@@ -800,6 +883,10 @@ class MetricGraphInterface:
                 'has_mesh': bool(info[2][0]),
                 'bbox': np.array(info[3])
             }
+            
+        except Exception as e:
+            self._log(f"Error retrieving graph info: {str(e)}")
+            return None
     
     def _kriging_baseline(self, tract_observation: pd.DataFrame, prediction_locations: pd.DataFrame) -> Dict:
         """Standard kriging baseline - clean version with no undefined references"""

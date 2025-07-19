@@ -247,22 +247,88 @@ class MetricGraphInterface:
         """Initialize R environment and load required packages"""
         self._log("Initializing R environment...")
         
-        # Set R options for quiet operation
+        # First, set up R library paths and options BEFORE any package operations
         ro.r('''
+        # Suppress all prompts and messages
         options(repos = c(CRAN = "https://cloud.r-project.org"))
-        options(warn = -1)
-        suppressPackageStartupMessages(library(methods))
+        options(warn = -1)  # Suppress warnings temporarily
+        options(menu.graphics = FALSE)  # No graphical menus
+        options(pkgType = "binary")  # Prefer binary packages
+        options(install.packages.compile.from.source = "never")
+        
+        # Create a writable library directory
+        # Try multiple locations in order of preference
+        lib_paths <- c(
+            file.path(tempdir(), "R_libs"),  # Temp directory (always writable)
+            file.path(Sys.getenv("HOME"), ".R", "library"),  # User home
+            file.path(getwd(), "R_libs")  # Current directory
+        )
+        
+        # Find or create the first writable directory
+        user_lib <- NULL
+        for (path in lib_paths) {
+            if (!dir.exists(path)) {
+                try({
+                    dir.create(path, recursive = TRUE, showWarnings = FALSE)
+                    if (dir.exists(path)) {
+                        user_lib <- path
+                        break
+                    }
+                }, silent = TRUE)
+            } else if (file.access(path, 2) == 0) {  # Check if writable
+                user_lib <- path
+                break
+            }
+        }
+        
+        if (is.null(user_lib)) {
+            stop("Could not find or create a writable R library directory")
+        }
+        
+        # Set library paths with our writable directory first
+        .libPaths(c(user_lib, .libPaths()))
+        
+        # Restore warning level
         options(warn = 0)
+        
+        message(paste("Using R library:", user_lib))
         ''')
         
-        # Try to load MetricGraph - don't install automatically
+        # Now check for and install MetricGraph if needed
         try:
-            # Check if MetricGraph is available
+            # Check if MetricGraph is already installed
             ro.r('''
-            if (!requireNamespace("MetricGraph", quietly = TRUE)) {
-                stop("MetricGraph package is not installed. Please install it using:\\n",
-                    "  R -e \\"install.packages('MetricGraph')\\"\\n",
-                    "  or in R: install.packages('MetricGraph')")
+            # Function to check and install packages
+            ensure_package <- function(pkg) {
+                if (!requireNamespace(pkg, quietly = TRUE)) {
+                    # Get the first writable library path
+                    lib_path <- .libPaths()[1]
+                    
+                    # Install without any prompts
+                    tryCatch({
+                        install.packages(pkg,
+                                    lib = lib_path,
+                                    repos = "https://cloud.r-project.org",
+                                    dependencies = TRUE,
+                                    quiet = TRUE,
+                                    type = "binary",  # Faster installation
+                                    INSTALL_opts = "--no-lock")  # Avoid file locking issues
+                        TRUE
+                    }, error = function(e) {
+                        message(paste("Failed to install", pkg, ":", e$message))
+                        FALSE
+                    })
+                } else {
+                    TRUE
+                }
+            }
+            
+            # Ensure required packages are installed
+            metricgraph_available <- ensure_package("MetricGraph")
+            matrix_available <- ensure_package("Matrix")
+            
+            if (!metricgraph_available) {
+                stop("MetricGraph package could not be installed")
             }
             ''')
             
@@ -274,26 +340,21 @@ class MetricGraphInterface:
             }))
             ''')
             
-            # Import MetricGraph
+            # Import to Python
             self.mg = rpackages.importr('MetricGraph')
             self._log("MetricGraph package loaded successfully")
             
         except Exception as e:
-            error_msg = str(e)
-            if "MetricGraph package is not installed" in error_msg:
-                self._log("="*60)
-                self._log("ERROR: MetricGraph R package is not installed")
-                self._log("Please install it by running ONE of these commands:")
-                self._log("  1. In terminal: R -e \"install.packages('MetricGraph')\"")
-                self._log("  2. In R console: install.packages('MetricGraph')")
-                self._log("  3. With user library: R -e \"install.packages('MetricGraph', lib='~/R/library')\"")
-                self._log("="*60)
-            else:
-                self._log(f"Failed to load MetricGraph: {error_msg}")
-            self.mg = None
+            self._log(f"Failed to initialize R packages: {str(e)}")
             
-            # Don't continue if MetricGraph isn't available
-            raise RuntimeError("MetricGraph R package is required but not available")
+            # Try alternative: assume packages are pre-installed
+            try:
+                ro.r('library(MetricGraph)')
+                self.mg = rpackages.importr('MetricGraph')
+                self._log("MetricGraph loaded from pre-installed packages")
+            except:
+                self._log("MetricGraph not available - spatial features will be limited")
+                self.mg = None
             
         # Define R helper functions for graph creation and spatial disaggregation
         ro.r('''

@@ -17,25 +17,27 @@ import io
 from contextlib import redirect_stdout, redirect_stderr
 
 # Import rpy2 with suppressed output
-with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-    import rpy2
-    import rpy2.robjects as ro
-    from rpy2.robjects import pandas2ri
-    from rpy2.robjects.conversion import localconverter
-    import rpy2.robjects.packages as rpackages
-    
-    # Set up console callback to suppress R messages
-    from rpy2.rinterface_lib import callbacks
-    
-    def quiet_console_write(text):
-        # Only print actual errors, suppress all warnings
-        if any(error_keyword in text.lower() for error_keyword in ['error', 'fatal']):
-            if 'warning message' not in text.lower():
-                print(f"[R] {text}", end='')
-    
-    # Override the console write callback
-    callbacks.consolewrite_print = quiet_console_write
-    callbacks.consolewrite_warnerror = quiet_console_write
+import rpy2
+import rpy2.robjects as ro
+from rpy2.robjects import pandas2ri
+from rpy2.robjects.conversion import localconverter
+import rpy2.robjects.packages as rpackages
+
+# Set up console callback to suppress R messages
+from rpy2.rinterface_lib import callbacks
+
+def quiet_console_write(text):
+# Only print actual errors, suppress all warnings
+    if any(error_keyword in text.lower() for error_keyword in ['error', 'fatal']):
+        if 'warning message' not in text.lower():
+            print(f"[R] {text}", end='')
+    # TEMPORARY: Allow debug messages through
+    elif 'debug' in text.lower():
+        print(f"[R] {text}", end='')
+
+# Override the console write callback
+callbacks.consolewrite_print = quiet_console_write
+callbacks.consolewrite_warnerror = quiet_console_write
 
 # Suppress rpy2 warnings BEFORE any rpy2 imports
 os.environ['PYTHONWARNINGS'] = 'ignore'
@@ -218,7 +220,7 @@ class MetricGraphInterface:
                             'q025': list(r_predictions.rx2('q025')),
                             'q975': list(r_predictions.rx2('q975'))
                         })
-                        self._log(f"✅ Predictions extracted manually: shape {predictions_df.shape}")
+                        self._log(f" Predictions extracted manually: shape {predictions_df.shape}")
                     except Exception as e:
                         self._log(f"Manual DataFrame extraction failed: {e}")
                         return self._kriging_baseline(tract_observation, prediction_locations)
@@ -229,7 +231,7 @@ class MetricGraphInterface:
                         constraint_error = float(result.rx2('constraint_error')[0])
                         total_predicted = float(result.rx2('total_predicted')[0])
                         tract_value = float(result.rx2('tract_value')[0])
-                        self._log("✅ Scalar values extracted successfully")
+                        self._log(" Scalar values extracted successfully")
                     except Exception as e:
                         self._log(f"Error extracting scalar values: {e}")
                         # Use defaults
@@ -253,7 +255,7 @@ class MetricGraphInterface:
                         self._log(f"Error extracting SPDE params: {e}")
                         spde_params = {'kappa': 1.0, 'alpha': 1.0, 'sigma': 0.5, 'tau': 4.0}
                     
-                    self._log(f"✅ Whittle-Matérn disaggregation completed: {len(predictions_df)} predictions")
+                    self._log(f" Whittle-Matérn disaggregation completed: {len(predictions_df)} predictions")
                     self._log(f"Constraint satisfied: {constraint_satisfied} (error: {constraint_error:.4f})")
                     self._log_timing("Spatial disaggregation", start_time)
                     
@@ -299,9 +301,7 @@ class MetricGraphInterface:
             self._log("Checking if MetricGraph is already available...")
             ro.r('library(MetricGraph)')
             self.mg = rpackages.importr('MetricGraph')
-            self._log("✅ MetricGraph already working! Skipping installation.")
-            self._setup_r_functions()
-            return
+            self._log(" MetricGraph already working! Skipping installation.")
         except:
             self._log("MetricGraph not immediately available, proceeding with setup...")
         
@@ -310,7 +310,7 @@ class MetricGraphInterface:
         ro.r('''
         # Quick setup - no package installation yet
         options(repos = c(CRAN = "https://cloud.r-project.org"))
-        options(warn = -1)
+        #options(warn = -1)
         options(menu.graphics = FALSE)
         
         # Create temp library
@@ -366,7 +366,7 @@ class MetricGraphInterface:
                 ro.r('''
                 cat("Installing remotes...\\n")
                 install.packages("remotes", quiet = FALSE, verbose = TRUE)
-                cat("✅ remotes installation complete\\n")
+                cat(" remotes installation complete\\n")
                 ''')
             
             if needs_matrix:
@@ -374,7 +374,7 @@ class MetricGraphInterface:
                 ro.r('''
                 cat("Installing Matrix...\\n")
                 install.packages("Matrix", quiet = FALSE, verbose = TRUE)
-                cat("✅ Matrix installation complete\\n")
+                cat(" Matrix installation complete\\n")
                 ''')
             
             if needs_metricgraph:
@@ -398,7 +398,7 @@ class MetricGraphInterface:
                                         build_vignettes = FALSE) # Skip vignettes for speed
                     
                     end_time <- Sys.time()
-                    cat("\\n✅ MetricGraph installation completed in", 
+                    cat("\\n MetricGraph installation completed in", 
                         round(as.numeric(difftime(end_time, start_time, units = "mins")), 1), 
                         "minutes\\n")
                         
@@ -412,11 +412,11 @@ class MetricGraphInterface:
                                         upgrade = "never",
                                         dependencies = TRUE,
                                         build_vignettes = FALSE)
-                    cat("✅ Stable branch installation completed\\n")
+                    cat(" Stable branch installation completed\\n")
                 })
                 ''')
             else:
-                self._log("✅ MetricGraph already installed, skipping")
+                self._log(" MetricGraph already installed, skipping")
         
         except Exception as e:
             self._log(f"❌ Package installation failed: {e}")
@@ -426,15 +426,15 @@ class MetricGraphInterface:
         try:
             self._log("Loading packages...")
             ro.r('''
-            suppressWarnings(suppressMessages({
+            #suppressWarnings(suppressMessages({
                 library(MetricGraph, quietly = TRUE)
                 library(Matrix, quietly = TRUE)
-            }))
-            cat("✅ All packages loaded successfully\\n")
+            #}))
+            cat(" All packages loaded successfully\\n")
             ''')
             
             self.mg = rpackages.importr('MetricGraph')
-            self._log("✅ MetricGraph interface ready")
+            self._log(" MetricGraph interface ready")
             
         except Exception as e:
             self._log(f"❌ Failed to load MetricGraph: {e}")
@@ -461,7 +461,7 @@ class MetricGraphInterface:
                 
                 ro.r('library(MetricGraph)')
                 self.mg = rpackages.importr('MetricGraph')
-                self._log("✅ MetricGraph found and loaded from alternative path")
+                self._log(" MetricGraph found and loaded from alternative path")
                 
             except:
                 self._log("❌ MetricGraph not available - spatial features will be limited")
@@ -503,7 +503,7 @@ class MetricGraphInterface:
                     parameterization = "spde"
                 )
                 
-                cat("✅ SPDE model created successfully!\\n")
+                cat(" SPDE model created successfully!\\n")
                 cat("SPDE class:", class(spde_model), "\\n")
                 
                 return(list(
@@ -528,8 +528,9 @@ class MetricGraphInterface:
 
         # Function to perform GNN-informed Whittle-Matérn spatial disaggregation
         disaggregate_with_constraint <- function(graph, spde_model, tract_observation, 
-                                            prediction_locations, gnn_features) {
+                                                prediction_locations, gnn_features) {
             tryCatch({
+                cat("🚨 FUNCTION ENTRY - disaggregate_with_constraint called! 🚨\\n")
                 cat("=== Starting Whittle-Matérn Disaggregation ===\\n")
                 
                 # Check mesh status using correct API
@@ -540,7 +541,7 @@ class MetricGraphInterface:
                 if (!mesh_exists) {
                     cat("Building mesh...\\n")
                     graph$build_mesh(h = 0.05)
-                    cat("✅ Mesh built successfully\\n")
+                    cat(" Mesh built successfully\\n")
                 }
                 
                 # Verify SPDE model
@@ -565,45 +566,50 @@ class MetricGraphInterface:
                 distances <- sqrt((pred_x - tract_x)^2 + (pred_y - tract_y)^2)
                 
                 # Use SPDE parameters for spatial correlation
+                cat("🔍 GNN features check: is.null =", is.null(gnn_features), "\\n")
+                if (!is.null(gnn_features)) {
+                    cat("🔍 GNN features nrow =", nrow(gnn_features), "n_pred =", n_pred, "\\n")
+                }
+            
                 if (!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
-                    cat("Using GNN-informed Whittle-Matérn parameters\\n")
+                    cat("Using HYBRID GNN-informed Whittle-Matérn parameters\\n")
                     
                     # Extract GNN parameters safely
                     kappa_field <- as.numeric(gnn_features[1:n_pred, 1])
+                    alpha_field <- as.numeric(gnn_features[1:n_pred, 2]) 
                     tau_field <- as.numeric(gnn_features[1:n_pred, 3])
                     
-                    # Create spatially-varying Matérn correlation
-                    nu <- 1  # Matérn smoothness
-                    range_field <- sqrt(8 * nu) / kappa_field
+                    # HYBRID APPROACH: Start with simple spatial correlation (proven to work)
+                    fixed_range <- quantile(distances, 0.75)
+                    base_correlation <- exp(-distances / fixed_range)
                     
-                    # Matérn correlation function
-                    correlation <- numeric(n_pred)
-                    for (i in 1:n_pred) {
-                        h <- distances[i]
-                        range_i <- range_field[i]
-                        if (h == 0) {
-                            correlation[i] <- 1
-                        } else {
-                            scaled_dist <- h / range_i
-                            correlation[i] <- exp(-scaled_dist)
-                        }
-                    }
+                    # Add SUBTLE GNN-informed accessibility enhancement
+                    # Scale accessibility factor to avoid over-smoothing
+                    accessibility_raw <- kappa_field / mean(kappa_field)
+                    accessibility_factor <- 1.0 + 0.2 * (accessibility_raw - 1.0)  # Subtle 20% adjustment
                     
-                    # Create weights that respect Matérn spatial correlation
-                    weights <- correlation / sum(correlation)
+                    # Apply accessibility weighting to base correlation
+                    enhanced_correlation <- base_correlation * accessibility_factor
                     
-                    # Scale by accessibility (kappa)
-                    accessibility_factor <- kappa_field / mean(kappa_field)
-                    adjusted_values <- weights * tract_svi * accessibility_factor
+                    # Normalize weights to sum to 1
+                    weights <- enhanced_correlation / sum(enhanced_correlation)
                     
-                    # Renormalize to satisfy constraint
-                    adjusted_values <- adjusted_values * (tract_svi / sum(adjusted_values))
+                    # Apply weights to tract SVI
+                    adjusted_values <- weights * tract_svi
                     
-                    # Calculate uncertainty using tau parameters
-                    sigma_field <- 1 / sqrt(tau_field)
-                    uncertainty <- sigma_field * (1 - correlation) * tract_svi * 0.1
+                    # Renormalize to satisfy constraint (should be minimal adjustment)
+                    constraint_factor <- tract_svi / sum(adjusted_values)
+                    adjusted_values <- adjusted_values * constraint_factor
                     
-                    cat("✅ GNN-Whittle-Matérn disaggregation completed\\n")
+                    # Calculate uncertainty using hybrid approach
+                    # Use GNN tau for local precision, but maintain realistic scale
+                    sigma_base <- sqrt(0.1 * tract_svi)  # Base uncertainty scale
+                    tau_factor <- tau_field / mean(tau_field)  # Relative precision
+                    uncertainty <- sigma_base * (1 - base_correlation) / sqrt(tau_factor)
+                    
+                    cat(" HYBRID GNN-Whittle-Matérn disaggregation completed\\n")
+                    cat("Accessibility factor range:", min(accessibility_factor), "to", max(accessibility_factor), "\\n")
+                    cat("Constraint adjustment factor:", constraint_factor, "\\n")
                     
                 } else {
                     cat("Using basic Whittle-Matérn (no GNN features)\\n")
@@ -612,6 +618,7 @@ class MetricGraphInterface:
                     range_param <- quantile(distances, 0.75)
                     correlation <- exp(-distances / range_param)
                     weights <- correlation / sum(correlation)
+                    
                     adjusted_values <- weights * tract_svi
                     uncertainty <- sqrt(0.1 * tract_svi * (1 - correlation))
                 }
@@ -632,7 +639,7 @@ class MetricGraphInterface:
                 constraint_error <- abs(total_predicted - tract_svi) / tract_svi
                 
                 cat("Total predicted:", total_predicted, "Target:", tract_svi, "Error:", constraint_error, "\\n")
-                cat("✅ Whittle-Matérn spatial disaggregation completed successfully!\\n")
+                cat(" Whittle-Matérn spatial disaggregation completed successfully!\\n")
                 
                 # Return results with clean types (NO strings that cause conversion issues)
                 return(list(

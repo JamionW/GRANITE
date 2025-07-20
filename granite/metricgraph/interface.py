@@ -31,7 +31,7 @@ def quiet_console_write(text):
     if any(error_keyword in text.lower() for error_keyword in ['error', 'fatal']):
         if 'warning message' not in text.lower():
             print(f"[R] {text}", end='')
-    # TEMPORARY: Allow debug messages through
+    # Allow debug messages through
     elif 'debug' in text.lower():
         print(f"[R] {text}", end='')
 

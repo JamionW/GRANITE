@@ -181,7 +181,7 @@ class GRANITEPipeline:
         for idx, tract in data['tracts'].iterrows():
             fips = tract['FIPS']
             
-            tract_number = idx + 1
+            tract_number = idx
             self._log(f"\nProcessing tract {fips} ({tract_number}/{total_tracts})")
 
             

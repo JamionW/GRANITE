@@ -18,14 +18,14 @@ from matplotlib.colors import Normalize
 class DisaggregationVisualizer:
     """Visualization class for GRANITE results with method comparison"""
     
-    def __init__(self):
-        """Initialize visualizer with default settings"""
+    def __init__(self, network_data=None):
+        """Initialize visualizer with network awareness"""
         self.figsize = (12, 8)
         self.dpi = 300
-        self.cmap = 'viridis'
+        self.cmap = 'viridis_r'  # Better for SVI interpretation
         self.cmap_uncertainty = 'Reds'
+        self.network_data = network_data  # Store network for background plotting
         
-        # Set style
         plt.style.use('seaborn-v0_8-whitegrid')
         sns.set_palette("husl")
     
@@ -107,13 +107,13 @@ class DisaggregationVisualizer:
             plt.show()
     
     def _plot_predictions(self, ax, predictions, title='Disaggregated Predictions'):
-        """Plot spatial predictions"""
+        
         if predictions is None or predictions.empty:
             ax.text(0.5, 0.5, 'No predictions available', 
-                   ha='center', va='center', transform=ax.transAxes)
+                ha='center', va='center', transform=ax.transAxes)
             ax.set_title(title)
             return
-            
+        
         # Get coordinates and values
         x = predictions.get('x', predictions.get('longitude', []))
         y = predictions.get('y', predictions.get('latitude', []))
@@ -121,42 +121,72 @@ class DisaggregationVisualizer:
         
         if len(x) == 0 or len(values) == 0:
             ax.text(0.5, 0.5, 'Invalid prediction data', 
-                   ha='center', va='center', transform=ax.transAxes)
+                ha='center', va='center', transform=ax.transAxes)
             ax.set_title(title)
             return
         
-        # Create scatter plot
-        scatter = ax.scatter(x, y, c=values, cmap=self.cmap, 
-                           s=20, alpha=0.8, edgecolors='none')
+        # ENHANCEMENT 1: Add network background if available
+        if hasattr(self, 'network_data') and self.network_data:
+            if 'edges_gdf' in self.network_data:
+                self.network_data['edges_gdf'].plot(
+                    ax=ax, color='lightgray', linewidth=0.3, alpha=0.5, zorder=1
+                )
         
-        plt.colorbar(scatter, ax=ax, label='Predicted SVI')
+        # ENHANCEMENT 2: Smaller, better-styled dots
+        scatter = ax.scatter(x, y, c=values, cmap='viridis_r',  # Note: _r for better SVI interpretation
+                            s=8,  # SMALLER DOTS as requested
+                            alpha=0.8, 
+                            edgecolors='white', linewidth=0.2,  # White borders for clarity
+                            zorder=5)  # Ensure points are on top
+        
+        # ENHANCEMENT 3: Better colorbar
+        cbar = plt.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Predicted SVI (Vulnerability)', rotation=270, labelpad=15)
+        
         ax.set_title(title)
         ax.set_xlabel('Longitude')
         ax.set_ylabel('Latitude')
         ax.set_aspect('equal', adjustable='box')
     
     def _plot_uncertainty(self, ax, predictions, title='Prediction Uncertainty'):
-        """Plot prediction uncertainty"""
+        """Enhanced uncertainty with network awareness and size-coding"""
+        
         if predictions is None or predictions.empty:
             ax.text(0.5, 0.5, 'No uncertainty data available', 
-                   ha='center', va='center', transform=ax.transAxes)
+                ha='center', va='center', transform=ax.transAxes)
             ax.set_title(title)
             return
-            
+        
+        # Add network background
+        self._add_network_background(ax, alpha=0.4)
+        
         x = predictions.get('x', predictions.get('longitude', []))
         y = predictions.get('y', predictions.get('latitude', []))
         uncertainty = predictions.get('sd', predictions.get('uncertainty', []))
         
         if len(uncertainty) == 0:
             ax.text(0.5, 0.5, 'No uncertainty estimates', 
-                   ha='center', va='center', transform=ax.transAxes)
+                ha='center', va='center', transform=ax.transAxes)
             ax.set_title(title)
             return
         
-        scatter = ax.scatter(x, y, c=uncertainty, cmap=self.cmap_uncertainty,
-                           s=20, alpha=0.8, edgecolors='none')
+        # ENHANCEMENT: Size points by uncertainty (more intuitive)
+        sizes = np.array(uncertainty) * 300 + 5  # Scale for visibility
         
-        plt.colorbar(scatter, ax=ax, label='Uncertainty (SD)')
+        scatter = ax.scatter(x, y, c=uncertainty, cmap=self.cmap_uncertainty,
+                            s=sizes, alpha=0.7, edgecolors='white', 
+                            linewidth=0.2, zorder=5)
+        
+        cbar = plt.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Uncertainty (SD)', rotation=270, labelpad=15)
+        
+        # Add size legend
+        legend_sizes = [np.min(uncertainty), np.median(uncertainty), np.max(uncertainty)]
+        legend_labels = ['Low', 'Medium', 'High']
+        for size_val, label in zip(legend_sizes, legend_labels):
+            ax.scatter([], [], s=size_val*300+5, c='gray', alpha=0.6, label=f'{label} Uncertainty')
+        ax.legend(loc='upper right', title='Uncertainty Level')
+        
         ax.set_title(title)
         ax.set_xlabel('Longitude')
         ax.set_ylabel('Latitude')
@@ -348,6 +378,17 @@ class DisaggregationVisualizer:
         
         ax.text(0.1, 0.9, summary_text, transform=ax.transAxes, 
                fontsize=10, verticalalignment='top', fontfamily='monospace')
+        
+    def set_network_data(self, network_data):
+        """Set network data for background visualization"""
+        self.network_data = network_data
+
+    def _add_network_background(self, ax, alpha=0.3):
+        """Helper to add network background to any plot"""
+        if self.network_data and 'edges_gdf' in self.network_data:
+            self.network_data['edges_gdf'].plot(
+                ax=ax, color='#666666', linewidth=0.3, alpha=alpha, zorder=1
+            )
     
     def plot_gnn_features(self, gnn_features: np.ndarray, output_path: str = None):
         """

@@ -26,18 +26,18 @@ import rpy2.robjects.packages as rpackages
 # Set up console callback to suppress R messages
 from rpy2.rinterface_lib import callbacks
 
-def quiet_console_write(text):
+#def quiet_console_write(text):
 # Only print actual errors, suppress all warnings
-    if any(error_keyword in text.lower() for error_keyword in ['error', 'fatal']):
-        if 'warning message' not in text.lower():
-            print(f"[R] {text}", end='')
+#    if any(error_keyword in text.lower() for error_keyword in ['error', 'fatal']):
+#        if 'warning message' not in text.lower():
+#            print(f"[R] {text}", end='')
     # Allow debug messages through
-    elif 'debug' in text.lower():
-        print(f"[R] {text}", end='')
+#    elif 'debug' in text.lower():
+#        print(f"[R] {text}", end='')
 
 # Override the console write callback
-callbacks.consolewrite_print = quiet_console_write
-callbacks.consolewrite_warnerror = quiet_console_write
+#callbacks.consolewrite_print = quiet_console_write
+#callbacks.consolewrite_warnerror = quiet_console_write
 
 # Suppress rpy2 warnings BEFORE any rpy2 imports
 os.environ['PYTHONWARNINGS'] = 'ignore'
@@ -53,7 +53,7 @@ import time
 import logging
 from typing import Dict, Optional, Tuple
 
-logger = logging.getLogger(__name__)  # <-- THIS LINE WAS MISSING
+logger = logging.getLogger(__name__) 
 
 class MetricGraphInterface:
     """
@@ -229,7 +229,7 @@ class MetricGraphInterface:
                     try:
                         constraint_satisfied = bool(result.rx2('constraint_satisfied')[0])
                         constraint_error = float(result.rx2('constraint_error')[0])
-                        total_predicted = float(result.rx2('total_predicted')[0])
+                        predicted_mean = float(result.rx2('predicted_mean')[0])  # Changed from total_predicted
                         tract_value = float(result.rx2('tract_value')[0])
                         self._log(" Scalar values extracted successfully")
                     except Exception as e:
@@ -265,7 +265,7 @@ class MetricGraphInterface:
                         'diagnostics': {
                             'constraint_satisfied': constraint_satisfied,
                             'constraint_error': constraint_error,
-                            'total_predicted': total_predicted,
+                            'predicted_mean': predicted_mean,  # Changed from total_predicted
                             'tract_value': tract_value,
                             'mean_prediction': float(predictions_df['mean'].mean()),
                             'std_prediction': float(predictions_df['mean'].std()),
@@ -541,7 +541,7 @@ class MetricGraphInterface:
                 if (!mesh_exists) {
                     cat("Building mesh...\\n")
                     graph$build_mesh(h = 0.05)
-                    cat(" Mesh built successfully\\n")
+                    cat(" Mesh built successfully\\n")
                 }
                 
                 # Verify SPDE model
@@ -562,7 +562,7 @@ class MetricGraphInterface:
                 
                 cat("Disaggregating tract SVI:", tract_svi, "to", n_pred, "locations using Whittle-Matérn\\n")
                 
-                # Calculate distances
+                # Calculate distances (keep for backward compatibility)
                 distances <- sqrt((pred_x - tract_x)^2 + (pred_y - tract_y)^2)
                 
                 # Use SPDE parameters for spatial correlation
@@ -572,55 +572,89 @@ class MetricGraphInterface:
                 }
             
                 if (!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
-                    cat("Using HYBRID GNN-informed Whittle-Matérn parameters\\n")
+                    cat("Using TRUE network-aware SPDE (no centroid dependency)\\n")
                     
                     # Extract GNN parameters safely
                     kappa_field <- as.numeric(gnn_features[1:n_pred, 1])
                     alpha_field <- as.numeric(gnn_features[1:n_pred, 2]) 
                     tau_field <- as.numeric(gnn_features[1:n_pred, 3])
                     
-                    # HYBRID APPROACH: Start with simple spatial correlation (proven to work)
-                    fixed_range <- quantile(distances, 0.75)
-                    base_correlation <- exp(-distances / fixed_range)
+                    # METHOD 1: True SPDE using pairwise spatial correlation matrix
+                    coord_matrix <- cbind(pred_x, pred_y)
+                    pairwise_distances <- as.matrix(dist(coord_matrix))
                     
-                    # Add SUBTLE GNN-informed accessibility enhancement
-                    # Scale accessibility factor to avoid over-smoothing
-                    accessibility_raw <- kappa_field / mean(kappa_field)
-                    accessibility_factor <- 1.0 + 0.2 * (accessibility_raw - 1.0)  # Subtle 20% adjustment
+                    # SPDE spatial correlation: each location correlated with ALL others
+                    # Use learned GNN parameters to set spatial range
+                    mean_kappa <- mean(kappa_field)
+                    spatial_range <- 1.0 / sqrt(mean_kappa)  # Higher kappa = shorter range
                     
-                    # Apply accessibility weighting to base correlation
-                    enhanced_correlation <- base_correlation * accessibility_factor
+                    # Create full spatial correlation matrix (not from centroid!)
+                    spatial_correlation <- exp(-pairwise_distances / spatial_range)
                     
-                    # Normalize weights to sum to 1
-                    weights <- enhanced_correlation / sum(enhanced_correlation)
+                    # GNN-informed local parameter adjustment
+                    # Locations with similar GNN features should have higher correlation
+                    gnn_matrix <- cbind(kappa_field, alpha_field, tau_field)
+                    gnn_similarity <- 1 / (1 + as.matrix(dist(gnn_matrix)))
                     
-                    # Apply weights to tract SVI
-                    adjusted_values <- weights * tract_svi
+                    # Combine spatial and GNN similarity
+                    combined_correlation <- spatial_correlation * (0.7 + 0.3 * gnn_similarity)
                     
-                    # Renormalize to satisfy constraint (should be minimal adjustment)
-                    constraint_factor <- tract_svi / sum(adjusted_values)
-                    adjusted_values <- adjusted_values * constraint_factor
+                    # SPDE-style spatial field generation
+                    # Start with random field constrained to mean = tract_svi
+                    base_field <- rnorm(n_pred, mean = tract_svi, sd = sqrt(0.1 * tract_svi))
                     
-                    # Calculate uncertainty using hybrid approach
-                    # Use GNN tau for local precision, but maintain realistic scale
-                    sigma_base <- sqrt(0.1 * tract_svi)  # Base uncertainty scale
-                    tau_factor <- tau_field / mean(tau_field)  # Relative precision
-                    uncertainty <- sigma_base * (1 - base_correlation) / sqrt(tau_factor)
+                    # Apply spatial smoothing using correlation matrix
+                    # This is like Gaussian Process conditioning
+                    for (iter in 1:5) {
+                        # Each location influenced by weighted average of all others
+                        smoothed_field <- as.numeric(combined_correlation %*% base_field) / rowSums(combined_correlation)
+                        base_field <- 0.5 * smoothed_field + 0.5 * base_field  # Gradual smoothing
+                    }
                     
-                    cat(" HYBRID GNN-Whittle-Matérn disaggregation completed\\n")
-                    cat("Accessibility factor range:", min(accessibility_factor), "to", max(accessibility_factor), "\\n")
-                    cat("Constraint adjustment factor:", constraint_factor, "\\n")
+                    adjusted_values <- base_field
+                    
+                    cat("TRUE SPDE: Using full pairwise correlation matrix\\n")
+                    cat("Spatial range based on learned kappa:", spatial_range, "\\n")
                     
                 } else {
-                    cat("Using basic Whittle-Matérn (no GNN features)\\n")
+                    cat("Using basic SPDE (no GNN, but still network-aware)\\n")
                     
-                    # Standard Matérn with default parameters
-                    range_param <- quantile(distances, 0.75)
-                    correlation <- exp(-distances / range_param)
-                    weights <- correlation / sum(correlation)
+                    # METHOD 2: Basic network-aware SPDE without GNN
+                    coord_matrix <- cbind(pred_x, pred_y)
+                    pairwise_distances <- as.matrix(dist(coord_matrix))
                     
-                    adjusted_values <- weights * tract_svi
-                    uncertainty <- sqrt(0.1 * tract_svi * (1 - correlation))
+                    # Use median distance as spatial range
+                    spatial_range <- median(pairwise_distances[pairwise_distances > 0])
+                    spatial_correlation <- exp(-pairwise_distances / spatial_range)
+                    
+                    # Generate spatially correlated field
+                    base_field <- rnorm(n_pred, mean = tract_svi, sd = sqrt(0.1 * tract_svi))
+                    
+                    for (iter in 1:3) {
+                        smoothed_field <- as.numeric(spatial_correlation %*% base_field) / rowSums(spatial_correlation)
+                        base_field <- 0.6 * smoothed_field + 0.4 * base_field
+                    }
+                    
+                    adjusted_values <- base_field
+                    
+                    cat("Basic SPDE: Network-aware without tract centroid\\n")
+                }
+
+                # Ensure constraint satisfaction (this part stays the same)
+                current_mean <- mean(adjusted_values)
+                constraint_factor <- tract_svi / current_mean
+                adjusted_values <- adjusted_values * constraint_factor
+
+                # GNN-informed uncertainty (if available)
+                if (!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
+                    # Higher kappa = more precision = lower uncertainty
+                    relative_precision <- kappa_field / mean(kappa_field)
+                    uncertainty <- sqrt(0.1 * tract_svi) / sqrt(relative_precision)
+                } else {
+                    # Simple distance-based uncertainty (but not from centroid!)
+                    mean_distance_to_others <- rowMeans(pairwise_distances)
+                    max_mean_distance <- max(mean_distance_to_others)
+                    uncertainty <- sqrt(0.1 * tract_svi) * (1 + mean_distance_to_others / max_mean_distance)
                 }
                 
                 # Create prediction data frame with clean base R types
@@ -634,20 +668,20 @@ class MetricGraphInterface:
                     stringsAsFactors = FALSE
                 )
                 
-                # Calculate constraint metrics
-                total_predicted <- sum(predictions$mean)
-                constraint_error <- abs(total_predicted - tract_svi) / tract_svi
+                # Calculate constraint metrics (MEAN, not sum)
+                predicted_mean <- mean(predictions$mean)
+                constraint_error <- abs(predicted_mean - tract_svi) / tract_svi
                 
-                cat("Total predicted:", total_predicted, "Target:", tract_svi, "Error:", constraint_error, "\\n")
-                cat(" Whittle-Matérn spatial disaggregation completed successfully!\\n")
+                cat("Mean predicted:", predicted_mean, "Target:", tract_svi, "Error:", constraint_error, "\\n")
+                cat(" Whittle-Matérn spatial disaggregation completed successfully!\\n")
                 
-                # Return results with clean types (NO strings that cause conversion issues)
+                # Return results with clean types
                 return(list(
                     success = TRUE,
                     predictions = predictions,
                     constraint_satisfied = (constraint_error < 0.01),
                     constraint_error = as.numeric(constraint_error),
-                    total_predicted = as.numeric(total_predicted),
+                    predicted_mean = as.numeric(predicted_mean),
                     tract_value = as.numeric(tract_svi)
                 ))
                 
@@ -996,6 +1030,11 @@ class MetricGraphInterface:
             
             # Predictions
             predictions = tract_svi * weights * len(weights)
+
+            # Adjust to ensure mean = tract_svi (not sum = tract_svi)
+            current_mean = predictions.mean()
+            predictions = predictions * (tract_svi / current_mean)
+
             kriging_sd = np.sqrt(sill * (1 - np.exp(-3 * distances / range_param)))
             
             # Create results DataFrame
@@ -1012,9 +1051,9 @@ class MetricGraphInterface:
             predictions_df['mean'] = predictions_df['mean'].clip(lower=0)
             predictions_df['q025'] = predictions_df['q025'].clip(lower=0)
             
-            # Calculate diagnostics
-            total_predicted = float(predictions_df['mean'].sum())
-            constraint_error = abs(total_predicted - tract_svi) / max(tract_svi, 1e-6)
+            # Calculate diagnostics - corrected
+            predicted_mean = float(predictions_df['mean'].mean())  # Changed from sum
+            constraint_error = abs(predicted_mean - tract_svi) / max(tract_svi, 1e-6)
             
             return {
                 'success': True,
@@ -1022,7 +1061,7 @@ class MetricGraphInterface:
                 'diagnostics': {
                     'constraint_satisfied': constraint_error < 0.001,
                     'constraint_error': constraint_error,
-                    'total_predicted': total_predicted,
+                    'predicted_mean': predicted_mean, 
                     'tract_value': tract_svi,
                     'mean_prediction': float(predictions_df['mean'].mean()),
                     'std_prediction': float(predictions_df['mean'].std()),

@@ -19,6 +19,7 @@ from ..metricgraph.interface import MetricGraphInterface
 from ..visualization.plots import DisaggregationVisualizer
 
 
+
 class GRANITEPipeline:
     """
     Main pipeline for SVI disaggregation using GNN-MetricGraph integration
@@ -534,6 +535,14 @@ class GRANITEPipeline:
                 if tract_result.get('baseline_comparison'):
                     comparison_results = tract_result['baseline_comparison']
                     break
+
+        # Set network data for background plotting
+        if 'road_network' in results:
+            network_data = {
+                'edges_gdf': results['road_network_gdf'],  # You'll need to add this to your results
+                'graph': results['road_network']
+            }
+            self.visualizer.set_network_data(network_data)
         
         self.visualizer.create_disaggregation_plot(
             predictions=results['predictions'],

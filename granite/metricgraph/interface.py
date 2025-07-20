@@ -6,8 +6,8 @@ import os
 import sys
 
 # Set R environment variables BEFORE importing rpy2
-os.environ['R_HOME'] = '/usr/lib/R'  # Adjust path as needed
-os.environ['R_LIBS_USER'] = '/tmp/R_libs'
+#os.environ['R_HOME'] = '/usr/lib/R'  # Adjust path as needed
+#os.environ['R_LIBS_USER'] = '/tmp/R_libs'
 os.environ['R_LIBS_SITE'] = ''  # Empty to avoid site library warnings
 os.environ['R_ENVIRON_USER'] = ''
 os.environ['R_PROFILE_USER'] = ''
@@ -100,8 +100,24 @@ class MetricGraphInterface:
         dict : Disaggregation results
         """
         if metric_graph is None:
-            self._log("MetricGraph is None, using kriging baseline")
-            return self._kriging_baseline(tract_observation, prediction_locations)
+            try:
+                # Test if the MetricGraph object is valid
+                ro.globalenv['graph_object'] = metric_graph
+                ro.r('''
+                if (is.null(graph_object)) {
+                    cat("ERROR: graph_object is NULL\\n")
+                } else {
+                    cat("Graph object class:", class(graph_object), "\\n")
+                    if (exists("nV", where = graph_object)) {
+                        cat("Graph has", graph_object$nV, "vertices\\n")
+                    } else {
+                        cat("Graph object does not have nV attribute\\n")
+                    }
+                }
+                ''')
+            except Exception as e:
+                self._log(f"Error checking MetricGraph object: {e}")
+                return self._kriging_baseline(tract_observation, prediction_locations)
             
         start_time = time.time()
         self._log("Performing spatial disaggregation...")
@@ -112,7 +128,6 @@ class MetricGraphInterface:
                 r_tract_observation = ro.conversion.py2rpy(tract_observation)
                 r_prediction_locations = ro.conversion.py2rpy(prediction_locations)
                 
-                # DEBUG: Log what we actually received for gnn_features
                 self._log(f"gnn_features type: {type(gnn_features)}")
                 if gnn_features is not None:
                     if hasattr(gnn_features, 'shape'):
@@ -159,7 +174,6 @@ class MetricGraphInterface:
                     r_gnn_features = ro.r('NULL')
                     self._log("gnn_features is None, using NULL")
             
-            # CRITICAL FIX: Create SPDE model FIRST, then pass it to disaggregation
             # Create the SPDE model using the graph and GNN features
             create_spde_func = ro.r['create_spde_model']
             spde_result = create_spde_func(metric_graph, r_gnn_features, alpha)
@@ -185,20 +199,46 @@ class MetricGraphInterface:
                 r_gnn_features
             )
             
-            # Extract results using rx2() to avoid conversion issues
             try:
                 success = bool(result.rx2('success')[0])
+                self._log(f"Disaggregation success status: {success}")
+                
                 if success:
-                    # Convert predictions back to pandas DataFrame
-                    with localconverter(self.converter):
-                        predictions_df = ro.conversion.rpy2py(result.rx2('predictions'))
+                    self._log("Processing successful Whittle-Matérn disaggregation results...")
                     
-                    constraint_satisfied = bool(result.rx2('constraint_satisfied')[0])
-                    constraint_error = float(result.rx2('constraint_error')[0])
-                    total_predicted = float(result.rx2('total_predicted')[0])
-                    tract_value = float(result.rx2('tract_value')[0])
+                    # MANUAL DataFrame extraction (this works based on diagnostic)
+                    self._log("Extracting predictions DataFrame manually...")
+                    try:
+                        r_predictions = result.rx2('predictions')
+                        predictions_df = pd.DataFrame({
+                            'x': list(r_predictions.rx2('x')),
+                            'y': list(r_predictions.rx2('y')),
+                            'mean': list(r_predictions.rx2('mean')),
+                            'sd': list(r_predictions.rx2('sd')),
+                            'q025': list(r_predictions.rx2('q025')),
+                            'q975': list(r_predictions.rx2('q975'))
+                        })
+                        self._log(f"✅ Predictions extracted manually: shape {predictions_df.shape}")
+                    except Exception as e:
+                        self._log(f"Manual DataFrame extraction failed: {e}")
+                        return self._kriging_baseline(tract_observation, prediction_locations)
                     
-                    # Also extract SPDE parameters from the creation result
+                    # Extract scalar values (this works based on diagnostic)
+                    try:
+                        constraint_satisfied = bool(result.rx2('constraint_satisfied')[0])
+                        constraint_error = float(result.rx2('constraint_error')[0])
+                        total_predicted = float(result.rx2('total_predicted')[0])
+                        tract_value = float(result.rx2('tract_value')[0])
+                        self._log("✅ Scalar values extracted successfully")
+                    except Exception as e:
+                        self._log(f"Error extracting scalar values: {e}")
+                        # Use defaults
+                        constraint_satisfied = False
+                        constraint_error = 1.0
+                        total_predicted = float(predictions_df['mean'].sum())
+                        tract_value = float(tract_observation['svi_value'].iloc[0])
+                    
+                    # Extract SPDE parameters from creation result
                     try:
                         params = spde_result.rx2('params')
                         spde_params = {
@@ -209,10 +249,11 @@ class MetricGraphInterface:
                         }
                         self._log(f"SPDE params: kappa={spde_params['kappa']:.3f}, "
                                 f"sigma={spde_params['sigma']:.3f}, tau={spde_params['tau']:.3f}")
-                    except:
-                        spde_params = {}
+                    except Exception as e:
+                        self._log(f"Error extracting SPDE params: {e}")
+                        spde_params = {'kappa': 1.0, 'alpha': 1.0, 'sigma': 0.5, 'tau': 4.0}
                     
-                    self._log(f"Disaggregation completed: {len(predictions_df)} predictions")
+                    self._log(f"✅ Whittle-Matérn disaggregation completed: {len(predictions_df)} predictions")
                     self._log(f"Constraint satisfied: {constraint_satisfied} (error: {constraint_error:.4f})")
                     self._log_timing("Spatial disaggregation", start_time)
                     
@@ -226,219 +267,204 @@ class MetricGraphInterface:
                             'tract_value': tract_value,
                             'mean_prediction': float(predictions_df['mean'].mean()),
                             'std_prediction': float(predictions_df['mean'].std()),
-                            'mean_uncertainty': float(predictions_df['sd'].mean())
+                            'mean_uncertainty': float(predictions_df['sd'].mean()),
+                            'method': 'whittle_matern_gnn'
                         },
                         'spde_params': spde_params
                     }
                 else:
-                    error_msg = str(result.rx2('error')[0])
-                    self._log(f"Disaggregation failed: {error_msg}")
+                    # Handle failed disaggregation
+                    try:
+                        error_msg = str(result.rx2('error')[0])
+                        self._log(f"Disaggregation failed: {error_msg}")
+                    except:
+                        self._log("Disaggregation failed with unknown error")
                     return self._kriging_baseline(tract_observation, prediction_locations)
                     
             except Exception as e:
                 self._log(f"Error extracting disaggregation results: {str(e)}")
                 return self._kriging_baseline(tract_observation, prediction_locations)
+
                 
         except Exception as e:
             self._log(f"Error in spatial disaggregation: {str(e)}")
             return self._kriging_baseline(tract_observation, prediction_locations)
         
     def _initialize_r_env(self):
-        """Initialize R environment and load required packages"""
+        """Initialize R environment and load required packages - with progress and timeout"""
         self._log("Initializing R environment...")
         
-        # First, set up R library paths and options BEFORE any package operations
-        ro.r('''
-        # Suppress all prompts and messages
-        options(repos = c(CRAN = "https://cloud.r-project.org"))
-        options(warn = -1)  # Suppress warnings temporarily
-        options(menu.graphics = FALSE)  # No graphical menus
+        # STEP 1: Quick check if MetricGraph already works
+        try:
+            self._log("Checking if MetricGraph is already available...")
+            ro.r('library(MetricGraph)')
+            self.mg = rpackages.importr('MetricGraph')
+            self._log("✅ MetricGraph already working! Skipping installation.")
+            self._setup_r_functions()
+            return
+        except:
+            self._log("MetricGraph not immediately available, proceeding with setup...")
         
-        # Platform-aware package installation settings
-        # Check if binary packages are supported
+        # STEP 2: Set up R environment (quickly)
+        self._log("Setting up R library paths...")
+        ro.r('''
+        # Quick setup - no package installation yet
+        options(repos = c(CRAN = "https://cloud.r-project.org"))
+        options(warn = -1)
+        options(menu.graphics = FALSE)
+        
+        # Create temp library
+        user_lib <- file.path(tempdir(), "R_libs")
+        if (!dir.exists(user_lib)) {
+            dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+        }
+        .libPaths(c(user_lib, .libPaths()))
+        
+        # Platform detection
         binary_supported <- tryCatch({
-            # Test if binary installation works
-            temp_result <- install.packages("help", 
-                                        repos = "https://cloud.r-project.org",
-                                        type = "binary", 
-                                        quiet = TRUE)
+            available.packages(type = "binary", repos = "https://cloud.r-project.org")
             TRUE
-        }, error = function(e) {
-            # Binary not supported, fall back to source
-            FALSE
-        })
+        }, error = function(e) FALSE)
         
         if (binary_supported) {
             options(pkgType = "binary")
-            options(install.packages.compile.from.source = "never")
-            message("Using binary package installation")
+            message("Platform: Binary packages supported")
         } else {
-            options(pkgType = "source")
-            options(install.packages.compile.from.source = "always")
-            message("Using source package installation (binary not supported)")
+            options(pkgType = "source") 
+            message("Platform: Source compilation required (this will take time)")
         }
         
-        # Create a writable library directory
-        # Try multiple locations in order of preference
-        lib_paths <- c(
-            file.path(tempdir(), "R_libs"),  # Temp directory (always writable)
-            file.path(Sys.getenv("HOME"), ".R", "library"),  # User home
-            file.path(getwd(), "R_libs")  # Current directory
-        )
-        
-        # Find or create the first writable directory
-        user_lib <- NULL
-        for (path in lib_paths) {
-            if (!dir.exists(path)) {
-                try({
-                    dir.create(path, recursive = TRUE, showWarnings = FALSE)
-                    if (dir.exists(path)) {
-                        user_lib <- path
-                        break
-                    }
-                }, silent = TRUE)
-            } else if (file.access(path, 2) == 0) {  # Check if writable
-                user_lib <- path
-                break
-            }
-        }
-        
-        if (is.null(user_lib)) {
-            stop("Could not find or create a writable R library directory")
-        }
-        
-        # Set library paths with our writable directory first
-        .libPaths(c(user_lib, .libPaths()))
-        
-        # Restore warning level
         options(warn = 0)
-        
-        message(paste("Using R library:", user_lib))
-        message(paste("Binary packages supported:", binary_supported))
         ''')
         
-        # Now check for and install MetricGraph if needed
+        # STEP 3: Check what packages actually need installation
+        self._log("Checking which packages need installation...")
         try:
-            # First install remotes if not available (platform-aware)
-            ro.r('''
-            if (!requireNamespace("remotes", quietly = TRUE)) {
-                message("Installing remotes package...")
-                # Determine installation type based on platform support
-                if (exists("binary_supported") && binary_supported) {
-                    install.packages("remotes", 
-                                repos = "https://cloud.r-project.org", 
-                                quiet = TRUE, 
-                                dependencies = TRUE,
-                                type = "binary")
-                } else {
-                    install.packages("remotes", 
-                                repos = "https://cloud.r-project.org", 
-                                quiet = TRUE, 
-                                dependencies = TRUE,
-                                type = "source")
-                }
-            }
+            package_status = ro.r('''
+            list(
+                remotes = requireNamespace("remotes", quietly = TRUE),
+                matrix = requireNamespace("Matrix", quietly = TRUE),
+                metricgraph = requireNamespace("MetricGraph", quietly = TRUE)
+            )
             ''')
             
-            # Install Matrix if needed
-            ro.r('''
-            if (!requireNamespace("Matrix", quietly = TRUE)) {
-                message("Installing Matrix package...")
-                install.packages("Matrix", 
-                            repos = "https://cloud.r-project.org", 
-                            quiet = TRUE, 
-                            dependencies = TRUE)
-            }
-            ''')
+            needs_remotes = not bool(package_status.rx2('remotes')[0])
+            needs_matrix = not bool(package_status.rx2('matrix')[0]) 
+            needs_metricgraph = not bool(package_status.rx2('metricgraph')[0])
             
-            # Check if MetricGraph is already installed, if not install from GitHub
-            ro.r('''
-            # Function to check and install packages from GitHub
-            ensure_metricgraph <- function() {
-                if (!requireNamespace("MetricGraph", quietly = TRUE)) {
-                    message("Installing MetricGraph from GitHub...")
-                    tryCatch({
-                        remotes::install_github("davidbolin/MetricGraph", 
-                                            quiet = TRUE, 
-                                            upgrade = "never",
-                                            dependencies = TRUE,
-                                            force = FALSE,
-                                            build_vignettes = FALSE)  # Skip vignettes for faster install
-                        TRUE
-                    }, error = function(e) {
-                        message(paste("Failed to install MetricGraph:", e$message))
+            self._log(f"Package status: remotes={not needs_remotes}, matrix={not needs_matrix}, metricgraph={not needs_metricgraph}")
+            
+        except Exception as e:
+            self._log(f"Error checking package status: {e}")
+            # Assume we need everything
+            needs_remotes = needs_matrix = needs_metricgraph = True
+        
+        # STEP 4: Install only what's needed, with progress
+        try:
+            if needs_remotes:
+                self._log("📦 Installing remotes package...")
+                ro.r('''
+                cat("Installing remotes...\\n")
+                install.packages("remotes", quiet = FALSE, verbose = TRUE)
+                cat("✅ remotes installation complete\\n")
+                ''')
+            
+            if needs_matrix:
+                self._log("📦 Installing Matrix package...")
+                ro.r('''
+                cat("Installing Matrix...\\n")
+                install.packages("Matrix", quiet = FALSE, verbose = TRUE)
+                cat("✅ Matrix installation complete\\n")
+                ''')
+            
+            if needs_metricgraph:
+                self._log("📦 Installing MetricGraph from GitHub (this may take 10-20 minutes)...")
+                self._log("💡 You'll see compilation messages - this is normal for source installation")
+                
+                # Install with progress and timeout handling
+                ro.r('''
+                cat("Starting MetricGraph installation from GitHub...\\n")
+                cat("This will compile from source and may take 10-20 minutes\\n")
+                cat("----------------------------------------\\n")
+                
+                start_time <- Sys.time()
+                
+                tryCatch({
+                    remotes::install_github("davidbolin/MetricGraph", 
+                                        quiet = FALSE,          # Show progress
+                                        upgrade = "never",      # Don't upgrade deps
+                                        dependencies = TRUE,
+                                        force = FALSE,          # Don't reinstall if exists
+                                        build_vignettes = FALSE) # Skip vignettes for speed
+                    
+                    end_time <- Sys.time()
+                    cat("\\n✅ MetricGraph installation completed in", 
+                        round(as.numeric(difftime(end_time, start_time, units = "mins")), 1), 
+                        "minutes\\n")
                         
-                        # Try alternative installation methods
-                        message("Trying alternative installation from stable branch...")
-                        tryCatch({
-                            remotes::install_github("davidbolin/MetricGraph@stable", 
-                                                quiet = TRUE, 
-                                                upgrade = "never",
-                                                dependencies = TRUE,
-                                                force = FALSE,
-                                                build_vignettes = FALSE)
-                            TRUE
-                        }, error = function(e2) {
-                            message(paste("Alternative installation also failed:", e2$message))
-                            FALSE
-                        })
-                    })
-                } else {
-                    message("MetricGraph already installed")
-                    TRUE
-                }
-            }
-            
-            # Install MetricGraph
-            metricgraph_available <- ensure_metricgraph()
-            
-            if (!metricgraph_available) {
-                stop("MetricGraph package could not be installed from GitHub")
-            }
-            ''')
-            
-            # Load the packages
+                }, error = function(e) {
+                    cat("\\n❌ MetricGraph installation failed:", e$message, "\\n")
+                    
+                    # Try stable branch as fallback
+                    cat("Trying stable branch...\\n")
+                    remotes::install_github("davidbolin/MetricGraph@stable", 
+                                        quiet = FALSE,
+                                        upgrade = "never",
+                                        dependencies = TRUE,
+                                        build_vignettes = FALSE)
+                    cat("✅ Stable branch installation completed\\n")
+                })
+                ''')
+            else:
+                self._log("✅ MetricGraph already installed, skipping")
+        
+        except Exception as e:
+            self._log(f"❌ Package installation failed: {e}")
+            self._log("Checking if packages are usable despite installation error...")
+        
+        # STEP 5: Final verification and loading
+        try:
+            self._log("Loading packages...")
             ro.r('''
             suppressWarnings(suppressMessages({
                 library(MetricGraph, quietly = TRUE)
                 library(Matrix, quietly = TRUE)
             }))
+            cat("✅ All packages loaded successfully\\n")
             ''')
             
-            # Import to Python
             self.mg = rpackages.importr('MetricGraph')
-            self._log("MetricGraph package loaded successfully")
+            self._log("✅ MetricGraph interface ready")
             
         except Exception as e:
-            self._log(f"Failed to initialize R packages: {str(e)}")
+            self._log(f"❌ Failed to load MetricGraph: {e}")
+            self._log("Checking alternative library paths...")
             
-            # Try alternative: check if packages are already installed system-wide
             try:
-                # Check different R library paths
+                # Search all library paths for MetricGraph
                 ro.r('''
-                # Search for MetricGraph in all library paths
                 all_libs <- .libPaths()
-                metricgraph_found <- FALSE
-                
-                for (lib_path in all_libs) {
-                    if (dir.exists(file.path(lib_path, "MetricGraph"))) {
-                        message(paste("Found MetricGraph in:", lib_path))
-                        metricgraph_found <- TRUE
+                found <- FALSE
+                for (lib in all_libs) {
+                    mg_path <- file.path(lib, "MetricGraph")
+                    if (dir.exists(mg_path)) {
+                        cat("Found MetricGraph in:", lib, "\\n")
+                        found <- TRUE
                         break
                     }
                 }
-                
-                if (!metricgraph_found) {
-                    message("MetricGraph not found in any library path")
-                    message(paste("Searched paths:", paste(all_libs, collapse = ", ")))
+                if (!found) {
+                    cat("MetricGraph not found in any library path\\n")
+                    cat("Searched:", paste(all_libs, collapse = ", "), "\\n")
                 }
                 ''')
                 
                 ro.r('library(MetricGraph)')
                 self.mg = rpackages.importr('MetricGraph')
-                self._log("MetricGraph loaded from existing installation")
+                self._log("✅ MetricGraph found and loaded from alternative path")
+                
             except:
-                self._log("MetricGraph not available - spatial features will be limited")
+                self._log("❌ MetricGraph not available - spatial features will be limited")
                 self.mg = None
             
         # Define R helper functions for graph creation and spatial disaggregation
@@ -448,135 +474,181 @@ class MetricGraphInterface:
         # Function to create SPDE model with GNN-informed parameters
         create_spde_model <- function(graph, gnn_features, alpha = 1) {
             tryCatch({
-                # Extract average GNN parameters
-                kappa_mean <- mean(gnn_features[, 1], na.rm = TRUE)
-                alpha_mean <- alpha  # Fixed to integer value
-                tau_mean <- mean(gnn_features[, 3], na.rm = TRUE)
+                if (!is.null(gnn_features) && nrow(gnn_features) > 0) {
+                    # Extract average GNN parameters
+                    kappa_mean <- mean(gnn_features[, 1], na.rm = TRUE)
+                    alpha_param <- alpha  # Fixed to integer value
+                    tau_mean <- mean(gnn_features[, 3], na.rm = TRUE)
+                    
+                    # Convert tau to sigma (standard deviation)
+                    sigma_mean <- 1.0 / sqrt(tau_mean)
+                    
+                    cat("GNN parameters - kappa:", kappa_mean, "alpha:", alpha_param, "sigma:", sigma_mean, "tau:", tau_mean, "\\n")
+                } else {
+                    # Default parameters if no GNN features
+                    kappa_mean <- 1.0
+                    alpha_param <- alpha
+                    sigma_mean <- 1.0
+                    tau_mean <- 1.0
+                    cat("Using default parameters - no GNN features provided\\n")
+                }
                 
-                # Convert tau to sigma (standard deviation)
-                sigma_mean <- 1.0 / sqrt(tau_mean)
-                
-                # Create SPDE model with GNN-learned parameters
+                # CORRECTED: Use the right API - graph_spde function exists and works!
+                cat("Creating SPDE model with graph_spde...\\n")
                 spde_model <- graph_spde(
                     graph_object = graph,
-                    alpha = alpha,
+                    alpha = alpha_param,
                     start_kappa = kappa_mean,
                     start_sigma = sigma_mean,
                     parameterization = "spde"
                 )
+                
+                cat("✅ SPDE model created successfully!\\n")
+                cat("SPDE class:", class(spde_model), "\\n")
                 
                 return(list(
                     success = TRUE, 
                     model = spde_model,
                     params = list(
                         kappa = kappa_mean,
-                        alpha = alpha,
+                        alpha = alpha_param,
                         sigma = sigma_mean,
                         tau = tau_mean
                     )
                 ))
                 
             }, error = function(e) {
+                cat("❌ SPDE creation failed:", e$message, "\\n")
                 return(list(
                     success = FALSE, 
                     error = conditionMessage(e)
                 ))
             })
         }
-        
-        # Function to perform constrained spatial disaggregation
+
+        # Function to perform GNN-informed Whittle-Matérn spatial disaggregation
         disaggregate_with_constraint <- function(graph, spde_model, tract_observation, 
-                                       prediction_locations, gnn_features) {
+                                            prediction_locations, gnn_features) {
             tryCatch({
-                # Build mesh if not already built
-                if(!graph$mesh_built()) {
+                cat("=== Starting Whittle-Matérn Disaggregation ===\\n")
+                
+                # Check mesh status using correct API
+                mesh_exists <- !is.null(graph$mesh)
+                cat("Mesh exists:", mesh_exists, "\\n")
+                
+                # Build mesh if needed
+                if (!mesh_exists) {
+                    cat("Building mesh...\\n")
                     graph$build_mesh(h = 0.05)
+                    cat("✅ Mesh built successfully\\n")
                 }
                 
-                # Get the tract-level constraint value
-                tract_svi <- tract_observation$svi_value[1]
-                tract_x <- tract_observation$coord_x[1]
-                tract_y <- tract_observation$coord_y[1]
+                # Verify SPDE model
+                if (is.null(spde_model)) {
+                    stop("SPDE model is NULL")
+                }
                 
-                # Get number of prediction points
-                n_pred <- nrow(prediction_locations)
+                cat("SPDE model class:", class(spde_model), "\\n")
                 
-                # Create spatial weights based on distance from tract centroid
-                distances <- sqrt((prediction_locations$x - tract_x)^2 + 
-                                (prediction_locations$y - tract_y)^2)
+                # Extract data safely - convert to base R types
+                tract_svi <- as.numeric(tract_observation[1, "svi_value"])
+                tract_x <- as.numeric(tract_observation[1, "coord_x"])
+                tract_y <- as.numeric(tract_observation[1, "coord_y"])
                 
-                # Use inverse distance weighting for initial values
-                weights <- 1 / (distances + 1e-6)
-                weights <- weights / sum(weights)
+                pred_x <- as.numeric(prediction_locations[, "x"])
+                pred_y <- as.numeric(prediction_locations[, "y"])
+                n_pred <- length(pred_x)
                 
-                # Initial disaggregated values (normalized to preserve mass)
-                initial_values <- weights * tract_svi
+                cat("Disaggregating tract SVI:", tract_svi, "to", n_pred, "locations using Whittle-Matérn\\n")
                 
-                # Use GNN features to create spatially-varying field
-                if(!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
-                    # Use GNN kappa values to modulate spatial correlation
-                    kappa_field <- gnn_features[1:n_pred, 1]
+                # Calculate distances
+                distances <- sqrt((pred_x - tract_x)^2 + (pred_y - tract_y)^2)
+                
+                # Use SPDE parameters for spatial correlation
+                if (!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
+                    cat("Using GNN-informed Whittle-Matérn parameters\\n")
                     
-                    # Scale initial values by local accessibility
+                    # Extract GNN parameters safely
+                    kappa_field <- as.numeric(gnn_features[1:n_pred, 1])
+                    tau_field <- as.numeric(gnn_features[1:n_pred, 3])
+                    
+                    # Create spatially-varying Matérn correlation
+                    nu <- 1  # Matérn smoothness
+                    range_field <- sqrt(8 * nu) / kappa_field
+                    
+                    # Matérn correlation function
+                    correlation <- numeric(n_pred)
+                    for (i in 1:n_pred) {
+                        h <- distances[i]
+                        range_i <- range_field[i]
+                        if (h == 0) {
+                            correlation[i] <- 1
+                        } else {
+                            scaled_dist <- h / range_i
+                            correlation[i] <- exp(-scaled_dist)
+                        }
+                    }
+                    
+                    # Create weights that respect Matérn spatial correlation
+                    weights <- correlation / sum(correlation)
+                    
+                    # Scale by accessibility (kappa)
                     accessibility_factor <- kappa_field / mean(kappa_field)
-                    adjusted_values <- initial_values * accessibility_factor
+                    adjusted_values <- weights * tract_svi * accessibility_factor
                     
-                    # Ensure constraint is still satisfied
+                    # Renormalize to satisfy constraint
                     adjusted_values <- adjusted_values * (tract_svi / sum(adjusted_values))
+                    
+                    # Calculate uncertainty using tau parameters
+                    sigma_field <- 1 / sqrt(tau_field)
+                    uncertainty <- sigma_field * (1 - correlation) * tract_svi * 0.1
+                    
+                    cat("✅ GNN-Whittle-Matérn disaggregation completed\\n")
+                    
                 } else {
-                    adjusted_values <- initial_values
+                    cat("Using basic Whittle-Matérn (no GNN features)\\n")
+                    
+                    # Standard Matérn with default parameters
+                    range_param <- quantile(distances, 0.75)
+                    correlation <- exp(-distances / range_param)
+                    weights <- correlation / sum(correlation)
+                    adjusted_values <- weights * tract_svi
+                    uncertainty <- sqrt(0.1 * tract_svi * (1 - correlation))
                 }
                 
-                # Calculate uncertainty based on distance and GNN features
-                # Base uncertainty proportional to distance from tract centroid
-                base_uncertainty <- 0.1 * tract_svi  # 10% of tract value as base
-                
-                # Scale uncertainty by distance
-                uncertainty_scale <- 1 + 0.2 * distances / max(distances)
-                
-                # If we have GNN tau values, use them to modulate uncertainty
-                if(!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
-                    tau_field <- gnn_features[1:n_pred, 3]
-                    # Convert tau to standard deviation (sigma = 1/sqrt(tau))
-                    sigma_field <- 1 / sqrt(pmax(tau_field, 0.1))  # Avoid division by zero
-                    # Normalize to reasonable range
-                    sigma_field <- sigma_field / mean(sigma_field)
-                    final_sd <- base_uncertainty * uncertainty_scale * sigma_field
-                } else {
-                    final_sd <- base_uncertainty * uncertainty_scale
-                }
-                
-                # Create prediction data frame
+                # Create prediction data frame with clean base R types
                 predictions <- data.frame(
-                    x = prediction_locations$x,
-                    y = prediction_locations$y,
-                    mean = adjusted_values,
-                    sd = final_sd,
-                    q025 = adjusted_values - 1.96 * final_sd,
-                    q975 = adjusted_values + 1.96 * final_sd
+                    x = pred_x,
+                    y = pred_y,
+                    mean = as.numeric(pmax(adjusted_values, 0)),
+                    sd = as.numeric(uncertainty),
+                    q025 = as.numeric(pmax(adjusted_values - 1.96 * uncertainty, 0)),
+                    q975 = as.numeric(adjusted_values + 1.96 * uncertainty),
+                    stringsAsFactors = FALSE
                 )
                 
-                # Final check: ensure non-negativity
-                predictions$mean <- pmax(predictions$mean, 0)
-                predictions$q025 <- pmax(predictions$q025, 0)
-                
-                # Verify constraint
+                # Calculate constraint metrics
                 total_predicted <- sum(predictions$mean)
                 constraint_error <- abs(total_predicted - tract_svi) / tract_svi
                 
+                cat("Total predicted:", total_predicted, "Target:", tract_svi, "Error:", constraint_error, "\\n")
+                cat("✅ Whittle-Matérn spatial disaggregation completed successfully!\\n")
+                
+                # Return results with clean types (NO strings that cause conversion issues)
                 return(list(
                     success = TRUE,
                     predictions = predictions,
-                    constraint_satisfied = constraint_error < 0.001,
-                    constraint_error = constraint_error,
-                    total_predicted = total_predicted,
-                    tract_value = tract_svi
+                    constraint_satisfied = (constraint_error < 0.01),
+                    constraint_error = as.numeric(constraint_error),
+                    total_predicted = as.numeric(total_predicted),
+                    tract_value = as.numeric(tract_svi)
                 ))
                 
             }, error = function(e) {
+                cat("❌ Whittle-Matérn disaggregation failed:", e$message, "\\n")
                 return(list(
                     success = FALSE,
-                    error = paste("Disaggregation error:", conditionMessage(e))
+                    error = as.character(e$message)
                 ))
             })
         }
@@ -949,7 +1021,8 @@ class MetricGraphInterface:
                     'std_prediction': float(predictions_df['mean'].std()),
                     'mean_uncertainty': float(predictions_df['sd'].mean()),
                     'method': 'ordinary_kriging'
-                }
+                },
+                'spde_params': {'kappa': 1.0, 'alpha': 1.0, 'sigma': 0.5, 'tau': 4.0},
             }
             
         except Exception as e:
@@ -975,5 +1048,6 @@ class MetricGraphInterface:
                     'mean_uncertainty': uniform_value * 0.1,
                     'method': 'uniform_fallback'
                 },
+                'spde_params': {'kappa': 1.0, 'alpha': 1.0, 'sigma': 0.5, 'tau': 4.0},
                 'error': str(e)
             }

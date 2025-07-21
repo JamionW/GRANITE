@@ -6,9 +6,6 @@ Command-line entry point for GRANITE framework
 This module provides the main() function that serves as the entry point
 for the 'granite' command.
 """
-from granite.utils.suppress_warnings import suppress_all_r_warnings
-suppress_all_r_warnings()
-
 import os
 import sys
 import argparse
@@ -303,7 +300,7 @@ def main():
     
     # Parse arguments FIRST
     parser = argparse.ArgumentParser(description='GRANITE Pipeline')
-    parser.add_argument('--fips', type=str, help='Target FIPS code')
+    parser.add_argument('--fips', type=str, help='Target FIPS code(s) - single or comma-separated')
     parser.add_argument('--epochs', type=int, help='Number of epochs')
     args = parser.parse_args()
     
@@ -318,13 +315,28 @@ def main():
         # Load config
         config = load_config('config/config.yaml')
         
-        # CRITICAL: Override with command line args
+        # FIXED: Handle comma-separated FIPS codes
         if args.fips:
-            config['data']['target_fips'] = args.fips
-            config['data']['processing_mode'] = 'fips'
+            if ',' in args.fips:
+                # Multiple FIPS codes
+                fips_list = [fips.strip() for fips in args.fips.split(',')]
+                config['data']['processing_mode'] = 'multi_fips'
+                config['data']['target_fips_list'] = fips_list
+                print(f"Configuration:")
+                print(f"  Processing mode: multi_fips")
+                print(f"  Target FIPS list: {fips_list}")
+            else:
+                # Single FIPS code
+                config['data']['target_fips'] = args.fips.strip()
+                config['data']['processing_mode'] = 'fips'
+                print(f"Configuration:")
+                print(f"  Processing mode: fips")
+                print(f"  Target FIPS: {args.fips}")
+        else:
+            # No FIPS specified - process all
+            config['data']['processing_mode'] = 'county'
             print(f"Configuration:")
-            print(f"  Processing mode: fips")
-            print(f"  Target FIPS: {args.fips}")
+            print(f"  Processing mode: county")
         
         if args.epochs:
             config['model']['epochs'] = args.epochs

@@ -88,16 +88,18 @@ class GRANITEPipeline:
         # Check processing mode
         processing_mode = self.config.get('data', {}).get('processing_mode', 'county')
         target_fips = self.config.get('data', {}).get('target_fips')
+        target_fips_list = self.config.get('data', {}).get('target_fips_list', [])
         
-        # CRITICAL DEBUG OUTPUT
         self._log(f"Processing mode: {processing_mode}")
-        self._log(f"Target FIPS: {target_fips}")
         
         if processing_mode == 'fips' and target_fips:
             self._log(f"Processing single FIPS: {target_fips}")
             results = self._process_fips_mode(data)
+        elif processing_mode == 'multi_fips' and target_fips_list:
+            self._log(f"Processing multiple FIPS: {target_fips_list}")
+            results = self._process_multi_fips_mode(data, target_fips_list)
         else:
-            self._log("No FIPS codes specified, processing all tracts")
+            self._log("Processing all tracts")
             results = self._process_county_mode(data)
         
         # Save results
@@ -170,53 +172,218 @@ class GRANITEPipeline:
         return data
     
     def _process_county_mode(self, data):
-        """Process entire county with tract-by-tract disaggregation"""
-        self._log("Processing in county mode")
+        self._log("Processing in county mode with SHARED GNN training")
         
-        total_tracts = len(data['tracts'])
+        # Step 1: GLOBAL GNN training on ALL tracts
+        self._log("\n=== PHASE 1: Global GNN Training on All Tracts ===")
+        global_gnn_model = self._train_global_gnn(data)
+        
+        # Step 2: Apply trained model to each tract
+        self._log("\n=== PHASE 2: Applying Trained GNN to Individual Tracts ===")
         all_results = []
-        successful = 0
-        failed = 0
         
-        # Process each tract
         for idx, tract in data['tracts'].iterrows():
             fips = tract['FIPS']
-            
-            tract_number = idx
-            self._log(f"\nProcessing tract {fips} ({tract_number}/{total_tracts})")
-
-            
-            # Skip if no SVI data
-            if pd.isna(tract['RPL_THEMES']):
-                self._log(f"  Skipping {fips} - no SVI data")
-                continue
+            self._log(f"\nApplying trained GNN to tract {fips} ({idx+1}/{len(data['tracts'])})")
             
             try:
-                # Get tract-specific data
                 tract_data = self._prepare_tract_data(tract, data)
-                
                 if tract_data['addresses'].empty:
-                    self._log(f"  Skipping {fips} - no addresses")
                     continue
-                
-                # Process tract
-                result = self._process_single_tract(tract_data)
+                    
+                # Use PRE-TRAINED global model (no training here!)
+                result = self._apply_trained_gnn_to_tract(tract_data, global_gnn_model)
                 
                 if result['status'] == 'success':
                     all_results.append(result)
-                    successful += 1
-                else:
-                    failed += 1
                     
             except Exception as e:
-                self._log(f"  Error processing {fips}: {str(e)}")
-                failed += 1
+                self._log(f"Error processing {fips}: {str(e)}")
         
-        self._log(f"\nCounty processing complete: {successful} successful, {failed} failed")
-        
-        # Combine all results
         return self._combine_results(all_results)
     
+    def _train_global_gnn(self, data):
+        """Train ONE GNN on ALL tract networks combined"""
+        self._log("Building combined network from all tracts...")
+        
+        # Combine networks from ALL tracts
+        combined_networks = []
+        combined_svi_values = []
+        
+        for _, tract in data['tracts'].iterrows():
+            if pd.isna(tract['RPL_THEMES']):
+                continue
+                
+            tract_data = self._prepare_tract_data(tract, data)
+            if not tract_data['addresses'].empty:
+                combined_networks.append(tract_data['road_network'])
+                combined_svi_values.append(tract['RPL_THEMES'])
+        
+        # Create MEGA-GRAPH from all tracts
+        mega_graph = self._combine_networks(combined_networks)
+        
+        # Prepare graph data for training
+        graph_data, node_mapping = prepare_graph_data(mega_graph)
+        
+        # Train GNN on FULL spatial diversity
+        model = create_gnn_model(
+            input_dim=graph_data.x.shape[1],
+            hidden_dim=self.config['model']['hidden_dim'],
+            output_dim=self.config['model']['output_dim']
+        )
+        
+        self._log(f"Training GNN on combined network: {mega_graph.number_of_nodes()} nodes")
+        
+        trained_model, _, training_metrics = train_accessibility_gnn(
+            graph_data,
+            model,
+            epochs=self.config['model']['epochs'],
+            lr=self.config['model']['learning_rate'],
+            spatial_weight=self.config['model']['spatial_weight'],
+            reg_weight=self.config['model']['regularization_weight']
+        )
+        
+        self._log(f"Global GNN training complete: {training_metrics['final_loss']:.4f}")
+        return trained_model
+    
+    def _combine_networks(self, networks):
+        """Combine multiple NetworkX graphs into one mega-graph"""
+        import networkx as nx
+        
+        mega_graph = nx.Graph()
+        node_offset = 0
+        
+        for net in networks:
+            # Add nodes with offset to avoid conflicts
+            for node, data in net.nodes(data=True):
+                new_node = (node[0] + node_offset * 0.001, node[1])  # Slight offset
+                mega_graph.add_node(new_node, **data)
+            
+            # Add edges
+            for u, v, data in net.edges(data=True):
+                new_u = (u[0] + node_offset * 0.001, u[1])
+                new_v = (v[0] + node_offset * 0.001, v[1])
+                mega_graph.add_edge(new_u, new_v, **data)
+            
+            node_offset += 1
+        
+        return mega_graph
+    
+    def _apply_trained_gnn_to_tract(self, tract_data, trained_model):
+        """Apply pre-trained GNN to individual tract with robust error handling"""
+        fips = tract_data['tract_info']['FIPS']
+        svi_value = tract_data['svi_value']
+        
+        self._log(f"  Applying trained GNN to tract {fips} with SVI={svi_value:.3f}")
+        
+        try:
+            # Step 1: Prepare graph data
+            graph_data, node_mapping = prepare_graph_data(tract_data['road_network'])
+            
+            # Step 2: Extract features using PRE-TRAINED model
+            trained_model.eval()
+            with torch.no_grad():
+                gnn_features = trained_model(graph_data.x, graph_data.edge_index).cpu().numpy()
+            
+            self._log(f"  Applied trained GNN: κ range [{gnn_features[:, 0].min():.3f}, {gnn_features[:, 0].max():.3f}]")
+            
+            # Step 3: Create MetricGraph
+            self._log("  Creating MetricGraph representation...")
+            mg_start = time.time()
+            
+            nodes_df, edges_df = self._prepare_metricgraph_data(tract_data['road_network'])
+            
+            metric_graph = self.mg_interface.create_graph(
+                nodes_df, edges_df,
+                enable_sampling=len(edges_df) > self.config['metricgraph']['max_edges']
+            )
+            
+            if metric_graph is None:
+                raise RuntimeError("Failed to create MetricGraph")
+            
+            mg_time = time.time() - mg_start
+            self._log(f"  MetricGraph created in {mg_time:.2f}s")
+            
+            # Step 4: Prepare observation and prediction data
+            tract_centroid = tract_data['tract_info'].geometry.centroid
+            tract_observation = pd.DataFrame({
+                'coord_x': [tract_centroid.x],
+                'coord_y': [tract_centroid.y],
+                'svi_value': [svi_value]
+            })
+            
+            prediction_locations = pd.DataFrame({
+                'x': [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()],
+                'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()]
+            })
+            
+            # Step 5: Perform disaggregation with error checking
+            self._log("  Performing GNN-informed spatial disaggregation...")
+            disagg_result = self.mg_interface.disaggregate_svi(
+                metric_graph=metric_graph,
+                tract_observation=tract_observation,
+                prediction_locations=prediction_locations,
+                gnn_features=gnn_features,
+                alpha=self.config['metricgraph']['alpha']
+            )
+            
+            if disagg_result is None:
+                raise RuntimeError("Disaggregation returned None")
+            
+            if not disagg_result.get('success', False):
+                raise RuntimeError(f"Disaggregation failed: {disagg_result.get('error', 'Unknown error')}")
+            
+            # Step 6: Run baseline with error checking
+            self._log("  Running kriging baseline for comparison...")
+            baseline_result = self.mg_interface._kriging_baseline(
+                tract_observation=tract_observation,
+                prediction_locations=prediction_locations
+            )
+            
+            if baseline_result is None:
+                self._log("  WARNING: Baseline comparison failed, continuing without it")
+                baseline_result = {'success': False, 'error': 'Baseline failed'}
+            
+            # Step 7: Process results
+            predictions = disagg_result['predictions']
+            predictions['fips'] = fips
+            predictions['tract_svi'] = svi_value
+            
+            # Compute validation metrics with safer handling
+            validation_metrics = self._compute_proper_validation_metrics(
+                predictions, baseline_result, svi_value
+            )
+            
+            self._log(f"  Successfully disaggregated to {len(predictions)} addresses")
+            self._log(f"  Constraint satisfied: {disagg_result['diagnostics']['constraint_satisfied']}")
+            
+            if validation_metrics.get('method_correlation') is not None:
+                self._log(f"  Method correlation: {validation_metrics['method_correlation']:.3f}")
+            
+            return {
+                'status': 'success',
+                'fips': fips,
+                'predictions': predictions,
+                'gnn_features': gnn_features,
+                'spde_params': disagg_result['spde_params'],
+                'diagnostics': disagg_result['diagnostics'],
+                'baseline_comparison': baseline_result,
+                'validation_metrics': validation_metrics,
+                'network_data': self._prepare_network_data_for_viz(tract_data),
+                'transit_data': self._prepare_transit_data_for_viz(tract_data),
+                'timing': {'total': mg_time}
+            }
+            
+        except Exception as e:
+            self._log(f"  Error applying GNN to tract: {str(e)}")
+            import traceback
+            self._log(f"  Full traceback: {traceback.format_exc()}")
+            return {
+                'status': 'failed',
+                'fips': fips,
+                'error': str(e)
+            }
+
     def _process_fips_mode(self, data):
         """
         FIXED: Process specific FIPS codes with proper string handling
@@ -429,6 +596,20 @@ class GRANITEPipeline:
                 # Add metadata to predictions
                 predictions['fips'] = fips
                 predictions['tract_svi'] = svi_value
+
+                # Compute proper validation metrics
+                validation_metrics = self._compute_proper_validation_metrics(
+                    predictions, baseline_result, svi_value
+                )
+                
+                # Log validation results
+                if validation_metrics['method_correlation'] is not None:
+                    self._log(f"    Method correlation: {validation_metrics['method_correlation']:.3f}")
+                    if validation_metrics['method_correlation'] < 0.1:
+                        self._log("    ⚠️  LOW CORRELATION - CHECK IMPLEMENTATION")
+                
+                self._log(f"    Constraint error: {validation_metrics['constraint_error']:.1%}")
+                self._log(f"    Prediction variance: {validation_metrics['prediction_variance']:.6f}")
                 
                 return {
                     'status': 'success',
@@ -438,6 +619,7 @@ class GRANITEPipeline:
                     'spde_params': disagg_result['spde_params'],
                     'diagnostics': diagnostics,
                     'baseline_comparison': baseline_result,
+                    'validation_metrics': validation_metrics, 
                     'feature_history': feature_history,
                     'attention_weights': attention_weights,
                     'network_data': network_data,
@@ -461,6 +643,36 @@ class GRANITEPipeline:
                 'error': str(e)
             }
     
+    def _process_multi_fips_mode(self, data, target_fips_list):
+        """Process specific list of FIPS codes with global GNN training"""
+        self._log(f"Processing {len(target_fips_list)} specific FIPS codes with shared GNN training")
+        
+        # Convert target_fips_list to strings for consistent matching
+        target_fips_list = [str(fips).strip() for fips in target_fips_list]
+        data['tracts']['FIPS'] = data['tracts']['FIPS'].astype(str).str.strip()
+        
+        self._log(f"Looking for FIPS codes: {target_fips_list}")
+        
+        # Filter to target tracts only
+        target_tracts = data['tracts'][data['tracts']['FIPS'].isin(target_fips_list)]
+        
+        if len(target_tracts) == 0:
+            self._log("No target tracts found in data")
+            available_fips = data['tracts']['FIPS'].tolist()[:10]
+            self._log(f"Available FIPS (first 10): {available_fips}")
+            return {'success': False, 'error': 'No target FIPS found'}
+        
+        self._log(f"✓ Found {len(target_tracts)} target tracts out of {len(target_fips_list)} requested:")
+        for _, tract in target_tracts.iterrows():
+            self._log(f"  - {tract['FIPS']}: SVI = {tract.get('RPL_THEMES', 'N/A')}")
+        
+        # Create filtered dataset
+        filtered_data = data.copy()
+        filtered_data['tracts'] = target_tracts
+        
+        # Use the county mode processing (which does global training)
+        return self._process_county_mode(filtered_data)
+
     def _prepare_metricgraph_data(self, road_network):
         """Prepare node and edge dataframes for MetricGraph"""
         # Extract nodes
@@ -574,6 +786,65 @@ class GRANITEPipeline:
                 'success': False,
                 'message': 'No predictions generated'
             }
+        
+    def _compute_proper_validation_metrics(self, predictions, baseline_result, svi_value):
+        """
+        FIXED: Proper validation with correct baseline comparison
+        """
+        # Ensure both methods use same locations
+        gnn_predictions = predictions['mean'].values
+        gnn_uncertainty = predictions['sd'].values
+        
+        # FIXED: Get baseline predictions on SAME locations
+        if baseline_result and 'predictions' in baseline_result:
+            kriging_predictions = baseline_result['predictions']['mean'].values
+            kriging_uncertainty = baseline_result['predictions']['sd'].values
+            
+            # Verify same number of predictions
+            if len(gnn_predictions) != len(kriging_predictions):
+                self._log(f"WARNING: Different prediction counts - GNN: {len(gnn_predictions)}, Kriging: {len(kriging_predictions)}")
+                # Take minimum length for comparison
+                min_len = min(len(gnn_predictions), len(kriging_predictions))
+                gnn_predictions = gnn_predictions[:min_len]
+                kriging_predictions = kriging_predictions[:min_len]
+                gnn_uncertainty = gnn_uncertainty[:min_len]
+                kriging_uncertainty = kriging_uncertainty[:min_len]
+            
+            # FIXED: Compute correlation
+            correlation = np.corrcoef(gnn_predictions, kriging_predictions)[0, 1]
+            
+            # CRITICAL: Check for concerning results
+            if correlation < 0.1:
+                self._log(f"WARNING: Low correlation ({correlation:.3f}) suggests implementation issues")
+                self._log(f"  GNN predictions range: [{gnn_predictions.min():.3f}, {gnn_predictions.max():.3f}]")
+                self._log(f"  Kriging predictions range: [{kriging_predictions.min():.3f}, {kriging_predictions.max():.3f}]")
+        else:
+            self._log("No baseline comparison available")
+            correlation = None
+            kriging_predictions = None
+            kriging_uncertainty = None
+        
+        # Constraint validation
+        predicted_tract_mean = np.mean(gnn_predictions)
+        constraint_error = abs(predicted_tract_mean - svi_value) / svi_value if svi_value > 0 else 0
+        
+        # Parameter variability check
+        prediction_variance = np.var(gnn_predictions)
+        
+        validation_results = {
+            'method_correlation': correlation,
+            'constraint_error': constraint_error,
+            'constraint_satisfied': constraint_error < 0.01,  # 1% tolerance
+            'prediction_variance': prediction_variance,
+            'gnn_prediction_std': np.std(gnn_predictions),
+            'gnn_uncertainty_mean': np.mean(gnn_uncertainty),
+            'kriging_prediction_std': np.std(kriging_predictions) if kriging_predictions is not None else None,
+            'kriging_uncertainty_mean': np.mean(kriging_uncertainty) if kriging_uncertainty is not None else None,
+            'predicted_tract_mean': predicted_tract_mean,
+            'actual_tract_svi': svi_value
+        }
+        
+        return validation_results
     
     def _save_results(self, results):
         """Save results with enhanced visualizations"""

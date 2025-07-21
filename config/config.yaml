@@ -12,10 +12,10 @@ data:
   address_file: "chattanooga.geojson"
   use_real_addresses: true
   address_buffer_meters: 200
-  target_fips: "47065000600" 
+  #target_fips: "47065000600" 
   
   # Processing mode: "county" or "fips"
-  processing_mode: "fips"
+  processing_mode: "county"
   
   # FIPS-based processing configuration
   fips_config:
@@ -50,11 +50,11 @@ data:
 # GNN model configuration
 model:
   input_dim: 5      # Number of input features
-  hidden_dim: 64    # Hidden layer dimension
+  hidden_dim: 128    # Hidden layer dimension
   output_dim: 3     # SPDE parameters: kappa, alpha, tau
   dropout: 0.2
   epochs: 100
-  learning_rate: 0.01
+  learning_rate: 0.0001
   
   # Training parameters
   spatial_weight: 1.0      # Weight for spatial smoothness loss

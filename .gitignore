@@ -76,7 +76,6 @@ results/
 *.pkl
 *.h5
 *.ckpt
-models/
 
 # Logs
 logs/

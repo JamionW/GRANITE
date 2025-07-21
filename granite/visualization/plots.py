@@ -238,37 +238,59 @@ class DisaggregationVisualizer:
         ax.set_ylim(y.min() - 0.001, y.max() + 0.001)
         ax.set_aspect('equal', adjustable='box')
     
-    def _plot_method_comparison(self, ax, pred1, pred2):
-        """Scatter plot comparing two methods"""
-        if pred1 is None or pred2 is None:
-            ax.text(0.5, 0.5, 'Cannot compare methods', 
-                   ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('Method Comparison')
+    def _plot_method_comparison(self, ax, pred_df, comp_pred):
+        """Plot comparison between methods with robust error handling"""
+        
+        if comp_pred is None or not comp_pred.get('success', False):
+            ax.text(0.5, 0.5, 'Baseline comparison\nnot available', 
+                ha='center', va='center', transform=ax.transAxes)
             return
         
-        values1 = np.array(pred1.get('mean', pred1.get('predicted_svi', [])))
-        values2 = np.array(pred2.get('mean', pred2.get('predicted_svi', [])))
+        # Extract values with length checking
+        values1 = pred_df['mean'].values
         
-        # Scatter plot
+        if 'predictions' in comp_pred and isinstance(comp_pred['predictions'], pd.DataFrame):
+            values2 = comp_pred['predictions']['mean'].values
+        else:
+            ax.text(0.5, 0.5, 'Baseline predictions\ninvalid format', 
+                ha='center', va='center', transform=ax.transAxes)
+            return
+        
+        # CRITICAL: Ensure same length
+        min_len = min(len(values1), len(values2))
+        if len(values1) != len(values2):
+            print(f"WARNING: Prediction length mismatch - GNN: {len(values1)}, Baseline: {len(values2)}")
+            print(f"Using first {min_len} predictions for comparison")
+            values1 = values1[:min_len]
+            values2 = values2[:min_len]
+        
+        if min_len == 0:
+            ax.text(0.5, 0.5, 'No predictions\nto compare', 
+                ha='center', va='center', transform=ax.transAxes)
+            return
+        
+        # Compute correlation safely
+        try:
+            correlation = np.corrcoef(values1, values2)[0, 1]
+            if np.isnan(correlation):
+                correlation = 0.0
+        except:
+            correlation = 0.0
+        
+        # Plot with error handling
         ax.scatter(values2, values1, alpha=0.5, s=10)
         
-        # Add diagonal line
-        lims = [
-            np.min([ax.get_xlim(), ax.get_ylim()]),
-            np.max([ax.get_xlim(), ax.get_ylim()]),
-        ]
-        ax.plot(lims, lims, 'k--', alpha=0.75, zorder=0)
+        # Add diagonal line and correlation
+        min_val = min(np.min(values1), np.min(values2))
+        max_val = max(np.max(values1), np.max(values2))
+        ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5)
         
-        # Add correlation
-        if len(values1) > 0 and len(values2) > 0:
-            corr = np.corrcoef(values1, values2)[0, 1]
-            ax.text(0.05, 0.95, f'Correlation: {corr:.3f}', 
-                   transform=ax.transAxes, va='top')
+        ax.text(0.05, 0.95, f'Correlation: {correlation:.3f}', 
+            transform=ax.transAxes, bbox=dict(boxstyle="round,pad=0.3", facecolor="white"))
         
         ax.set_xlabel('Kriging Predictions')
         ax.set_ylabel('GNN-WM Predictions')
         ax.set_title('Method Comparison')
-        ax.set_aspect('equal', adjustable='box')
     
     def _plot_uncertainty_comparison(self, ax, pred1, pred2):
         """Compare uncertainty between methods"""

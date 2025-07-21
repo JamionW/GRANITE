@@ -330,15 +330,27 @@ class GRANITEPipeline:
                 output_dim=self.config['model']['output_dim']
             )
             
+            feature_history = [] 
+
             trained_model, gnn_features, training_metrics = train_accessibility_gnn(
                 graph_data,
                 model,
                 epochs=self.config['model']['epochs'],
                 lr=self.config['model']['learning_rate'],
                 spatial_weight=self.config['model']['spatial_weight'],
-                reg_weight=self.config['model']['regularization_weight']
+                reg_weight=self.config['model']['regularization_weight'],
+                collect_history=True, 
+                feature_history=feature_history 
             )
             
+            attention_weights = None
+            if hasattr(trained_model, 'attention_weights'):
+                with torch.no_grad():
+                    trained_model.eval()
+                    _, attention_weights = trained_model(graph_data.x, graph_data.edge_index, 
+                                                    return_attention=True)
+                    attention_weights = attention_weights.cpu().numpy()
+        
             gnn_time = time.time() - gnn_start
             self._log(f"    GNN training completed in {gnn_time:.2f}s")
             self._log(f"    Learned parameters - mean kappa: {gnn_features[:, 0].mean():.3f}, "
@@ -399,6 +411,11 @@ class GRANITEPipeline:
             disagg_time = time.time() - disagg_start
             self._log(f"    Disaggregation completed in {disagg_time:.2f}s")
             
+            network_data = self._prepare_network_data_for_viz(tract_data)
+        
+            transit_data = self._prepare_transit_data_for_viz(tract_data)
+        
+
             if disagg_result['success']:
                 predictions = disagg_result['predictions']
                 diagnostics = disagg_result['diagnostics']
@@ -421,6 +438,11 @@ class GRANITEPipeline:
                     'spde_params': disagg_result['spde_params'],
                     'diagnostics': diagnostics,
                     'baseline_comparison': baseline_result,
+                    'feature_history': feature_history,
+                    'attention_weights': attention_weights,
+                    'network_data': network_data,
+                    'transit_data': transit_data,
+                    'trained_model': trained_model,
                     'timing': {
                         'gnn_training': gnn_time,
                         'metricgraph_creation': mg_time,
@@ -466,6 +488,53 @@ class GRANITEPipeline:
         
         return nodes_df, edges_df
     
+    def _prepare_network_data_for_viz(self, tract_data):
+        """Prepare network data in format expected by visualizations"""
+        road_network = tract_data['road_network']
+        
+        # Convert NetworkX graph to GeoDataFrame for edge visualization
+        edges_list = []
+        for u, v, data in road_network.edges(data=True):
+            if 'x' in road_network.nodes[u] and 'x' in road_network.nodes[v]:
+                from shapely.geometry import LineString
+                line = LineString([
+                    (road_network.nodes[u]['x'], road_network.nodes[u]['y']),
+                    (road_network.nodes[v]['x'], road_network.nodes[v]['y'])
+                ])
+                edges_list.append({
+                    'geometry': line,
+                    'from': u,
+                    'to': v,
+                    'weight': data.get('length', 1.0)
+                })
+        
+        edges_gdf = gpd.GeoDataFrame(edges_list, crs='EPSG:4326')
+        
+        return {
+            'graph': road_network,
+            'edges_gdf': edges_gdf
+        }
+
+    def _prepare_transit_data_for_viz(self, tract_data):
+        """Prepare transit data for visualization"""
+        # You might need to load transit routes if available
+        # For now, just use transit stops
+        
+        # Load transit stops from data loader if not already in tract_data
+        if 'transit_stops' not in tract_data:
+            transit_stops = self.data_loader.load_transit_stops()
+        else:
+            transit_stops = tract_data['transit_stops']
+        
+        # Filter stops to tract area if needed
+        tract_geom = tract_data['tract_info'].geometry
+        local_stops = transit_stops[transit_stops.intersects(tract_geom.buffer(0.01))]
+        
+        return {
+            'stops': local_stops,
+            'routes': None  # Add if you have route data
+        }
+
     def _combine_results(self, tract_results):
         """Combine results from all tracts"""
         if not tract_results:
@@ -507,12 +576,12 @@ class GRANITEPipeline:
             }
     
     def _save_results(self, results):
-        """Save results to output directory"""
+        """Save results with enhanced visualizations"""
         if not results.get('success', False):
             self._log("No results to save")
             return
         
-        # Save predictions
+        # Save existing outputs (predictions, summary, etc.)
         predictions_path = os.path.join(self.output_dir, 'granite_predictions.csv')
         results['predictions'].to_csv(predictions_path, index=False)
         self._log(f"Saved predictions to {predictions_path}")
@@ -524,32 +593,77 @@ class GRANITEPipeline:
             json.dump(results['summary'], f, indent=2)
         self._log(f"Saved summary to {summary_path}")
         
-        # Create visualization
-        viz_path = os.path.join(self.output_dir, 'granite_visualization.png')
+        # ENHANCED: Create comprehensive visualizations
+        self._log("Creating enhanced visualizations...")
         
-        # Extract baseline comparison if available
-        comparison_results = None
+        # Get visualization data from first successful tract
+        viz_data = None
         if results.get('tract_results'):
-            # Get first tract with baseline comparison
             for tract_result in results['tract_results']:
-                if tract_result.get('baseline_comparison'):
-                    comparison_results = tract_result['baseline_comparison']
+                if (tract_result.get('status') == 'success' and 
+                    tract_result.get('network_data')):
+                    viz_data = tract_result
                     break
-
-        # Set network data for background plotting
-        if 'road_network' in results:
-            network_data = {
-                'edges_gdf': results['road_network_gdf'],  # You'll need to add this to your results
-                'graph': results['road_network']
-            }
-            self.visualizer.set_network_data(network_data)
         
-        self.visualizer.create_disaggregation_plot(
-            predictions=results['predictions'],
-            results=results,
-            comparison_results=comparison_results,
-            output_path=viz_path
-        )
-        self._log(f"Saved visualization to {viz_path}")
+        if viz_data:
+            # 1. Main visualization (existing)
+            viz_path = os.path.join(self.output_dir, 'granite_visualization.png')
+            self.visualizer.create_disaggregation_plot(
+                predictions=results['predictions'],
+                results=results,
+                comparison_results=viz_data.get('baseline_comparison'),
+                output_path=viz_path
+            )
+            self._log(f"Saved main visualization to {viz_path}")
+            
+            # 2. NEW: GNN feature evolution plot
+            if viz_data.get('feature_history') and len(viz_data['feature_history']) > 1:
+                evolution_path = os.path.join(self.output_dir, 'gnn_feature_evolution.png')
+                self.visualizer.plot_gnn_feature_evolution(
+                    viz_data['feature_history'],
+                    output_path=evolution_path
+                )
+                self._log(f"Saved feature evolution plot to {evolution_path}")
+            
+            # 3. NEW: Accessibility gradients
+            gradients_path = os.path.join(self.output_dir, 'accessibility_gradients.png')
+            self.visualizer.plot_accessibility_gradients(
+                predictions=results['predictions'],
+                network_data=viz_data['network_data'],
+                transit_data=viz_data.get('transit_data'),
+                output_path=gradients_path
+            )
+            self._log(f"Saved accessibility gradients to {gradients_path}")
+            
+            # 4. NEW: GNN attention maps (if available)
+            if viz_data.get('attention_weights') is not None:
+                attention_path = os.path.join(self.output_dir, 'gnn_attention_maps.png')
+                self.visualizer.plot_gnn_attention_maps(
+                    attention_weights=viz_data['attention_weights'],
+                    network_data=viz_data['network_data'],
+                    predictions=results['predictions'],
+                    output_path=attention_path
+                )
+                self._log(f"Saved attention maps to {attention_path}")
+            
+            # 5. NEW: Uncertainty sources analysis
+            uncertainty_path = os.path.join(self.output_dir, 'uncertainty_analysis.png')
+            self.visualizer.plot_uncertainty_sources(
+                predictions=results['predictions'],
+                network_data=viz_data.get('network_data'),
+                output_path=uncertainty_path
+            )
+            self._log(f"Saved uncertainty analysis to {uncertainty_path}")
+            
+            # 6. NEW: Model interpretability dashboard
+            if viz_data.get('gnn_features') is not None:
+                interpret_path = os.path.join(self.output_dir, 'model_interpretability.png')
+                self.visualizer.plot_model_interpretability(
+                    predictions=results['predictions'],
+                    gnn_features=viz_data['gnn_features'],
+                    network_data=viz_data.get('network_data'),
+                    output_path=interpret_path
+                )
+                self._log(f"Saved interpretability dashboard to {interpret_path}")
         
-        self._log(f"\nResults saved to {self.output_dir}/")
+        self._log(f"\nAll results and visualizations saved to {self.output_dir}/")

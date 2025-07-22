@@ -75,9 +75,6 @@ class GRANITEPipeline:
     
     def run(self):
         """Run the complete GRANITE pipeline"""
-        self._log("="*60)
-        self._log("GRANITE Pipeline - Spatial Disaggregation Mode") 
-        self._log("="*60)
         
         start_time = time.time()
         
@@ -182,9 +179,9 @@ class GRANITEPipeline:
         self._log("\n=== PHASE 2: Applying Trained GNN to Individual Tracts ===")
         all_results = []
         
-        for idx, tract in data['tracts'].iterrows():
+        for tract in data['tracts'].iterrows():
             fips = tract['FIPS']
-            self._log(f"\nApplying trained GNN to tract {fips} ({idx+1}/{len(data['tracts'])})")
+            self._log(f"\nApplying trained GNN to tract {fips}")
             
             try:
                 tract_data = self._prepare_tract_data(tract, data)

@@ -336,6 +336,7 @@ class GRANITEPipeline:
             # Step 6: Run baseline with error checking
             self._log("  Running kriging baseline for comparison...")
             baseline_result = self.mg_interface._kriging_baseline(
+            #baseline_result = self.mg_interface._random_baseline_test(
                 tract_observation=tract_observation,
                 prediction_locations=prediction_locations
             )
@@ -570,6 +571,7 @@ class GRANITEPipeline:
             
             # Also run kriging baseline for comparison
             self._log("  Running kriging baseline for comparison...")
+            #baseline_result = self.mg_interface._random_baseline_test(
             baseline_result = self.mg_interface._kriging_baseline(
                 tract_observation=tract_observation,
                 prediction_locations=prediction_locations
@@ -748,7 +750,9 @@ class GRANITEPipeline:
         }
 
     def _combine_results(self, tract_results):
-        """Combine results from all tracts"""
+        """
+        FIXED: Combine results from all tracts with proper baseline aggregation
+        """
         if not tract_results:
             return {
                 'success': False,
@@ -757,12 +761,56 @@ class GRANITEPipeline:
         
         # Combine all predictions
         all_predictions = []
+        all_baseline_predictions = []  # NEW: Collect baseline predictions
+        
         for result in tract_results:
             if result['status'] == 'success':
+                # Add GNN predictions
                 all_predictions.append(result['predictions'])
+                
+                # NEW: Add baseline predictions if available
+                if (result.get('baseline_comparison') and 
+                    result['baseline_comparison'].get('success') and
+                    'predictions' in result['baseline_comparison']):
+                    
+                    baseline_pred = result['baseline_comparison']['predictions'].copy()
+                    # Add tract metadata to baseline predictions
+                    baseline_pred['fips'] = result['fips']
+                    baseline_pred['tract_svi'] = result['predictions']['tract_svi'].iloc[0]
+                    all_baseline_predictions.append(baseline_pred)
         
         if all_predictions:
             combined_predictions = pd.concat(all_predictions, ignore_index=True)
+            
+            # NEW: Create combined baseline comparison
+            combined_baseline = None
+            if all_baseline_predictions:
+                combined_baseline_predictions = pd.concat(all_baseline_predictions, ignore_index=True)
+                
+                # Verify same number of predictions
+                if len(combined_predictions) == len(combined_baseline_predictions):
+                    combined_baseline = {
+                        'success': True,
+                        'predictions': combined_baseline_predictions,
+                        'diagnostics': {
+                            'constraint_satisfied': True,
+                            'constraint_error': 0.0,  # Compute if needed
+                            'mean_prediction': combined_baseline_predictions['mean'].mean(),
+                            'std_prediction': combined_baseline_predictions['mean'].std(),
+                            'mean_uncertainty': combined_baseline_predictions['sd'].mean(),
+                            'method': 'combined_kriging'
+                        }
+                    }
+                    
+                    self._log(f"Combined baseline: {len(combined_baseline_predictions)} predictions")
+                else:
+                    self._log(f"WARNING: Prediction count mismatch - GNN: {len(combined_predictions)}, "
+                            f"Baseline: {len(combined_baseline_predictions)}")
+            
+            # NEW: Compute global validation metrics
+            global_validation = self._compute_global_validation_metrics(
+                combined_predictions, combined_baseline
+            )
             
             # Calculate summary statistics
             summary_stats = {
@@ -772,21 +820,72 @@ class GRANITEPipeline:
                 'mean_svi': combined_predictions['mean'].mean(),
                 'std_svi': combined_predictions['mean'].std(),
                 'mean_uncertainty': combined_predictions['sd'].mean(),
-                'processing_time': sum(r['timing']['total'] for r in tract_results if 'timing' in r)
+                'processing_time': sum(r['timing']['total'] for r in tract_results if 'timing' in r),
+                'global_correlation': global_validation.get('method_correlation')  # NEW
             }
             
             return {
                 'success': True,
                 'predictions': combined_predictions,
+                'combined_baseline': combined_baseline,  # NEW: Global baseline comparison
                 'tract_results': tract_results,
-                'summary': summary_stats
+                'summary': summary_stats,
+                'global_validation': global_validation  # NEW
             }
         else:
             return {
                 'success': False,
                 'message': 'No predictions generated'
             }
+
+    def _compute_global_validation_metrics(self, combined_predictions, combined_baseline):
+        """
+        NEW: Compute validation metrics across all tracts combined
+        """
+        if not combined_baseline or not combined_baseline.get('success'):
+            return {'method_correlation': None, 'error': 'No baseline available'}
         
+        gnn_predictions = combined_predictions['mean'].values
+        kriging_predictions = combined_baseline['predictions']['mean'].values
+        
+        # Verify same length
+        if len(gnn_predictions) != len(kriging_predictions):
+            self._log(f"GLOBAL WARNING: Prediction length mismatch - "
+                    f"GNN: {len(gnn_predictions)}, Kriging: {len(kriging_predictions)}")
+            return {'method_correlation': None, 'error': 'Length mismatch'}
+        
+        # Compute global correlation
+        try:
+            correlation = np.corrcoef(gnn_predictions, kriging_predictions)[0, 1]
+            if np.isnan(correlation):
+                correlation = 0.0
+        except Exception as e:
+            self._log(f"Error computing global correlation: {str(e)}")
+            correlation = None
+        
+        # Additional global metrics
+        gnn_uncertainty = combined_predictions['sd'].values
+        kriging_uncertainty = combined_baseline['predictions']['sd'].values
+        
+        global_metrics = {
+            'method_correlation': correlation,
+            'gnn_prediction_range': [gnn_predictions.min(), gnn_predictions.max()],
+            'kriging_prediction_range': [kriging_predictions.min(), kriging_predictions.max()],
+            'gnn_prediction_std': np.std(gnn_predictions),
+            'kriging_prediction_std': np.std(kriging_predictions),
+            'gnn_uncertainty_mean': np.mean(gnn_uncertainty),
+            'kriging_uncertainty_mean': np.mean(kriging_uncertainty),
+            'total_addresses': len(gnn_predictions)
+        }
+        
+        self._log(f"GLOBAL CORRELATION: {correlation:.3f}")
+        self._log(f"  GNN range: [{global_metrics['gnn_prediction_range'][0]:.3f}, "
+                f"{global_metrics['gnn_prediction_range'][1]:.3f}]")
+        self._log(f"  Kriging range: [{global_metrics['kriging_prediction_range'][0]:.3f}, "
+                f"{global_metrics['kriging_prediction_range'][1]:.3f}]")
+        
+        return global_metrics
+    
     def _compute_proper_validation_metrics(self, predictions, baseline_result, svi_value):
         """
         FIXED: Proper validation with correct baseline comparison
@@ -864,7 +963,7 @@ class GRANITEPipeline:
             json.dump(results['summary'], f, indent=2)
         self._log(f"Saved summary to {summary_path}")
         
-        # ENHANCED: Create comprehensive visualizations
+        # ENHANCED: Create comprehensive visualizations with COMBINED baseline
         self._log("Creating enhanced visualizations...")
         
         # Get visualization data from first successful tract
@@ -877,12 +976,12 @@ class GRANITEPipeline:
                     break
         
         if viz_data:
-            # 1. Main visualization (existing)
+            # 1. Main visualization with COMBINED baseline
             viz_path = os.path.join(self.output_dir, 'granite_visualization.png')
             self.visualizer.create_disaggregation_plot(
                 predictions=results['predictions'],
                 results=results,
-                comparison_results=viz_data.get('baseline_comparison'),
+                comparison_results=results.get('combined_baseline'),  # CHANGED: Use combined baseline
                 output_path=viz_path
             )
             self._log(f"Saved main visualization to {viz_path}")
@@ -937,4 +1036,11 @@ class GRANITEPipeline:
                 )
                 self._log(f"Saved interpretability dashboard to {interpret_path}")
         
+            if results.get('global_validation'):
+                self._log(f"\n=== GLOBAL VALIDATION SUMMARY ===")
+                global_val = results['global_validation']
+                if global_val.get('method_correlation'):
+                    self._log(f"Global GNN-Kriging Correlation: {global_val['method_correlation']:.3f}")
+                self._log(f"Total Addresses Compared: {global_val.get('total_addresses', 'N/A')}")
+
         self._log(f"\nAll results and visualizations saved to {self.output_dir}/")

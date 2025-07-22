@@ -52,6 +52,7 @@ import rpy2.robjects.packages as rpackages
 import time
 import logging
 from typing import Dict, Optional, Tuple
+from scipy.spatial.distance import cdist
 
 logger = logging.getLogger(__name__) 
 
@@ -1125,3 +1126,68 @@ class MetricGraphInterface:
                 'spde_params': {'kappa': 1.0, 'alpha': 1.0, 'sigma': 0.5, 'tau': 4.0},
                 'error': str(e)
             }
+        
+    def _random_baseline_test(self, tract_observation: pd.DataFrame, prediction_locations: pd.DataFrame) -> Dict:
+        """
+        DIAGNOSTIC: Pure random baseline to test if high correlation is due to constraints
+        Should give correlation ≈ 0 if methods are truly independent
+        """
+        self._log("Using RANDOM baseline for correlation testing")
+        
+        try:
+            n_pred = len(prediction_locations)
+            tract_svi = float(tract_observation['svi_value'].iloc[0])
+            
+            # Generate completely random spatial pattern (no spatial structure)
+            np.random.seed(999)  # Fixed seed for reproducibility
+            random_values = np.random.normal(tract_svi, tract_svi * 0.2, n_pred)
+            
+            current_mean = np.mean(random_values)
+            error_percent = abs(current_mean - tract_svi) / max(tract_svi, 1e-6)
+
+            if error_percent > 0.10:  # Only force constraint if error > 10%
+                self._log(f"  Applying constraint adjustment - error was {error_percent:.1%}")
+                constraint_adjustment = tract_svi / current_mean
+                random_values *= constraint_adjustment
+            else:
+                self._log(f"  Relaxed constraint satisfied - error {error_percent:.1%}, no adjustment needed")
+            
+            # Ensure non-negativity
+            random_values = np.clip(random_values, 0, 1)
+            
+            # Random uncertainty (not spatially structured)
+            random_uncertainty = np.random.uniform(0.02, 0.08, n_pred)
+            
+            predictions_df = pd.DataFrame({
+                'x': prediction_locations['x'].values,
+                'y': prediction_locations['y'].values,
+                'mean': random_values,
+                'sd': random_uncertainty,
+                'q025': random_values - 1.96 * random_uncertainty,
+                'q975': random_values + 1.96 * random_uncertainty
+            })
+            
+            predictions_df['q025'] = predictions_df['q025'].clip(lower=0)
+            
+            final_mean = float(predictions_df['mean'].mean())
+            constraint_error = abs(final_mean - tract_svi) / max(tract_svi, 1e-6)
+
+            return {
+                'success': True,
+                'predictions': predictions_df,
+                'diagnostics': {
+                    'constraint_satisfied': constraint_error < 0.10,  # Changed from 0.01 to 0.10
+                    'constraint_error': constraint_error,
+                    'predicted_mean': final_mean,
+                    'tract_value': tract_svi,
+                    'mean_prediction': final_mean,
+                    'std_prediction': float(predictions_df['mean'].std()),
+                    'mean_uncertainty': float(predictions_df['sd'].mean()),
+                    'method': 'relaxed_random_baseline'  # Updated method name
+                },
+                'spde_params': {'kappa': 0.1, 'alpha': 1.0, 'sigma': 2.0, 'tau': 0.5}
+            }
+            
+        except Exception as e:
+            self._log(f"Random baseline test failed: {str(e)}")
+            return {'success': False, 'error': str(e)}

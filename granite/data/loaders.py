@@ -361,7 +361,7 @@ class DataLoader:
         """
         UPDATED: Generate synthetic addresses within tract (fallback only)
         """
-        np.random.seed(42)  # For reproducibility
+        np.random.seed(123)  # Loader-specific seed (different from kriging)
         
         minx, miny, maxx, maxy = bbox
         addresses = []

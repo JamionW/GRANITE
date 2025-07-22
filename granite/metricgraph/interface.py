@@ -2,46 +2,19 @@
 MetricGraph R interface for GRANITE framework
 Updated to support spatial disaggregation workflow
 """
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='rpy2')
 import os
-import sys
-
-# Set R environment variables BEFORE importing rpy2
-#os.environ['R_HOME'] = '/usr/lib/R'  # Adjust path as needed
-#os.environ['R_LIBS_USER'] = '/tmp/R_libs'
-os.environ['R_LIBS_SITE'] = ''  # Empty to avoid site library warnings
-os.environ['R_ENVIRON_USER'] = ''
-os.environ['R_PROFILE_USER'] = ''
-
-# Suppress console output during rpy2 import
-import io
-from contextlib import redirect_stdout, redirect_stderr
 
 # Import rpy2 with suppressed output
-import rpy2
+os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning'
+os.environ['R_LIBS_SITE'] = ''  
+os.environ['R_ENVIRON_USER'] = ''
+os.environ['R_PROFILE_USER'] = ''
 import rpy2.robjects as ro
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.conversion import localconverter
 import rpy2.robjects.packages as rpackages
-
-# Set up console callback to suppress R messages
-from rpy2.rinterface_lib import callbacks
-
-#def quiet_console_write(text):
-# Only print actual errors, suppress all warnings
-#    if any(error_keyword in text.lower() for error_keyword in ['error', 'fatal']):
-#        if 'warning message' not in text.lower():
-#            print(f"[R] {text}", end='')
-    # Allow debug messages through
-#    elif 'debug' in text.lower():
-#        print(f"[R] {text}", end='')
-
-# Override the console write callback
-#callbacks.consolewrite_print = quiet_console_write
-#callbacks.consolewrite_warnerror = quiet_console_write
-
-# Suppress rpy2 warnings BEFORE any rpy2 imports
-os.environ['PYTHONWARNINGS'] = 'ignore'
-os.environ['R_LIBS_SITE'] = '/usr/local/lib/R/site-library:/usr/lib/R/site-library:/usr/lib/R/library'
 
 import numpy as np
 import pandas as pd
@@ -79,7 +52,8 @@ class MetricGraphInterface:
     def _log_timing(self, operation, start_time):
         """Log operation timing"""
         elapsed = time.time() - start_time
-        self._log(f"{operation} completed in {elapsed:.2f}s")
+        if elapsed > 2.0: 
+            self._log(f"{operation} completed in {elapsed:.2f}s")
 
     def disaggregate_svi(self, metric_graph, tract_observation, prediction_locations, gnn_features=None, alpha=1):
         """
@@ -294,180 +268,17 @@ class MetricGraphInterface:
             return self._kriging_baseline(tract_observation, prediction_locations)
         
     def _initialize_r_env(self):
-        """Initialize R environment and load required packages - with progress and timeout"""
+        """Initialize R environment and load required packages"""
         self._log("Initializing R environment...")
-        
-        # STEP 1: Quick check if MetricGraph already works
         try:
-            self._log("Checking if MetricGraph is already available...")
             ro.r('library(MetricGraph)')
             self.mg = rpackages.importr('MetricGraph')
-            self._log(" MetricGraph already working! Skipping installation.")
         except:
-            self._log("MetricGraph not immediately available, proceeding with setup...")
-        
-        # STEP 2: Set up R environment (quickly)
-        self._log("Setting up R library paths...")
-        ro.r('''
-        # Quick setup - no package installation yet
-        options(repos = c(CRAN = "https://cloud.r-project.org"))
-        #options(warn = -1)
-        options(menu.graphics = FALSE)
-        
-        # Create temp library
-        user_lib <- file.path(tempdir(), "R_libs")
-        if (!dir.exists(user_lib)) {
-            dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
-        }
-        .libPaths(c(user_lib, .libPaths()))
-        
-        # Platform detection
-        binary_supported <- tryCatch({
-            available.packages(type = "binary", repos = "https://cloud.r-project.org")
-            TRUE
-        }, error = function(e) FALSE)
-        
-        if (binary_supported) {
-            options(pkgType = "binary")
-            message("Platform: Binary packages supported")
-        } else {
-            options(pkgType = "source") 
-            message("Platform: Source compilation required (this will take time)")
-        }
-        
-        options(warn = 0)
-        ''')
-        
-        # STEP 3: Check what packages actually need installation
-        self._log("Checking which packages need installation...")
-        try:
-            package_status = ro.r('''
-            list(
-                remotes = requireNamespace("remotes", quietly = TRUE),
-                matrix = requireNamespace("Matrix", quietly = TRUE),
-                metricgraph = requireNamespace("MetricGraph", quietly = TRUE)
-            )
-            ''')
-            
-            needs_remotes = not bool(package_status.rx2('remotes')[0])
-            needs_matrix = not bool(package_status.rx2('matrix')[0]) 
-            needs_metricgraph = not bool(package_status.rx2('metricgraph')[0])
-            
-            self._log(f"Package status: remotes={not needs_remotes}, matrix={not needs_matrix}, metricgraph={not needs_metricgraph}")
-            
-        except Exception as e:
-            self._log(f"Error checking package status: {e}")
-            # Assume we need everything
-            needs_remotes = needs_matrix = needs_metricgraph = True
-        
-        # STEP 4: Install only what's needed, with progress
-        try:
-            if needs_remotes:
-                self._log("📦 Installing remotes package...")
-                ro.r('''
-                cat("Installing remotes...\\n")
-                install.packages("remotes", quiet = FALSE, verbose = TRUE)
-                cat(" remotes installation complete\\n")
-                ''')
-            
-            if needs_matrix:
-                self._log("📦 Installing Matrix package...")
-                ro.r('''
-                cat("Installing Matrix...\\n")
-                install.packages("Matrix", quiet = FALSE, verbose = TRUE)
-                cat(" Matrix installation complete\\n")
-                ''')
-            
-            if needs_metricgraph:
-                self._log("📦 Installing MetricGraph from GitHub (this may take 10-20 minutes)...")
-                self._log("💡 You'll see compilation messages - this is normal for source installation")
-                
-                # Install with progress and timeout handling
-                ro.r('''
-                cat("Starting MetricGraph installation from GitHub...\\n")
-                cat("This will compile from source and may take 10-20 minutes\\n")
-                cat("----------------------------------------\\n")
-                
-                start_time <- Sys.time()
-                
-                tryCatch({
-                    remotes::install_github("davidbolin/MetricGraph", 
-                                        quiet = FALSE,          # Show progress
-                                        upgrade = "never",      # Don't upgrade deps
-                                        dependencies = TRUE,
-                                        force = FALSE,          # Don't reinstall if exists
-                                        build_vignettes = FALSE) # Skip vignettes for speed
-                    
-                    end_time <- Sys.time()
-                    cat("\\n MetricGraph installation completed in", 
-                        round(as.numeric(difftime(end_time, start_time, units = "mins")), 1), 
-                        "minutes\\n")
-                        
-                }, error = function(e) {
-                    cat("\\n❌ MetricGraph installation failed:", e$message, "\\n")
-                    
-                    # Try stable branch as fallback
-                    cat("Trying stable branch...\\n")
-                    remotes::install_github("davidbolin/MetricGraph@stable", 
-                                        quiet = FALSE,
-                                        upgrade = "never",
-                                        dependencies = TRUE,
-                                        build_vignettes = FALSE)
-                    cat(" Stable branch installation completed\\n")
-                })
-                ''')
-            else:
-                self._log(" MetricGraph already installed, skipping")
-        
-        except Exception as e:
-            self._log(f"❌ Package installation failed: {e}")
-            self._log("Checking if packages are usable despite installation error...")
-        
-        # STEP 5: Final verification and loading
-        try:
-            self._log("Loading packages...")
-            ro.r('''
-            #suppressWarnings(suppressMessages({
-                library(MetricGraph, quietly = TRUE)
-                library(Matrix, quietly = TRUE)
-            #}))
-            cat(" All packages loaded successfully\\n")
-            ''')
-            
+            self._log("Installing MetricGraph...")
+            ro.r('install.packages("remotes")')
+            ro.r('remotes::install_github("davidbolin/MetricGraph")')
             self.mg = rpackages.importr('MetricGraph')
-            self._log(" MetricGraph interface ready")
-            
-        except Exception as e:
-            self._log(f"❌ Failed to load MetricGraph: {e}")
-            self._log("Checking alternative library paths...")
-            
-            try:
-                # Search all library paths for MetricGraph
-                ro.r('''
-                all_libs <- .libPaths()
-                found <- FALSE
-                for (lib in all_libs) {
-                    mg_path <- file.path(lib, "MetricGraph")
-                    if (dir.exists(mg_path)) {
-                        cat("Found MetricGraph in:", lib, "\\n")
-                        found <- TRUE
-                        break
-                    }
-                }
-                if (!found) {
-                    cat("MetricGraph not found in any library path\\n")
-                    cat("Searched:", paste(all_libs, collapse = ", "), "\\n")
-                }
-                ''')
                 
-                ro.r('library(MetricGraph)')
-                self.mg = rpackages.importr('MetricGraph')
-                self._log(" MetricGraph found and loaded from alternative path")
-                
-            except:
-                self._log("❌ MetricGraph not available - spatial features will be limited")
-                self.mg = None
-            
         # Define R helper functions for graph creation and spatial disaggregation
         ro.r('''
         library(MetricGraph)
@@ -531,7 +342,6 @@ class MetricGraphInterface:
         disaggregate_with_constraint <- function(graph, spde_model, tract_observation, 
                                                 prediction_locations, gnn_features) {
             tryCatch({
-                cat("🚨 FUNCTION ENTRY - disaggregate_with_constraint called! 🚨\\n")
                 cat("=== Starting Whittle-Matérn Disaggregation ===\\n")
                 
                 # Check mesh status using correct API
@@ -567,14 +377,12 @@ class MetricGraphInterface:
                 distances <- sqrt((pred_x - tract_x)^2 + (pred_y - tract_y)^2)
                 
                 # Use SPDE parameters for spatial correlation
-                cat("🔍 GNN features check: is.null =", is.null(gnn_features), "\\n")
+                cat("GNN features check: is.null =", is.null(gnn_features), "\\n")
                 if (!is.null(gnn_features)) {
-                    cat("🔍 GNN features nrow =", nrow(gnn_features), "n_pred =", n_pred, "\\n")
+                    cat("GNN features nrow =", nrow(gnn_features), "n_pred =", n_pred, "\\n")
                 }
             
-                if (!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
-                    cat("Using TRUE network-aware SPDE (no centroid dependency)\\n")
-                    
+                if (!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {                    
                     # Extract GNN parameters safely
                     kappa_field <- as.numeric(gnn_features[1:n_pred, 1])
                     alpha_field <- as.numeric(gnn_features[1:n_pred, 2]) 
@@ -614,7 +422,7 @@ class MetricGraphInterface:
                     
                     adjusted_values <- base_field
                     
-                    cat("TRUE SPDE: Using full pairwise correlation matrix\\n")
+                    cat("SPDE: Using full pairwise correlation matrix\\n")
                     cat("Spatial range based on learned kappa:", spatial_range, "\\n")
                     
                 } else {

@@ -479,7 +479,7 @@ class DataLoader:
         # Cache the result
         self._address_cache = addresses_gdf
         
-        self._log(f"Successfully loaded {len(addresses_gdf)} real Hamilton County addresses")
+        self._log(f"Loaded {len(addresses_gdf)} Hamilton County addresses")
         return addresses_gdf
     
     def _load_chattanooga_geojson(self, file_path: str) -> gpd.GeoDataFrame:

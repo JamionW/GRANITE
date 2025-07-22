@@ -129,21 +129,21 @@ class DisaggregationVisualizer:
             ax.set_title(title)
             return
         
-        # ENHANCEMENT 1: Add network background if available
+        # Add network background if available
         if hasattr(self, 'network_data') and self.network_data:
             if 'edges_gdf' in self.network_data:
                 self.network_data['edges_gdf'].plot(
                     ax=ax, color='lightgray', linewidth=0.3, alpha=0.5, zorder=1
                 )
         
-        # ENHANCEMENT 2: Smaller, better-styled dots
+        # Smaller, better-styled dots
         scatter = ax.scatter(x, y, c=values, cmap='viridis_r',  # Note: _r for better SVI interpretation
                             s=8,  # SMALLER DOTS as requested
                             alpha=0.8, 
                             edgecolors='white', linewidth=0.2,  # White borders for clarity
                             zorder=5)  # Ensure points are on top
         
-        # ENHANCEMENT 3: Better colorbar
+        # Better colorbar
         cbar = plt.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04)
         cbar.set_label('Predicted SVI (Vulnerability)', rotation=270, labelpad=15)
         
@@ -176,8 +176,8 @@ class DisaggregationVisualizer:
             ax.set_title(title)
             return
         
-        # ENHANCEMENT: Size points by uncertainty (more intuitive)
-        sizes = np.array(uncertainty) * 300 + 5  # Scale for visibility
+        # Size points by uncertainty 
+        sizes = np.array(uncertainty) * 300 + 5  
         
         scatter = ax.scatter(x, y, c=uncertainty, cmap=self.cmap_uncertainty,
                             s=sizes, alpha=0.7, edgecolors='white', 

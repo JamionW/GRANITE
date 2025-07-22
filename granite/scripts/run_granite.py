@@ -304,11 +304,7 @@ def main():
     parser.add_argument('--epochs', type=int, help='Number of epochs')
     args = parser.parse_args()
     
-    print("=" * 60)
-    print("GRANITE: Graph-Refined Accessibility Network")
-    print("         for Integrated Transit Equity")
-    print("=" * 60)
-    print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"GRANITE Framework - Starting analysis at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
     
     try:
@@ -355,7 +351,12 @@ def main():
         )
         
         results = pipeline.run()
-        return results
+        if results.get('success', False):
+            print("Analysis completed successfully")
+            return {'success': True, 'message': 'Analysis completed'}
+        else:
+            print(f"Analysis failed: {results.get('error', 'Unknown error')}")
+            return {'success': False}
         
     except Exception as e:
         print(f"Error: {str(e)}")

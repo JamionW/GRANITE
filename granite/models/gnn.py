@@ -144,14 +144,10 @@ def prepare_graph_data(road_network: nx.Graph) -> Tuple[Data, Dict]:
             nx.closeness_centrality(road_network, node) if len(nodes) > 1 else 0.5,  # Closeness
             node[0],  # X coordinate (normalized later)
             node[1],  # Y coordinate (normalized later)
-            len(road_network[node])  # Local connectivity
-        ]
-
-        features.extend([
-            0.0,  # Placeholder for betweenness (skip for now)
+            len(road_network[node]),  # Local connectivity
             np.mean([1.0 for neighbor in road_network[node]]) if road_network[node] else 0.0,  # Simple neighbor count
             min(road_network.degree(node), 10) / 10.0,  # Normalized degree (0-1)
-        ])
+        ]
 
         node_features.append(features)
     

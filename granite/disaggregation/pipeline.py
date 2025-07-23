@@ -188,7 +188,6 @@ class GRANITEPipeline:
                 if tract_data['addresses'].empty:
                     continue
                     
-                # Use PRE-TRAINED global model (no training here!)
                 result = self._apply_trained_gnn_to_tract(tract_data, global_gnn_model)
                 
                 if result['status'] == 'success':

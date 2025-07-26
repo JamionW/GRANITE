@@ -80,7 +80,7 @@ class DisaggregationVisualizer:
             comp_pred = comparison_results.get('predictions')
             if comp_pred is not None:
                 self._plot_predictions(axes[0, 1], comp_pred,
-                                     title='Ordinary Kriging Baseline')
+                                     title='IDM Fixed Coefficients Baseline')
                 
                 # Difference map
                 self._plot_difference_map(axes[0, 2], pred_df, comp_pred)
@@ -230,7 +230,7 @@ class DisaggregationVisualizer:
                            s=20, alpha=0.8, edgecolors='none',
                            vmin=-vmax, vmax=vmax)
         
-        plt.colorbar(scatter, ax=ax, label='GNN-WM - Kriging')
+        plt.colorbar(scatter, ax=ax, label='GNN-WM vs IDM')
         ax.set_title('Prediction Difference Map')
         ax.set_xlabel('Longitude')
         ax.set_ylabel('Latitude')
@@ -547,6 +547,311 @@ class DisaggregationVisualizer:
         else:
             plt.show()
     
+    def create_clear_method_comparison(self, gnn_predictions, idm_predictions, 
+                                    gnn_results=None, idm_results=None, 
+                                    output_path=None):
+        """
+        Create a crystal-clear comparison between GNN and IDM methods
+        """
+        fig = plt.figure(figsize=(20, 12))
+        gs = fig.add_gridspec(3, 4, hspace=0.35, wspace=0.3)
+        
+        # Extract data
+        gnn_x = gnn_predictions['x'].values
+        gnn_y = gnn_predictions['y'].values
+        gnn_values = gnn_predictions['mean'].values
+        gnn_uncertainty = gnn_predictions['sd'].values
+        
+        idm_x = idm_predictions['x'].values
+        idm_y = idm_predictions['y'].values
+        idm_values = idm_predictions['mean'].values
+        idm_uncertainty = idm_predictions['sd'].values
+        
+        # Calculate key metrics
+        gnn_std = np.std(gnn_values)
+        idm_std = np.std(idm_values)
+        correlation = np.corrcoef(gnn_values, idm_values)[0, 1]
+        
+        # Main title with key finding
+        fig.suptitle(f'GNN vs IDM Spatial Disaggregation Comparison\n'
+                    f'Key Finding: IDM {idm_std/gnn_std:.1f}x More Spatially Variable (r={correlation:.3f})', 
+                    fontsize=16, fontweight='bold')
+        
+        # Row 1: Side-by-side predictions
+        # GNN Predictions
+        ax1 = fig.add_subplot(gs[0, 0])
+        scatter1 = ax1.scatter(gnn_x, gnn_y, c=gnn_values, cmap='viridis_r', 
+                            s=15, alpha=0.8, edgecolors='white', linewidth=0.3)
+        ax1.set_title(f'GNN-Whittle-Matérn Predictions\n(Learned Parameters)', 
+                    fontweight='bold', fontsize=12)
+        ax1.set_xlabel('Longitude')
+        ax1.set_ylabel('Latitude')
+        cbar1 = plt.colorbar(scatter1, ax=ax1, fraction=0.046)
+        cbar1.set_label('SVI Vulnerability', rotation=270, labelpad=15)
+        ax1.text(0.02, 0.98, f'Spatial Std: {gnn_std:.6f}', 
+                transform=ax1.transAxes, va='top', fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+        ax1.set_aspect('equal')
+        
+        # IDM Predictions  
+        ax2 = fig.add_subplot(gs[0, 1])
+        scatter2 = ax2.scatter(idm_x, idm_y, c=idm_values, cmap='viridis_r',
+                            s=15, alpha=0.8, edgecolors='white', linewidth=0.3)
+        ax2.set_title(f'IDM Fixed Coefficients\n(Land Cover Based)', 
+                    fontweight='bold', fontsize=12)
+        ax2.set_xlabel('Longitude')
+        ax2.set_ylabel('Latitude')
+        cbar2 = plt.colorbar(scatter2, ax=ax2, fraction=0.046)
+        cbar2.set_label('SVI Vulnerability', rotation=270, labelpad=15)
+        ax2.text(0.02, 0.98, f'Spatial Std: {idm_std:.6f}', 
+                transform=ax2.transAxes, va='top', fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='orange', alpha=0.8))
+        ax2.set_aspect('equal')
+        
+        # Difference Map
+        ax3 = fig.add_subplot(gs[0, 2])
+        diff = gnn_values - idm_values
+        vmax = max(abs(diff.min()), abs(diff.max()))
+        scatter3 = ax3.scatter(gnn_x, gnn_y, c=diff, cmap='RdBu_r',
+                            s=15, alpha=0.8, vmin=-vmax, vmax=vmax)
+        ax3.set_title('Difference Map\n(GNN - IDM)', fontweight='bold', fontsize=12)
+        ax3.set_xlabel('Longitude')
+        ax3.set_ylabel('Latitude')
+        cbar3 = plt.colorbar(scatter3, ax=ax3, fraction=0.046)
+        cbar3.set_label('GNN minus IDM\n(Blue: GNN Lower)', rotation=270, labelpad=15)
+        ax3.text(0.02, 0.98, f'Max Diff: ±{vmax:.4f}', 
+                transform=ax3.transAxes, va='top', fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        ax3.set_aspect('equal')
+        
+        # Method Summary
+        ax4 = fig.add_subplot(gs[0, 3])
+        ax4.axis('off')
+        
+        summary_text = f"""
+    METHOD COMPARISON SUMMARY
+
+    GNN-Whittle-Matérn:
+    • Approach: Learned spatial parameters
+    • Spatial Variation: {gnn_std:.6f}
+    • Mean SVI: {np.mean(gnn_values):.4f}
+    • Uncertainty: {np.mean(gnn_uncertainty):.4f}
+
+    IDM Fixed Coefficients:
+    • Approach: Land cover based
+    • Spatial Variation: {idm_std:.6f}
+    • Mean SVI: {np.mean(idm_values):.4f}  
+    • Uncertainty: {np.mean(idm_uncertainty):.4f}
+
+    Key Differences:
+    • Variation Ratio: {idm_std/gnn_std:.1f}:1
+    • Correlation: {correlation:.3f}
+    • Pattern: {'Similar' if abs(correlation) > 0.3 else 'Different'}
+
+    Interpretation:
+    {'IDM creates more spatial contrast' if idm_std > gnn_std else 'GNN creates more spatial contrast'}
+    {'Methods agree on patterns' if abs(correlation) > 0.3 else 'Methods disagree on patterns'}
+        """
+        
+        ax4.text(0.05, 0.95, summary_text, transform=ax4.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.9))
+        
+        # Row 2: Direct comparison plots
+        # Scatter plot: GNN vs IDM values
+        ax5 = fig.add_subplot(gs[1, 0])
+        ax5.scatter(idm_values, gnn_values, alpha=0.6, s=20, color='steelblue')
+        min_val = min(gnn_values.min(), idm_values.min())
+        max_val = max(gnn_values.max(), idm_values.max())
+        ax5.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+        ax5.set_xlabel('IDM Predictions (Fixed Coefficients)')
+        ax5.set_ylabel('GNN Predictions (Learned Parameters)')
+        ax5.set_title(f'Method Agreement\nCorrelation: {correlation:.3f}', fontweight='bold')
+        ax5.grid(True, alpha=0.3)
+        
+        # Add interpretation
+        if abs(correlation) > 0.7:
+            interp = "High Agreement"
+            color = "lightgreen"
+        elif abs(correlation) > 0.3:
+            interp = "Moderate Agreement"
+            color = "lightyellow"
+        else:
+            interp = "Low Agreement\n(Different Patterns)"
+            color = "lightcoral"
+        
+        ax5.text(0.05, 0.95, interp, transform=ax5.transAxes, fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor=color, alpha=0.8))
+        
+        # Histogram comparison
+        ax6 = fig.add_subplot(gs[1, 1])
+        ax6.hist(gnn_values, bins=30, alpha=0.6, label=f'GNN (σ={gnn_std:.4f})', 
+                color='steelblue', density=True)
+        ax6.hist(idm_values, bins=30, alpha=0.6, label=f'IDM (σ={idm_std:.4f})', 
+                color='orange', density=True)
+        ax6.set_xlabel('SVI Prediction Value')
+        ax6.set_ylabel('Density')
+        ax6.set_title('Distribution Comparison', fontweight='bold')
+        ax6.legend()
+        ax6.grid(True, alpha=0.3)
+        
+        # Spatial variation comparison
+        ax7 = fig.add_subplot(gs[1, 2])
+        methods = ['GNN\n(Learned)', 'IDM\n(Fixed)']
+        variations = [gnn_std, idm_std]
+        colors = ['steelblue', 'orange']
+        
+        bars = ax7.bar(methods, variations, color=colors, alpha=0.7, 
+                    edgecolor='black', linewidth=1.5)
+        ax7.set_ylabel('Spatial Standard Deviation')
+        ax7.set_title('Spatial Variation Comparison', fontweight='bold')
+        ax7.grid(True, alpha=0.3, axis='y')
+        
+        # Add values on bars
+        for bar, val in zip(bars, variations):
+            ax7.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(variations)*0.02,
+                    f'{val:.6f}', ha='center', va='bottom', fontweight='bold')
+        
+        # Add ratio annotation
+        ratio = idm_std / gnn_std
+        ax7.text(0.5, 0.8, f'Ratio: {ratio:.1f}:1', transform=ax7.transAxes,
+                ha='center', fontsize=14, fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+        
+        # Research implications
+        ax8 = fig.add_subplot(gs[1, 3])
+        ax8.axis('off')
+        
+        implications_text = f"""
+    RESEARCH IMPLICATIONS
+
+    Spatial Modeling Trade-off:
+    • GNN: Emphasizes spatial smoothness
+    • IDM: Emphasizes land cover contrast
+
+    When to Use Each Method:
+
+    GNN-Whittle-Matérn:
+    ✓ Uncertainty quantification needed
+    ✓ Spatial correlation important
+    ✓ Smooth transitions preferred
+
+    IDM Fixed Coefficients:
+    ✓ Fine-scale variation needed
+    ✓ Land cover patterns important
+    ✓ Interpretable coefficients required
+
+    Hybrid Opportunity:
+    Combine GNN spatial correlation 
+    with IDM land cover variation
+        """
+        
+        ax8.text(0.05, 0.95, implications_text, transform=ax8.transAxes,
+                fontsize=9, verticalalignment='top',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.8))
+        
+        # Row 3: Uncertainty and effectiveness analysis
+        # Uncertainty comparison
+        ax9 = fig.add_subplot(gs[2, 0])
+        uncertainty_data = [gnn_uncertainty, idm_uncertainty]
+        bp = ax9.boxplot(uncertainty_data, labels=['GNN', 'IDM'], patch_artist=True)
+        bp['boxes'][0].set_facecolor('steelblue')
+        bp['boxes'][1].set_facecolor('orange')
+        ax9.set_ylabel('Prediction Uncertainty')
+        ax9.set_title('Uncertainty Comparison', fontweight='bold')
+        ax9.grid(True, alpha=0.3)
+        
+        # Effectiveness metrics
+        ax10 = fig.add_subplot(gs[2, 1])
+        
+        # Define effectiveness criteria (you can adjust these)
+        spatial_score = idm_std / gnn_std  # Higher variation often better
+        uncertainty_score = np.mean(gnn_uncertainty) / np.mean(idm_uncertainty)  # GNN provides uncertainty
+        correlation_score = abs(correlation)  # Agreement between methods
+        
+        metrics = ['Spatial\nVariation', 'Uncertainty\nQuantification', 'Method\nAgreement']
+        gnn_scores = [1.0, uncertainty_score, correlation_score]  # Baseline GNN = 1
+        idm_scores = [spatial_score, 1.0, correlation_score]  # Baseline IDM = 1
+        
+        x = np.arange(len(metrics))
+        width = 0.35
+        
+        bars1 = ax10.bar(x - width/2, gnn_scores, width, label='GNN', color='steelblue', alpha=0.7)
+        bars2 = ax10.bar(x + width/2, idm_scores, width, label='IDM', color='orange', alpha=0.7)
+        
+        ax10.set_ylabel('Relative Performance')
+        ax10.set_title('Method Effectiveness', fontweight='bold')
+        ax10.set_xticks(x)
+        ax10.set_xticklabels(metrics)
+        ax10.legend()
+        ax10.grid(True, alpha=0.3, axis='y')
+        ax10.axhline(y=1.0, color='red', linestyle='--', alpha=0.7)
+        
+        # Geographic patterns
+        ax11 = fig.add_subplot(gs[2, 2])
+        
+        # Show where methods disagree most
+        abs_diff = np.abs(diff)
+        scatter11 = ax11.scatter(gnn_x, gnn_y, c=abs_diff, cmap='Reds',
+                            s=15, alpha=0.8)
+        ax11.set_title('Where Methods Disagree Most', fontweight='bold')
+        ax11.set_xlabel('Longitude')  
+        ax11.set_ylabel('Latitude')
+        cbar11 = plt.colorbar(scatter11, ax=ax11, fraction=0.046)
+        cbar11.set_label('Absolute Difference', rotation=270, labelpad=15)
+        ax11.set_aspect('equal')
+        
+        # Overall verdict
+        ax12 = fig.add_subplot(gs[2, 3])
+        ax12.axis('off')
+        
+        # Determine verdict based on metrics
+        if spatial_score > 2.0 and abs(correlation) < 0.3:
+            verdict = "🏆 IDM BETTER FOR SPATIAL DETAIL"
+            verdict_color = "orange"
+            explanation = "Fixed coefficients create\nmore realistic spatial variation"
+        elif spatial_score < 0.5 and uncertainty_score > 1.5:
+            verdict = "🏆 GNN BETTER FOR UNCERTAINTY"
+            verdict_color = "steelblue"
+            explanation = "Learned parameters provide\nbetter uncertainty quantification"
+        elif abs(correlation) > 0.7:
+            verdict = "⚖️ METHODS SIMILAR"
+            verdict_color = "lightgreen"
+            explanation = "Both methods produce\nsimilar spatial patterns"
+        else:
+            verdict = "🔬 HYBRID APPROACH NEEDED"
+            verdict_color = "lightyellow"
+            explanation = "Combine strengths of\nboth approaches"
+        
+        verdict_text = f"""
+    RESEARCH VERDICT
+
+    {verdict}
+
+    {explanation}
+
+    Key Metrics:
+    • Spatial Variation Ratio: {spatial_score:.1f}:1
+    • Method Correlation: {correlation:.3f}
+    • Uncertainty Advantage: GNN
+
+    Recommendation:
+    {'Use IDM for spatial detail' if spatial_score > 2 else 'Develop hybrid method'}
+    {'Use GNN for uncertainty' if uncertainty_score > 1.2 else 'Both provide uncertainty'}
+        """
+        
+        ax12.text(0.05, 0.95, verdict_text, transform=ax12.transAxes,
+                fontsize=10, verticalalignment='top', fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor=verdict_color, alpha=0.9))
+        
+        plt.tight_layout()
+        
+        if output_path:
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+        else:
+            plt.show()
+
     def plot_accessibility_gradients(self, predictions, network_data, 
                                    transit_data=None, output_path=None):
         """
@@ -992,6 +1297,33 @@ GNN Contributions:
             plt.close()
         else:
             plt.show()
+
+    def create_comparison_from_results(self, results, output_path=None):
+        """
+        Create comparison visualization directly from pipeline results
+        """
+        # Extract GNN predictions
+        gnn_predictions = results['predictions']
+        
+        # Extract IDM predictions
+        idm_predictions = None
+        if 'tract_results' in results:
+            for tract_result in results['tract_results']:
+                if ('idm_comparison' in tract_result and 
+                    tract_result['idm_comparison'].get('success')):
+                    idm_predictions = tract_result['idm_comparison']['predictions']
+                    break
+        
+        if idm_predictions is None:
+            print("❌ No IDM comparison found in results")
+            return
+        
+        print("✅ Creating clear GNN vs IDM comparison visualization...")
+        self.create_clear_method_comparison(
+            gnn_predictions, idm_predictions, 
+            gnn_results=results, 
+            output_path=output_path
+        )
     
     def plot_gnn_features(self, gnn_features: np.ndarray, output_path: str = None):
         """

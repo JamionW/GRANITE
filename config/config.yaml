@@ -56,6 +56,11 @@ model:
   epochs: 100
   learning_rate: 0.0001
   
+  features:
+    type: "nlcd"  # vs "topological" 
+    fallback_to_topological: true
+    nlcd_path: "./data/nlcd_hamilton_county.tif"
+
   # Training parameters
   spatial_weight: 1.0      # Weight for spatial smoothness loss
   regularization_weight: 0.01  # Weight for parameter regularization
@@ -85,6 +90,10 @@ output:
   create_tract_folders: true
   save_batch_summary: true
   
+baselines:
+  enable_idm: true
+  compare_methods: ["gnn_nlcd", "idm_fixed", "kriging"]
+
 # Processing configuration
 processing:
   continue_on_error: true  # Continue batch processing on individual failures

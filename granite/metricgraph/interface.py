@@ -935,6 +935,39 @@ class MetricGraphInterface:
                 'error': str(e)
             }
         
+    def _idm_baseline(self, tract_observation: pd.DataFrame,
+                    prediction_locations: pd.DataFrame,
+                    nlcd_features: pd.DataFrame = None) -> Dict:
+        """
+        IDM baseline for comparison with GNN-Whittle-Matérn
+        
+        This is the NEW baseline we want to compare against
+        """
+        try:
+            from ..baselines.idm import IDMBaseline
+            
+            tract_svi = tract_observation['svi_value'].iloc[0]
+            
+            # Create IDM baseline
+            idm = IDMBaseline()
+            
+            # Run IDM disaggregation
+            idm_result = idm.disaggregate_svi(
+                tract_svi=tract_svi,
+                prediction_locations=prediction_locations,
+                nlcd_features=nlcd_features
+            )
+            
+            self._log(f"IDM baseline: {len(idm_result['predictions'])} predictions")
+            self._log(f"  Mean SVI: {idm_result['diagnostics']['mean_prediction']:.3f}")
+            self._log(f"  Constraint error: {idm_result['diagnostics']['constraint_error']:.1%}")
+            
+            return idm_result
+            
+        except Exception as e:
+            self._log(f"Error in IDM baseline: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
     def _random_baseline_test(self, tract_observation: pd.DataFrame, prediction_locations: pd.DataFrame) -> Dict:
         """
         DIAGNOSTIC: Pure random baseline to test if high correlation is due to constraints

@@ -12,6 +12,13 @@ from shapely.geometry import Point, box
 import networkx as nx
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
+import rasterio
+import rasterio.mask
+import numpy as np
+from rasterio.warp import reproject, Resampling
+import rasterio
+from rasterio.windows import from_bounds
+from rasterio.transform import rowcol
 
 
 class DataLoader:
@@ -42,6 +49,201 @@ class DataLoader:
         if self.verbose:
             timestamp = datetime.now().strftime("%H:%M:%S")
             print(f"[{timestamp}] DataLoader: {message}")
+
+    def load_nlcd_data(self, county_bounds: gpd.GeoDataFrame, 
+                    nlcd_path: str = "./data/nlcd_hamilton_county.tif"):
+        """
+        Load and crop NLCD data for Hamilton County
+        Enhanced implementation for GRANITE
+        """
+        try:
+            # Check if file exists
+            if not os.path.exists(nlcd_path):
+                self._log(f"NLCD file not found at {nlcd_path}")
+                self._log("Please download NLCD 2019/2021 data from https://www.mrlc.gov/viewer/")
+                return None
+                
+            with rasterio.open(nlcd_path) as src:
+                # Crop NLCD to county bounds
+                county_geom = county_bounds.to_crs(src.crs).geometry
+                nlcd_cropped, nlcd_transform = rasterio.mask.mask(
+                    src, county_geom, crop=True
+                )
+                
+                # Update metadata
+                nlcd_meta = src.meta.copy()
+                nlcd_meta.update({
+                    "height": nlcd_cropped.shape[1],
+                    "width": nlcd_cropped.shape[2], 
+                    "transform": nlcd_transform
+                })
+                
+                self._log(f"NLCD data loaded: {nlcd_cropped.shape}")
+                return {
+                    'data': nlcd_cropped[0],  # First band contains land cover classes
+                    'transform': nlcd_transform,
+                    'crs': src.crs,
+                    'meta': nlcd_meta
+                }
+        except Exception as e:
+            self._log(f"Error loading NLCD: {str(e)}")
+            return None
+        
+    def _load_roads_for_bbox(self, state_fips: str, county_fips: str, bbox: Tuple[float, float, float, float]) -> gpd.GeoDataFrame:
+        """
+        Load roads within a bounding box
+        
+        Parameters:
+        -----------
+        state_fips : str
+            State FIPS code
+        county_fips : str  
+            County FIPS code
+        bbox : Tuple[float, float, float, float]
+            Bounding box (minx, miny, maxx, maxy)
+            
+        Returns:
+        --------
+        gpd.GeoDataFrame
+            Roads within the bounding box
+        """
+        try:
+            # Load all county roads
+            all_roads = self.load_road_network(state_fips=state_fips, county_fips=county_fips)
+            
+            if len(all_roads) == 0:
+                self._log("No roads loaded for bbox filtering")
+                return gpd.GeoDataFrame(geometry=[])
+            
+            # Create bounding box geometry
+            from shapely.geometry import box
+            bbox_geom = box(*bbox)
+            
+            # Filter roads that intersect the bounding box
+            bbox_roads = all_roads[all_roads.geometry.intersects(bbox_geom)].copy()
+            
+            self._log(f"Filtered {len(all_roads)} roads to {len(bbox_roads)} within bbox")
+            
+            return bbox_roads
+            
+        except Exception as e:
+            self._log(f"Error loading roads for bbox: {str(e)}")
+            return gpd.GeoDataFrame(geometry=[])
+
+    def extract_nlcd_features_at_addresses(self, addresses: gpd.GeoDataFrame, 
+                                        nlcd_data: dict) -> pd.DataFrame:
+        """FIXED: Handle your specific NLCD encoding"""
+        
+        if nlcd_data is None:
+            self._log("No NLCD data available, using fallback features")
+            return self._create_fallback_nlcd_features(addresses)
+        
+        # Ensure addresses are in same CRS as NLCD
+        addresses_proj = addresses.to_crs(nlcd_data['crs'])
+        
+        # Extract NLCD values at point locations using rasterio
+        coords = [(geom.x, geom.y) for geom in addresses_proj.geometry]
+        
+        nlcd_values = []
+        for coord in coords:
+            try:
+                row, col = rasterio.transform.rowcol(nlcd_data['transform'], coord[0], coord[1])
+                
+                if (0 <= row < nlcd_data['data'].shape[0] and 
+                    0 <= col < nlcd_data['data'].shape[1]):
+                    value = nlcd_data['data'][row, col]
+                    
+                    # HANDLE your specific values
+                    if value == 250:  # No data
+                        nlcd_values.append(1)  # Default to low development
+                    else:
+                        nlcd_values.append(int(value))
+                else:
+                    nlcd_values.append(1)  # Default: low development
+            except:
+                nlcd_values.append(1)  # Default for errors
+        
+        # Convert to features
+        features_df = pd.DataFrame({
+            'address_id': addresses['address_id'] if 'address_id' in addresses.columns else range(len(addresses)),
+            'nlcd_class': nlcd_values
+        })
+        
+        # UPDATED coefficient mapping for your values
+        def get_svi_coefficient_updated(nlcd_class):
+            mapping = {
+                0: 0.1,    # Low vulnerability
+                1: 0.6,    # Medium vulnerability  
+                2: 1.2,    # High vulnerability
+                250: 0.1   # No data → low vulnerability
+            }
+            return mapping.get(nlcd_class, 0.6)  # Default: medium
+        
+        def get_development_intensity_updated(nlcd_class):
+            mapping = {
+                0: 0.2,    # Low development
+                1: 0.6,    # Medium development
+                2: 1.0,    # High development  
+                250: 0.3   # No data → low-medium
+            }
+            return mapping.get(nlcd_class, 0.5)  # Default: medium
+        
+        features_df['development_intensity'] = features_df['nlcd_class'].map(
+            get_development_intensity_updated
+        )
+        features_df['svi_coefficient'] = features_df['nlcd_class'].map(
+            get_svi_coefficient_updated
+        )
+        features_df['is_developed'] = features_df['nlcd_class'].isin([1, 2])  # 1,2 = developed
+        features_df['is_uninhabited'] = features_df['nlcd_class'].isin([0, 250])  # 0,250 = uninhabited
+        
+        # CRITICAL: Check for variation
+        unique_classes = features_df['nlcd_class'].unique()
+        unique_coeffs = features_df['svi_coefficient'].unique()
+        coeff_std = features_df['svi_coefficient'].std()
+        
+        self._log(f"NLCD classes at addresses: {sorted(unique_classes)}")
+        self._log(f"SVI coefficients: {sorted(unique_coeffs)}")
+        self._log(f"SVI coefficient std: {coeff_std:.4f}")
+        
+        if coeff_std < 0.01:
+            self._log("WARNING: Very low coefficient variation - adding artificial diversity")
+            # Add some spatial variation
+            n_addr = len(features_df)
+            spatial_factor = np.random.uniform(0.85, 1.15, n_addr)
+            features_df['svi_coefficient'] = features_df['svi_coefficient'] * spatial_factor
+            self._log(f"Adjusted coefficient std: {features_df['svi_coefficient'].std():.4f}")
+        
+        return features_df
+
+    def _get_development_intensity(self, nlcd_class):
+        """Convert NLCD class to development intensity (0-1 scale)"""
+        intensity_map = {
+            21: 0.25,  # Developed, Open Space
+            22: 0.5,   # Developed, Low Intensity  
+            23: 0.75,  # Developed, Medium Intensity
+            24: 1.0    # Developed, High Intensity
+        }
+        return intensity_map.get(nlcd_class, 0.0)
+
+    def _get_svi_coefficient(self, nlcd_class):
+        """IDM-style SVI coefficients from literature"""
+        svi_coefficients = {
+            # Developed areas (higher vulnerability)
+            21: 0.2,  # Open developed - low vulnerability
+            22: 0.6,  # Low density residential - moderate
+            23: 1.0,  # Medium density - higher vulnerability  
+            24: 1.5,  # High density urban - highest vulnerability
+            
+            # Uninhabited areas (zero vulnerability)
+            11: 0.0, 12: 0.0, 31: 0.0, 41: 0.0, 42: 0.0, 43: 0.0,
+            51: 0.0, 52: 0.0, 71: 0.0, 72: 0.0, 73: 0.0, 74: 0.0,
+            90: 0.0, 95: 0.0,
+            
+            # Agricultural (low vulnerability)
+            81: 0.1, 82: 0.1
+        }
+        return svi_coefficients.get(nlcd_class, 0.0)
     
     def load_svi_data(self, state_fips: str = '47', county_name: str = 'Hamilton', 
                      year: int = 2020) -> pd.DataFrame:

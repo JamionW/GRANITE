@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Dict, Tuple, Optional
 import time
 
-
 class AccessibilityTrainer:
     """Trainer class for GNN models learning SPDE parameters"""
     
@@ -246,9 +245,9 @@ class AccessibilityTrainer:
             
             # Total loss with all components
             loss = (spatial_weight * spatial_loss + 
-                   reg_weight * reg_loss +
-                   0.2 * diversity_loss +      # Encourage parameter diversity
-                   0.01 * realism_loss)          # Physical realism constraints
+                   reg_weight * reg_loss )
+                   #0.2 * diversity_loss +      # Encourage parameter diversity
+                  #0.01 * realism_loss)          # Physical realism constraints
             
             # Backward pass
             loss.backward()

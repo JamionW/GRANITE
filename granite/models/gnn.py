@@ -12,6 +12,7 @@ from torch_geometric.data import Data
 import numpy as np
 import networkx as nx
 from typing import Tuple, Dict
+import pandas as pd
 
 
 class SPDEParameterGNN(nn.Module):
@@ -116,7 +117,79 @@ def safe_feature_normalization_vectorized(node_features):
     
     return normalized_features
 
-def prepare_graph_data(road_network: nx.Graph) -> Tuple[Data, Dict]:
+def prepare_graph_data_with_nlcd(road_network: nx.Graph, 
+                                nlcd_features: pd.DataFrame) -> Tuple[Data, Dict]:
+    """
+    UPDATED VERSION of prepare_graph_data() using NLCD features
+    Replace topological features with theoretically justified land cover features
+    """
+    nodes = list(road_network.nodes())
+    node_to_idx = {node: i for i, node in enumerate(nodes)}
+    
+    # Create spatial index for faster NLCD feature lookup
+    from scipy.spatial import cKDTree
+    
+    # Build feature lookup from address-based NLCD features
+    if len(nlcd_features) > 0:
+        # Assuming nlcd_features has coordinate info or can be mapped to addresses
+        feature_lookup = nlcd_features.set_index('address_id').to_dict('index')
+    else:
+        # Fallback to default values
+        feature_lookup = {}
+    
+    node_features = []
+    for node in nodes:
+        # Get nearest NLCD features (simplified - you may want more sophisticated mapping)
+        # For now, using node coordinates to find nearest address features
+        
+        # REPLACE TOPOLOGICAL FEATURES WITH NLCD FEATURES
+        features = [
+            # Geographic features (keep these)
+            node[0],  # X coordinate (normalized later)
+            node[1],  # Y coordinate (normalized later)
+            
+            # NEW: NLCD-derived features (the key innovation!)
+            0.5,      # development_intensity (placeholder - replace with lookup)
+            0.3,      # svi_coefficient (placeholder - replace with lookup)  
+            1.0,      # is_developed (placeholder - replace with lookup)
+            0.0,      # is_uninhabited (placeholder - replace with lookup)
+            0.23,     # normalized nlcd_class (placeholder - replace with lookup)
+            
+            # REDUCED: Minimal network features (reduced importance)
+            min(road_network.degree(node), 10) / 10.0,  # Normalized degree only
+        ]
+        
+        node_features.append(features)
+    
+    # Rest of function same as your current implementation
+    node_features = torch.FloatTensor(node_features)
+    node_features = safe_feature_normalization_vectorized(node_features)
+    
+    # Build edges (keep your existing edge construction code)
+    edge_list = []
+    edge_attrs = []
+    
+    for u, v, data in road_network.edges(data=True):
+        u_idx = node_to_idx[u]
+        v_idx = node_to_idx[v]
+        
+        edge_list.append([u_idx, v_idx])
+        edge_list.append([v_idx, u_idx])
+        
+        length = data.get('length', 1.0)
+        edge_attrs.append([length])
+        edge_attrs.append([length])
+    
+    # Create PyTorch Geometric data object
+    x = node_features
+    edge_index = torch.LongTensor(edge_list).t().contiguous()
+    edge_attr = torch.FloatTensor(edge_attrs) if edge_attrs else None
+    
+    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+    
+    return data, node_to_idx
+
+def prepare_graph_data_topological(road_network: nx.Graph) -> Tuple[Data, Dict]:
     """
     Prepare graph data for GNN from road network
     
@@ -182,6 +255,8 @@ def prepare_graph_data(road_network: nx.Graph) -> Tuple[Data, Dict]:
     
     return data, node_to_idx
 
+# Alias for backward compatibility
+prepare_graph_data = prepare_graph_data_topological  # Default to old version for now
 
 def create_gnn_model(input_dim: int = 5, hidden_dim: int = 128, 
                     output_dim: int = 3) -> nn.Module:

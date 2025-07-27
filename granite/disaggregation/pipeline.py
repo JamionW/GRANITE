@@ -17,6 +17,7 @@ from ..models.gnn import prepare_graph_data, create_gnn_model
 from ..models.training import train_accessibility_gnn
 from ..metricgraph.interface import MetricGraphInterface
 from ..visualization.plots import DisaggregationVisualizer
+from ..diagnostics.comparison_diagnostics import diagnose_comparison_issues, create_diagnostic_plots
 
 
 
@@ -393,6 +394,58 @@ class GRANITEPipeline:
             if validation_metrics.get('gnn_vs_idm_correlation') is not None:
                 self._log(f"  GNN vs IDM correlation: {validation_metrics['gnn_vs_idm_correlation']:.3f}")
             
+            if disagg_result['success'] and idm_result.get('success'):
+                self._log("🔍 Running diagnostic analysis...")
+                
+                try:
+                    gnn_predictions = disagg_result['predictions']
+                    idm_predictions = idm_result['predictions']
+                    
+                    # Run diagnostics
+                    diagnostic_results = diagnose_comparison_issues(
+                        gnn_predictions, idm_predictions, svi_value
+                    )
+                    
+                    # Create diagnostic plots
+                    diagnostic_fig = create_diagnostic_plots(
+                        gnn_predictions, idm_predictions, svi_value
+                    )
+                    
+                    # Save diagnostic plot
+                    diagnostic_path = os.path.join(self.output_dir, f'diagnostics_tract_{fips}.png')
+                    diagnostic_fig.savefig(diagnostic_path, dpi=300, bbox_inches='tight')
+                    plt.close(diagnostic_fig)
+                    
+                    self._log(f"💾 Diagnostic plots saved to {diagnostic_path}")
+                    
+                    # Log key findings
+                    if diagnostic_results['issues_found']:
+                        self._log("🚨 DIAGNOSTIC ISSUES FOUND:")
+                        for issue in diagnostic_results['issues_found']:
+                            self._log(f"  - {issue}")
+                    else:
+                        self._log("✅ No major diagnostic issues detected")
+                        
+                    # Add diagnostics to return data
+                    return {
+                        'status': 'success',
+                        'fips': fips,
+                        'predictions': predictions,
+                        'gnn_features': gnn_features,
+                        'spde_params': disagg_result['spde_params'],
+                        'diagnostics': disagg_result['diagnostics'],
+                        'idm_comparison': idm_result,
+                        'validation_metrics': validation_metrics,
+                        'diagnostic_results': diagnostic_results,  # NEW
+                        'diagnostic_plot_path': diagnostic_path,   # NEW
+                        'network_data': self._prepare_network_data_for_viz(tract_data),
+                        'timing': {'total': mg_time}
+                    }
+                    
+                except Exception as e:
+                    self._log(f"⚠️  Diagnostic analysis failed: {str(e)}")
+                    # Continue without diagnostics
+
             return {
                 'status': 'success',
                 'fips': fips,

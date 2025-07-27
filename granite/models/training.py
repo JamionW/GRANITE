@@ -166,7 +166,7 @@ class AccessibilityTrainer:
         return kappa_penalty + alpha_penalty + tau_penalty
     
     def train(self, graph_data, epochs: int = 100, lr: float = 0.0001, 
-             weight_decay: float = 1e-4, spatial_weight: float = 1.0, 
+             weight_decay: float = 1e-4, spatial_weight: float = 0.5, 
              reg_weight: float = 0.01, collect_history: bool = False, 
              feature_history: Optional[list] = None) -> Dict:
         """

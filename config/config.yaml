@@ -62,7 +62,7 @@ model:
     nlcd_path: "./data/nlcd_hamilton_county.tif"
 
   # Training parameters
-  spatial_weight: 0.5      # Weight for spatial smoothness loss
+  spatial_weight: 0.01      # Weight for spatial smoothness loss
   regularization_weight: 0.01  # Weight for parameter regularization
   
 # MetricGraph configuration

@@ -166,7 +166,7 @@ class AccessibilityTrainer:
         return kappa_penalty + alpha_penalty + tau_penalty
     
     def train(self, graph_data, epochs: int = 100, lr: float = 0.0001, 
-             weight_decay: float = 1e-4, spatial_weight: float = 0.5, 
+             weight_decay: float = 1e-4, spatial_weight: float = 0.1, 
              reg_weight: float = 0.01, collect_history: bool = False, 
              feature_history: Optional[list] = None) -> Dict:
         """
@@ -196,8 +196,13 @@ class AccessibilityTrainer:
         Dict
             Training metrics
         """
+        print(f"🔍 TRAINING DEBUG: spatial_weight received = {spatial_weight}")
+        print(f"🔍 TRAINING DEBUG: Using hardcoded default = {spatial_weight == 0.5}")
+    
         start_time = time.time()
         self._log(f"Starting GNN training for {epochs} epochs...")
+
+        print(f"🔍 DEBUG: Training started with spatial_weight = {spatial_weight}")
         
         # Move data to device
         graph_data = graph_data.to(self.device)
@@ -238,6 +243,9 @@ class AccessibilityTrainer:
             )
             
             reg_loss = self.parameter_regularization(params)
+
+            if (epoch + 1) % 5 == 0:
+                print(f"🔍 DEBUG Epoch {epoch+1}: spatial_weight={spatial_weight}, spatial_loss={spatial_loss.item():.6f}")
             
             # Additional loss components
             diversity_loss = self.diversity_penalty(params)

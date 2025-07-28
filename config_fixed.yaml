@@ -1,0 +1,12 @@
+data:
+  nlcd_path: ./data/nlcd_hamilton_county.tif
+metricgraph:
+  max_edges: 10000
+  sampling_rate: 0.1
+model:
+  epochs: 10
+  hidden_dim: 64
+  learning_rate: 0.0001
+  output_dim: 3
+  regularization_weight: 0.01
+  spatial_weight: 0.1

@@ -53,7 +53,11 @@ class GRANITEPipeline:
         self.data_dir = data_dir
         self.output_dir = output_dir
         self.verbose = verbose
-        
+
+        # Add right after config loading:
+        print(f"🔍 CONFIG DEBUG: spatial_weight = {self.config['model']['spatial_weight']}")
+        print(f"🔍 CONFIG DEBUG: Full model config = {self.config['model']}")
+                
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
         
@@ -371,13 +375,14 @@ class GRANITEPipeline:
             idm_result = self.mg_interface._idm_baseline(
                 tract_observation=tract_observation,
                 prediction_locations=prediction_locations,
-                nlcd_features=nlcd_features  # Pass NLCD features to IDM
+                nlcd_features=nlcd_features,  # Now includes proper 16-class NLCD
+                tract_geometry=tract_data['tract_info'].geometry  # Pass tract geometry
             )
             
             if idm_result is None:
                 self._log("  WARNING: IDM baseline failed, continuing without it")
                 idm_result = {'success': False, 'error': 'IDM baseline failed'}
-            
+        
             # Step 7: Process results with IDM comparison
             predictions = disagg_result['predictions']
             predictions['fips'] = fips

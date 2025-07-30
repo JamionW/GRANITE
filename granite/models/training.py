@@ -120,25 +120,42 @@ class AccessibilityTrainer:
     
     def diversity_penalty(self, params: torch.Tensor) -> torch.Tensor:
         """
-        Penalty to prevent all parameters from converging to same values
-        
-        Parameters:
-        -----------
-        params : torch.Tensor
-            SPDE parameters [num_nodes, 3]
-            
-        Returns:
-        --------
-        torch.Tensor
-            Diversity penalty (negative variance to encourage diversity)
+        ENHANCED penalty to prevent all parameters from converging to same values
+        Now with target variance enforcement and spatial differentiation
         """
-        kappa_var = torch.var(params[:, 0])  # κ variance
-        alpha_var = torch.var(params[:, 1])  # α variance  
-        tau_var = torch.var(params[:, 2])    # τ variance
+        kappa = params[:, 0]  # κ variance
+        alpha = params[:, 1]  # α variance  
+        tau = params[:, 2]    # τ variance
         
-        # Return negative because we want HIGH variance
-        total_variance = kappa_var + alpha_var + tau_var
-        return -total_variance
+        # Current variances
+        kappa_var = torch.var(kappa)
+        alpha_var = torch.var(alpha)
+        tau_var = torch.var(tau)
+        
+        # Target variances for good spatial variation
+        target_kappa_var = 0.25  # κ should vary significantly
+        target_alpha_var = 0.1   # α should vary moderately  
+        target_tau_var = 0.05    # τ should vary less
+        
+        # STRONG penalty if variance is too low
+        variance_penalty = (
+            F.relu(target_kappa_var - kappa_var) * 10.0 +  # Very strong penalty
+            F.relu(target_alpha_var - alpha_var) * 5.0 +   # Strong penalty
+            F.relu(target_tau_var - tau_var) * 3.0         # Moderate penalty
+        )
+        
+        # Additional: encourage parameter ranges to be meaningful
+        kappa_range = kappa.max() - kappa.min()
+        alpha_range = alpha.max() - alpha.min()
+        tau_range = tau.max() - tau.min()
+        
+        range_penalty = (
+            F.relu(0.5 - kappa_range) * 5.0 +  # κ range should be at least 0.5
+            F.relu(0.3 - alpha_range) * 3.0 +  # α range should be at least 0.3
+            F.relu(0.2 - tau_range) * 2.0      # τ range should be at least 0.2
+        )
+        
+        return variance_penalty + range_penalty
     
     def physical_realism_penalty(self, params: torch.Tensor) -> torch.Tensor:
         """
@@ -245,17 +262,19 @@ class AccessibilityTrainer:
             reg_loss = self.parameter_regularization(params)
 
             if (epoch + 1) % 5 == 0:
-                print(f"🔍 DEBUG Epoch {epoch+1}: spatial_weight={spatial_weight}, spatial_loss={spatial_loss.item():.6f}")
+                print(f"🔍 DEBUG Epoch {epoch+1}: "
+                    f"spatial_w={spatial_weight}, spatial_l={spatial_loss.item():.6f}, "
+                    f"diversity_l={diversity_loss.item():.6f}, total_l={loss.item():.6f}")
             
             # Additional loss components
             diversity_loss = self.diversity_penalty(params)
             realism_loss = self.physical_realism_penalty(params)
-            
-            # Total loss with all components
-            loss = (spatial_weight * spatial_loss + 
-                   reg_weight * reg_loss )
-                   #0.2 * diversity_loss +      # Encourage parameter diversity
-                  #0.01 * realism_loss)          # Physical realism constraints
+
+            # Total loss with MUCH STRONGER diversity weighting
+            loss = (spatial_weight * spatial_loss +      # 0.001 (weak)
+                reg_weight * reg_loss +               # 0.01 (moderate)  
+                2.0 * diversity_loss +                # 2.0 (VERY STRONG)
+                0.01 * realism_loss)                  # 0.01 (weak)
             
             # Backward pass
             loss.backward()
@@ -279,9 +298,9 @@ class AccessibilityTrainer:
             # Log progress
             if (epoch + 1) % 20 == 0:
                 self._log(f"Epoch {epoch+1}/{epochs} - Loss: {loss.item():.4f} "
-                         f"(Spatial: {spatial_loss.item():.4f}, Reg: {reg_loss.item():.4f}, "
-                         f"Div: {diversity_loss.item():.4f}, Real: {realism_loss.item():.4f})")
-        
+                    f"(Spatial: {spatial_loss.item():.4f}, Reg: {reg_loss.item():.4f}, "
+                    f"Div: {diversity_loss.item():.4f}, Real: {realism_loss.item():.4f})")
+
         # Final feature snapshot for history
         if collect_history and feature_history is not None:
             with torch.no_grad():
@@ -326,9 +345,12 @@ class AccessibilityTrainer:
         
         # Log parameter statistics
         self._log("Extracted SPDE parameters:")
-        self._log(f"  Kappa (precision): [{features[:, 0].min():.3f}, {features[:, 0].max():.3f}]")
-        self._log(f"  Alpha (smoothness): [{features[:, 1].min():.3f}, {features[:, 1].max():.3f}]")
-        self._log(f"  Tau (nugget): [{features[:, 2].min():.3f}, {features[:, 2].max():.3f}]")
+        self._log(f"  Kappa (precision): [{features[:, 0].min():.3f}, {features[:, 0].max():.3f}] "
+                f"(var: {np.var(features[:, 0]):.4f})")
+        self._log(f"  Alpha (smoothness): [{features[:, 1].min():.3f}, {features[:, 1].max():.3f}] "
+                f"(var: {np.var(features[:, 1]):.4f})")
+        self._log(f"  Tau (nugget): [{features[:, 2].min():.3f}, {features[:, 2].max():.3f}] "
+                f"(var: {np.var(features[:, 2]):.4f})")
         
         return features
 

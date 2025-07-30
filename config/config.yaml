@@ -53,7 +53,7 @@ model:
   hidden_dim: 128    # Hidden layer dimension
   output_dim: 3     # SPDE parameters: kappa, alpha, tau
   dropout: 0.2
-  epochs: 100
+  epochs: 20
   learning_rate: 0.0001
   
   features:
@@ -62,8 +62,12 @@ model:
     nlcd_path: "./data/nlcd_hamilton_county.tif"
 
   # Training parameters
-  spatial_weight: 0.01      # Weight for spatial smoothness loss
+  spatial_weight: 0.001      # Weight for spatial smoothness loss
   regularization_weight: 0.01  # Weight for parameter regularization
+
+  diversity_weight: 0.2             # NEW: Encourage parameter variation
+  realism_weight: 0.01              # NEW: Keep parameters reasonable
+  
   
 # MetricGraph configuration
 metricgraph:

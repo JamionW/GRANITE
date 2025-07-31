@@ -57,12 +57,12 @@ model:
   learning_rate: 0.0001
   
   features:
-    type: "nlcd"  # vs "topological" 
+    type: "topological"  # vs "nlcd" 
     fallback_to_topological: true
     nlcd_path: "./data/nlcd_hamilton_county.tif"
 
   # Training parameters
-  spatial_weight: 0.001      # Weight for spatial smoothness loss
+  spatial_weight: 0.0      # Weight for spatial smoothness loss
   regularization_weight: 0.01  # Weight for parameter regularization
 
   diversity_weight: 0.2             # NEW: Encourage parameter variation

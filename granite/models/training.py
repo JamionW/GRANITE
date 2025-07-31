@@ -133,15 +133,15 @@ class AccessibilityTrainer:
         tau_var = torch.var(tau)
         
         # Target variances for good spatial variation
-        target_kappa_var = 0.25  # κ should vary significantly
-        target_alpha_var = 0.1   # α should vary moderately  
-        target_tau_var = 0.05    # τ should vary less
+        target_kappa_var = 0.05  # κ should vary significantly
+        target_alpha_var = 0.02   # α should vary moderately  
+        target_tau_var = 0.01    # τ should vary less
         
         # STRONG penalty if variance is too low
         variance_penalty = (
-            F.relu(target_kappa_var - kappa_var) * 10.0 +  # Very strong penalty
-            F.relu(target_alpha_var - alpha_var) * 5.0 +   # Strong penalty
-            F.relu(target_tau_var - tau_var) * 3.0         # Moderate penalty
+            F.relu(target_kappa_var - kappa_var) * 2.0 +  # Very strong penalty
+            F.relu(target_alpha_var - alpha_var) * 1.0 +   # Strong penalty
+            F.relu(target_tau_var - tau_var) * 0.5         # Moderate penalty
         )
         
         # Additional: encourage parameter ranges to be meaningful
@@ -150,9 +150,9 @@ class AccessibilityTrainer:
         tau_range = tau.max() - tau.min()
         
         range_penalty = (
-            F.relu(0.5 - kappa_range) * 5.0 +  # κ range should be at least 0.5
-            F.relu(0.3 - alpha_range) * 3.0 +  # α range should be at least 0.3
-            F.relu(0.2 - tau_range) * 2.0      # τ range should be at least 0.2
+            F.relu(0.5 - kappa_range) * 1.0 +  # κ range should be at least 0.5
+            F.relu(0.3 - alpha_range) * 0.5 +  # α range should be at least 0.3
+            F.relu(0.2 - tau_range) * 0.2      # τ range should be at least 0.2
         )
         
         return variance_penalty + range_penalty
@@ -273,7 +273,7 @@ class AccessibilityTrainer:
             # Total loss with MUCH STRONGER diversity weighting
             loss = (spatial_weight * spatial_loss +      # 0.001 (weak)
                 reg_weight * reg_loss +               # 0.01 (moderate)  
-                2.0 * diversity_loss +                # 2.0 (VERY STRONG)
+                0.1 * diversity_loss +                # 0.1
                 0.01 * realism_loss)                  # 0.01 (weak)
             
             # Backward pass

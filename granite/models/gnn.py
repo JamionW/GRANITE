@@ -93,9 +93,9 @@ class SPDEParameterGNN(nn.Module):
         # Alpha (smoothness) should be between 0 and 2
         # Tau (nugget) should be positive and small
         params = torch.stack([
-            F.softplus(params[:, 0]),
-            2.0 * torch.sigmoid(params[:, 1]),
-            0.5 * F.softplus(params[:, 2])
+            0.2 + 2.0 * torch.sigmoid(params[:, 0]),  # Kappa: [0.2, 2.2]
+            0.8 + 1.5 * torch.sigmoid(params[:, 1]),  # Alpha: [0.8, 2.3] 
+            0.1 + 0.8 * torch.sigmoid(params[:, 2])   # Tau: [0.1, 0.9]
         ], dim=1)
         
         return params
@@ -119,10 +119,6 @@ def safe_feature_normalization_vectorized(node_features):
 
 def prepare_graph_data_with_nlcd(road_network: nx.Graph, 
                                 nlcd_features: pd.DataFrame) -> Tuple[Data, Dict]:
-    """
-    UPDATED VERSION of prepare_graph_data() using NLCD features
-    Replace topological features with theoretically justified land cover features
-    """
     nodes = list(road_network.nodes())
     node_to_idx = {node: i for i, node in enumerate(nodes)}
     
@@ -139,24 +135,21 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
     
     node_features = []
     for node in nodes:
-        # Get nearest NLCD features (simplified - you may want more sophisticated mapping)
+        # Get nearest NLCD features
         # For now, using node coordinates to find nearest address features
         
-        # REPLACE TOPOLOGICAL FEATURES WITH NLCD FEATURES
         features = [
-            # Geographic features (keep these)
-            node[0],  # X coordinate (normalized later)
-            node[1],  # Y coordinate (normalized later)
+            # Geographic features 
+            node[0],  # X coordinate 
+            node[1],  # Y coordinate 
             
-            # NEW: NLCD-derived features (the key innovation!)
             0.5,      # development_intensity (placeholder - replace with lookup)
             0.3,      # svi_coefficient (placeholder - replace with lookup)  
             1.0,      # is_developed (placeholder - replace with lookup)
             0.0,      # is_uninhabited (placeholder - replace with lookup)
             0.23,     # normalized nlcd_class (placeholder - replace with lookup)
             
-            # REDUCED: Minimal network features (reduced importance)
-            min(road_network.degree(node), 10) / 10.0,  # Normalized degree only
+            min(road_network.degree(node), 10) / 10.0, 
         ]
         
         node_features.append(features)

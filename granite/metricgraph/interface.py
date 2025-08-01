@@ -112,7 +112,7 @@ class MetricGraphInterface:
                     elif hasattr(gnn_features, 'columns'):
                         self._log(f"gnn_features columns: {list(gnn_features.columns)}")
                 
-                # DEFENSIVE: Handle gnn_features regardless of type
+                # Handle gnn_features regardless of type
                 if gnn_features is not None:
                     try:
                         # Case 1: It's already a DataFrame
@@ -183,7 +183,7 @@ class MetricGraphInterface:
                 if success:
                     self._log("Processing successful Whittle-Matérn disaggregation results...")
                     
-                    # MANUAL DataFrame extraction (this works based on diagnostic)
+                    # Manual DataFrame extraction
                     self._log("Extracting predictions DataFrame manually...")
                     try:
                         r_predictions = result.rx2('predictions')
@@ -200,7 +200,7 @@ class MetricGraphInterface:
                         self._log(f"Manual DataFrame extraction failed: {e}")
                         return self._kriging_baseline(tract_observation, prediction_locations)
                     
-                    # Extract scalar values (this works based on diagnostic)
+                    # Extract scalar values 
                     try:
                         constraint_satisfied = bool(result.rx2('constraint_satisfied')[0])
                         if not constraint_satisfied:
@@ -307,7 +307,6 @@ class MetricGraphInterface:
                     cat("Using default parameters - no GNN features provided\\n")
                 }
                 
-                # CORRECTED: Use the right API - graph_spde function exists and works!
                 cat("Creating SPDE model with graph_spde...\\n")
                 spde_model <- graph_spde(
                     graph_object = graph,
@@ -332,7 +331,7 @@ class MetricGraphInterface:
                 ))
                 
             }, error = function(e) {
-                cat("❌ SPDE creation failed:", e$message, "\\n")
+                cat("SPDE creation failed:", e$message, "\\n")
                 return(list(
                     success = FALSE, 
                     error = conditionMessage(e)
@@ -399,7 +398,7 @@ class MetricGraphInterface:
                     mean_kappa <- mean(kappa_field)
                     spatial_range <- 1.0 / sqrt(mean_kappa)  # Higher kappa = shorter range
                     
-                    # Create full spatial correlation matrix (not from centroid!)
+                    # Create full spatial correlation matrix 
                     spatial_correlation <- exp(-pairwise_distances / spatial_range)
                     
                     # GNN-informed local parameter adjustment
@@ -457,7 +456,7 @@ class MetricGraphInterface:
 
                     cat("Pre-constraint mean:", current_mean, "Target:", tract_svi, "Error:", constraint_error_pre, "\\n")
 
-                    # ONLY apply constraint if error > 5% (was 1%)
+                    # Only apply constraint if error > 5% (was 1%)
                     if (constraint_error_pre > 0.05) {
                         constraint_factor <- tract_svi / current_mean
                         # SOFT adjustment: 90% constraint, 10% original (preserves some spatial variation)
@@ -490,7 +489,7 @@ class MetricGraphInterface:
                     stringsAsFactors = FALSE
                 )
                 
-                # Calculate constraint metrics (MEAN, not sum)
+                # Calculate constraint metrics 
                 predicted_mean <- mean(predictions$mean)
                 constraint_error <- abs(predicted_mean - tract_svi) / tract_svi
                 
@@ -508,7 +507,7 @@ class MetricGraphInterface:
                 ))
                 
             }, error = function(e) {
-                cat("❌ Whittle-Matérn disaggregation failed:", e$message, "\\n")
+                cat("Whittle-Matérn disaggregation failed:", e$message, "\\n")
                 return(list(
                     success = FALSE,
                     error = as.character(e$message)
@@ -707,7 +706,7 @@ class MetricGraphInterface:
                 r_nodes = ro.conversion.py2rpy(nodes_df)
                 r_edges = ro.conversion.py2rpy(edges_df)
 
-            # Create graph OUTSIDE localconverter to avoid automatic conversion
+            # Create graph outside localconverter to avoid automatic conversion
             create_func = ro.r['create_metric_graph_optimized']
             result = create_func(
                 r_nodes,
@@ -823,137 +822,12 @@ class MetricGraphInterface:
             self._log(f"Error retrieving graph info: {str(e)}")
             return None
     
-    def _kriging_baseline(self, tract_observation: pd.DataFrame, prediction_locations: pd.DataFrame) -> Dict:
-        """IMPROVED: Network-aware kriging baseline for realistic comparison"""
-        self._log("Using network-aware kriging baseline for disaggregation")
-        
-        try:
-            # Get tract parameters
-            tract_x = float(tract_observation['coord_x'].iloc[0])
-            tract_y = float(tract_observation['coord_y'].iloc[0])
-            tract_svi = float(tract_observation['svi_value'].iloc[0])
-            
-            # Create multiple pseudo-observations to simulate realistic spatial heterogeneity
-            # This represents what a competent spatial analyst would do
-            bounds = {
-                'min_x': float(prediction_locations['x'].min()),
-                'max_x': float(prediction_locations['x'].max()), 
-                'min_y': float(prediction_locations['y'].min()),
-                'max_y': float(prediction_locations['y'].max())
-            }
-            
-            # Multiple observation points with realistic SVI variation
-            pseudo_observations = [
-                # Tract centroid (main observation)
-                {'x': tract_x, 'y': tract_y, 'svi': tract_svi},
-                
-                # Corner points with plausible variation (±10-15% is realistic for SVI within tract)
-                {'x': bounds['min_x'], 'y': bounds['min_y'], 'svi': tract_svi * 0.88},
-                {'x': bounds['max_x'], 'y': bounds['min_y'], 'svi': tract_svi * 1.12}, 
-                {'x': bounds['min_x'], 'y': bounds['max_y'], 'svi': tract_svi * 0.94},
-                {'x': bounds['max_x'], 'y': bounds['max_y'], 'svi': tract_svi * 1.06},
-                
-                # Mid-edge points for smoother interpolation  
-                {'x': (bounds['min_x'] + bounds['max_x'])/2, 'y': bounds['min_y'], 'svi': tract_svi * 1.03},
-                {'x': (bounds['min_x'] + bounds['max_x'])/2, 'y': bounds['max_y'], 'svi': tract_svi * 0.97},
-            ]
-            
-            # Convert to arrays for Gaussian Process
-            obs_coords = np.array([[obs['x'], obs['y']] for obs in pseudo_observations])
-            obs_values = np.array([obs['svi'] for obs in pseudo_observations])
-            pred_coords = prediction_locations[['x', 'y']].values
-            
-            # Network-scale spatial correlation (not just distance decay)
-            tract_extent = np.sqrt((bounds['max_x'] - bounds['min_x'])**2 + 
-                                (bounds['max_y'] - bounds['min_y'])**2)
-            length_scale = tract_extent * 0.3  # Realistic spatial correlation range
-            
-            # Gaussian Process with appropriate kernel
-            from sklearn.gaussian_process import GaussianProcessRegressor
-            from sklearn.gaussian_process.kernels import RBF, WhiteKernel
-            
-            kernel = RBF(length_scale=length_scale, length_scale_bounds=(length_scale*0.1, length_scale*10)) + \
-                    WhiteKernel(noise_level=0.01, noise_level_bounds=(1e-5, 1e-1))
-            
-            gp = GaussianProcessRegressor(kernel=kernel, alpha=0.01, normalize_y=False)
-            gp.fit(obs_coords, obs_values)
-            
-            # Predict with uncertainty
-            pred_mean, pred_std = gp.predict(pred_coords, return_std=True)
-            
-            # Ensure constraint satisfaction (just like your GNN method)
-            predicted_mean = np.mean(pred_mean)
-            constraint_adjustment = tract_svi - predicted_mean
-            pred_mean += constraint_adjustment
-            
-            # Create results DataFrame  
-            predictions_df = pd.DataFrame({
-                'x': prediction_locations['x'].values,
-                'y': prediction_locations['y'].values,
-                'mean': pred_mean,
-                'sd': pred_std,
-                'q025': pred_mean - 1.96 * pred_std,
-                'q975': pred_mean + 1.96 * pred_std
-            })
-            
-            # Ensure non-negativity
-            predictions_df['mean'] = predictions_df['mean'].clip(lower=0)
-            predictions_df['q025'] = predictions_df['q025'].clip(lower=0)
-            
-            # Calculate diagnostics
-            final_mean = float(predictions_df['mean'].mean())
-            constraint_error = abs(final_mean - tract_svi) / max(tract_svi, 1e-6)
-            
-            return {
-                'success': True,
-                'predictions': predictions_df,
-                'diagnostics': {
-                    'constraint_satisfied': constraint_error < 0.001,
-                    'constraint_error': constraint_error,
-                    'predicted_mean': final_mean,
-                    'tract_value': tract_svi,
-                    'mean_prediction': final_mean,
-                    'std_prediction': float(predictions_df['mean'].std()),
-                    'mean_uncertainty': float(predictions_df['sd'].mean()),
-                    'method': 'network_aware_kriging'
-                },
-                'spde_params': {'kappa': 1.0, 'alpha': 1.0, 'sigma': 0.5, 'tau': 4.0}
-            }
-            
-        except Exception as e:
-            self._log(f"Network-aware kriging failed: {str(e)}")
-            # Fallback to your existing uniform distribution
-            n_pred = len(prediction_locations)
-            uniform_value = tract_observation['svi_value'].iloc[0]
-            
-            return {
-                'success': False,
-                'predictions': pd.DataFrame({
-                    'x': prediction_locations['x'].values,
-                    'y': prediction_locations['y'].values,
-                    'mean': [uniform_value] * n_pred,
-                    'sd': [uniform_value * 0.1] * n_pred,
-                    'q025': [uniform_value * 0.8] * n_pred,
-                    'q975': [uniform_value * 1.2] * n_pred
-                }),
-                'diagnostics': {
-                    'constraint_satisfied': False,
-                    'constraint_error': 1.0,
-                    'mean_prediction': uniform_value,
-                    'std_prediction': 0.0,
-                    'mean_uncertainty': uniform_value * 0.1,
-                    'method': 'uniform_fallback'
-                },
-                'spde_params': {'kappa': 1.0, 'alpha': 1.0, 'sigma': 0.5, 'tau': 4.0},
-                'error': str(e)
-            }
-        
     def _idm_baseline(self, tract_observation: pd.DataFrame,
                     prediction_locations: pd.DataFrame,
                     nlcd_features: pd.DataFrame = None,
                     tract_geometry = None) -> Dict:
         """
-        UPDATED: IDM baseline using the improved IDMBaseline class
+        IDM baseline using the improved IDMBaseline class
         
         This method keeps the same name but now uses the updated implementation
         """
@@ -999,7 +873,7 @@ class MetricGraphInterface:
     def _simple_distance_fallback(self, tract_observation: pd.DataFrame,
                                 prediction_locations: pd.DataFrame) -> Dict:
         """
-        UPDATED: Simple fallback when IDM fails completely
+        Simple fallback when IDM fails completely
         """
         self._log("Using simple distance-based fallback")
         
@@ -1066,7 +940,7 @@ class MetricGraphInterface:
 
     def _random_baseline_test(self, tract_observation: pd.DataFrame, prediction_locations: pd.DataFrame) -> Dict:
         """
-        DIAGNOSTIC: Pure random baseline to test if high correlation is due to constraints
+        Diagnostic Only: Pure random baseline to test if high correlation is due to constraints
         Should give correlation ≈ 0 if methods are truly independent
         """
         self._log("Using RANDOM baseline for correlation testing")

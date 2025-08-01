@@ -120,8 +120,7 @@ class AccessibilityTrainer:
     
     def diversity_penalty(self, params: torch.Tensor) -> torch.Tensor:
         """
-        ENHANCED penalty to prevent all parameters from converging to same values
-        Now with target variance enforcement and spatial differentiation
+        Penalty to prevent all parameters from converging to same values
         """
         kappa = params[:, 0]  # κ variance
         alpha = params[:, 1]  # α variance  
@@ -137,7 +136,7 @@ class AccessibilityTrainer:
         target_alpha_var = 0.02   # α should vary moderately  
         target_tau_var = 0.01    # τ should vary less
         
-        # STRONG penalty if variance is too low
+        # Strong penalty if variance is too low
         variance_penalty = (
             F.relu(target_kappa_var - kappa_var) * 2.0 +  # Very strong penalty
             F.relu(target_alpha_var - alpha_var) * 1.0 +   # Strong penalty
@@ -213,13 +212,13 @@ class AccessibilityTrainer:
         Dict
             Training metrics
         """
-        print(f"🔍 TRAINING DEBUG: spatial_weight received = {spatial_weight}")
-        print(f"🔍 TRAINING DEBUG: Using hardcoded default = {spatial_weight == 0.5}")
+        print(f"TRAINING DEBUG: spatial_weight received = {spatial_weight}")
+        print(f"TRAINING DEBUG: Using hardcoded default = {spatial_weight == 0.5}")
     
         start_time = time.time()
         self._log(f"Starting GNN training for {epochs} epochs...")
 
-        print(f"🔍 DEBUG: Training started with spatial_weight = {spatial_weight}")
+        print(f"TRAINING DEBUG: Training started with spatial_weight = {spatial_weight}")
         
         # Move data to device
         graph_data = graph_data.to(self.device)
@@ -245,7 +244,7 @@ class AccessibilityTrainer:
             # Forward pass - learn SPDE parameters
             params = self.model(graph_data.x, graph_data.edge_index)
             
-            # ENHANCEMENT: Collect feature snapshots for visualization
+            # Collect feature snapshots for visualization
             if collect_history and feature_history is not None:
                 if epoch % max(1, epochs // 10) == 0:  # Collect every 10% of training
                     with torch.no_grad():
@@ -270,7 +269,7 @@ class AccessibilityTrainer:
             diversity_loss = self.diversity_penalty(params)
             realism_loss = self.physical_realism_penalty(params)
 
-            # Total loss with MUCH STRONGER diversity weighting
+            # Total loss with strong diversity weighting
             loss = (spatial_weight * spatial_loss +      # 0.001 (weak)
                 reg_weight * reg_loss +               # 0.01 (moderate)  
                 0.1 * diversity_loss +                # 0.1

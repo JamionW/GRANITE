@@ -105,24 +105,24 @@ class DataLoader:
                 )
                 
                 if not has_overlap:
-                    self._log(f"  ❌ No overlap between county bounds and NLCD raster!")
+                    self._log(f"  No overlap between county bounds and NLCD raster!")
                     self._log(f"     County: {county_bounds_proj}")
                     self._log(f"     Raster: {raster_bounds}")
                     return None
                 else:
-                    self._log(f"  ✅ County/raster overlap confirmed")
+                    self._log(f"  County/raster overlap confirmed")
                 
                 # Crop NLCD to county bounds with proper CRS
                 try:
                     nlcd_cropped, nlcd_transform = rasterio.mask.mask(
-                        src, county_geom_reprojected, crop=True, filled=False
+                        src, county_geom_reprojected, crop=True, filled=True, fill_value=250
                     )
                     
                     self._log(f"  Cropped NLCD shape: {nlcd_cropped.shape}")
                     
                     # Check if we got valid data
                     if nlcd_cropped.size == 0:
-                        self._log(f"  ❌ Cropping resulted in empty raster!")
+                        self._log(f"  Cropping resulted in empty raster!")
                         return None
                     
                     # Check for all no-data
@@ -130,10 +130,10 @@ class DataLoader:
                     self._log(f"  Unique NLCD values in cropped area: {unique_values}")
                     
                     if len(unique_values) == 1 and unique_values[0] == 250:
-                        self._log(f"  ⚠️  WARNING: Cropped area contains only 'no data' values!")
+                        self._log(f"  WARNING: Cropped area contains only 'no data' values!")
                     elif 250 in unique_values:
                         pct_no_data = np.sum(nlcd_cropped[0] == 250) / nlcd_cropped[0].size * 100
-                        self._log(f"  📊 No data percentage: {pct_no_data:.1f}%")
+                        self._log(f"  No data percentage: {pct_no_data:.1f}%")
                     
                     # Update metadata
                     nlcd_meta = src.meta.copy()
@@ -144,12 +144,12 @@ class DataLoader:
                         "crs": src.crs  # Keep original raster CRS
                     })
                     
-                    self._log(f"  ✅ NLCD data successfully loaded and cropped")
+                    self._log(f"  NLCD data successfully loaded and cropped")
                     
                     return {
                         'data': nlcd_cropped[0],  # First band contains land cover classes
                         'transform': nlcd_transform,
-                        'crs': src.crs,  # IMPORTANT: Keep the raster's original CRS
+                        'crs': src.crs,  
                         'meta': nlcd_meta,
                         'bounds': rasterio.transform.array_bounds(
                             nlcd_cropped.shape[1], nlcd_cropped.shape[2], nlcd_transform
@@ -157,9 +157,9 @@ class DataLoader:
                     }
                     
                 except Exception as crop_error:
-                    self._log(f"  ❌ Error during cropping: {str(crop_error)}")
+                    self._log(f"  Error during cropping: {str(crop_error)}")
                     # Try loading full raster without cropping
-                    self._log(f"  🔄 Attempting to load full raster...")
+                    self._log(f"  Attempting to load full raster...")
                     
                     full_data = src.read(1)  # Read first band
                     
@@ -255,11 +255,11 @@ class DataLoader:
                     0 <= col < nlcd_data['data'].shape[1]):
                     value = nlcd_data['data'][row, col]
                     
-                    # Validate NLCD class - use proper 16-class legend
+                    # Validate NLCD class - use 16-class legend
                     if value in self._get_valid_nlcd_classes():
                         nlcd_values.append(int(value))
                     else:
-                        # Map legacy values to proper NLCD classes
+                        # Map legacy values to NLCD classes
                         if value in self._get_valid_nlcd_classes():
                             nlcd_values.append(int(value))
                         else:
@@ -293,7 +293,7 @@ class DataLoader:
             'nlcd_class': nlcd_values
         })
         
-        # Add derived features using proper NLCD methodology
+        # Add derived features using NLCD methodology
         features_df = self._add_nlcd_derived_features(features_df)
         
         # Quality check and logging
@@ -310,7 +310,7 @@ class DataLoader:
         Add derived features from NLCD classes following He et al. methodology
         """
         
-        # Population density coefficients (empirically derived from literature)
+        # Population density coefficients 
         population_density_map = {
             11: 0.0,   # Open Water
             12: 0.0,   # Perennial Ice/Snow
@@ -463,7 +463,7 @@ class DataLoader:
 
     def _create_fallback_nlcd_features(self, addresses: gpd.GeoDataFrame) -> pd.DataFrame:
         """
-        UPDATED: Create realistic NLCD features when raster data unavailable
+        Manufacture NLCD features when raster data unavailable
         Uses proper 16-class system with realistic urban distribution
         """
         n_addresses = len(addresses)
@@ -519,9 +519,7 @@ class DataLoader:
 
             # Add this right after: nlcd_data = self.data_loader.load_nlcd_data(...)
 
-            if nlcd_data is not None:
-                self._log(f"🔍 QUICK NLCD DIAGNOSTICS:")
-                
+            if nlcd_data is not None:   
                 # Check tract boundary vs NLCD coverage
                 tract_bounds = tract_boundary.total_bounds
                 self._log(f"  Tract bounds (EPSG:4326): [{tract_bounds[0]:.6f}, {tract_bounds[1]:.6f}, {tract_bounds[2]:.6f}, {tract_bounds[3]:.6f}]")
@@ -555,20 +553,20 @@ class DataLoader:
                 
                 # Check for obvious issues
                 if width < 10 or height < 10:
-                    self._log(f"  ⚠️  WARNING: NLCD raster very small ({width}x{height})")
+                    self._log(f"  WARNING: NLCD raster very small ({width}x{height})")
                 
                 if len(unique_values) < 3:
-                    self._log(f"  ⚠️  WARNING: NLCD has very few unique values ({len(unique_values)})")
+                    self._log(f"  WARNING: NLCD has very few unique values ({len(unique_values)})")
                 
                 if np.all(nlcd_data['data'] == 250):
-                    self._log(f"  ❌ CRITICAL: NLCD raster is all 'no data' values!")
+                    self._log(f"  CRITICAL: NLCD raster is all 'no data' values!")
                     
                 # Quick coordinate system check
                 if tract_bounds[0] > 0:  # Longitude should be negative for Tennessee
-                    self._log(f"  ⚠️  WARNING: Tract bounds have positive longitude - check CRS!")
+                    self._log(f"  WARNING: Tract bounds have positive longitude - check CRS!")
                     
                 if abs(raster_left) < 10:  # Should be around -85 for Tennessee  
-                    self._log(f"  ⚠️  WARNING: NLCD bounds seem wrong for Tennessee location")
+                    self._log(f"  WARNING: NLCD bounds seem wrong for Tennessee location")
             
             if nlcd_data is None:
                 self._log("  WARNING: NLCD raster not available, using fallback")
@@ -907,7 +905,7 @@ class DataLoader:
                 'svi_data': tract_svi.iloc[0],
                 'roads': roads,
                 'road_network': road_network,
-                'addresses': addresses,  # NOW CONTAINS REAL ADDRESSES
+                'addresses': addresses, 
                 'bbox': buffered_bbox,
                 'network_stats': {
                     'nodes': road_network.number_of_nodes(),
@@ -926,7 +924,7 @@ class DataLoader:
         """
         Generate synthetic addresses within tract (fallback only)
         """
-        np.random.seed(123)  # Loader-specific seed (different from kriging)
+        np.random.seed(123)  # Loader-specific seed 
         
         minx, miny, maxx, maxy = bbox
         addresses = []
@@ -1346,7 +1344,7 @@ class DataLoader:
 
     def _create_minimal_transit_stops(self) -> gpd.GeoDataFrame:
         """
-        Last resort: Original minimal transit stops (enhanced)
+        Last resort: Original minimal transit stops
         """
         stops = [
             {
@@ -1395,8 +1393,6 @@ class DataLoader:
     def load_address_points(self, state_fips: str = '47', county_fips: str = '065') -> gpd.GeoDataFrame:
         """
         Load real Chattanooga address point locations
-        
-        UPDATED TO USE REAL GEOJSON DATA
         
         Parameters:
         -----------
@@ -1489,7 +1485,7 @@ class DataLoader:
             if 'postcode' in addresses.columns:
                 addresses['zipcode'] = addresses['postcode']
             
-            # Ensure proper CRS (GeoJSON is typically WGS84)
+            # Ensure proper CRS 
             if addresses.crs is None:
                 addresses.set_crs(epsg=4326, inplace=True)
             elif addresses.crs != 'EPSG:4326':
@@ -1680,7 +1676,6 @@ class DataLoader:
     
     def _get_county_name(self, state_fips: str, county_fips: str) -> str:
         """Map FIPS codes to county name"""
-        # This should be expanded based on your needs
         county_map = {
             ('47', '065'): 'Hamilton'
         }

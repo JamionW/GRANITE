@@ -450,22 +450,6 @@ class MetricGraphInterface:
                     cat("Basic SPDE: Network-aware without tract centroid\\n")
                 }
 
-                    # FIXED: SOFT constraint satisfaction instead of hard constraint
-                    current_mean <- mean(adjusted_values)
-                    constraint_error_pre <- abs(current_mean - tract_svi) / tract_svi
-
-                    cat("Pre-constraint mean:", current_mean, "Target:", tract_svi, "Error:", constraint_error_pre, "\\n")
-
-                    # Only apply constraint if error > 5% (was 1%)
-                    if (constraint_error_pre > 0.05) {
-                        constraint_factor <- tract_svi / current_mean
-                        # SOFT adjustment: 90% constraint, 10% original (preserves some spatial variation)
-                        adjusted_values <- 0.9 * (adjusted_values * constraint_factor) + 0.1 * adjusted_values
-                        cat("Applied SOFT constraint adjustment\\n")
-                    } else {
-                        cat("Constraint satisfied without adjustment (", constraint_error_pre, ")\\n")
-                    }
-
                 # GNN-informed uncertainty (if available)
                 if (!is.null(gnn_features) && nrow(gnn_features) >= n_pred) {
                     # Higher kappa = more precision = lower uncertainty
@@ -899,10 +883,6 @@ class MetricGraphInterface:
             predictions = base_values + distance_effect
             
             # Force constraint satisfaction
-            current_mean = predictions.mean()
-            if current_mean > 0:
-                predictions *= tract_svi / current_mean
-            
             predictions = np.clip(predictions, 0.0, 1.0)
             uncertainty = np.full(n_pred, 0.05)
             
@@ -922,7 +902,7 @@ class MetricGraphInterface:
                 'predictions': predictions_df,
                 'diagnostics': {
                     'method': 'simple_distance_fallback',
-                    'constraint_satisfied': True,
+                    'constraint_satisfied': False,
                     'constraint_error': 0.0,
                     'predicted_mean': predictions.mean(),
                     'tract_value': tract_svi,
@@ -952,16 +932,6 @@ class MetricGraphInterface:
             # Generate completely random spatial pattern (no spatial structure)
             np.random.seed(999)  # Fixed seed for reproducibility
             random_values = np.random.normal(tract_svi, tract_svi * 0.2, n_pred)
-            
-            current_mean = np.mean(random_values)
-            error_percent = abs(current_mean - tract_svi) / max(tract_svi, 1e-6)
-
-            if error_percent > 0.10:  # Only force constraint if error > 10%
-                self._log(f"  Applying constraint adjustment - error was {error_percent:.1%}")
-                constraint_adjustment = tract_svi / current_mean
-                random_values *= constraint_adjustment
-            else:
-                self._log(f"  Relaxed constraint satisfied - error {error_percent:.1%}, no adjustment needed")
             
             # Ensure non-negativity
             random_values = np.clip(random_values, 0, 1)

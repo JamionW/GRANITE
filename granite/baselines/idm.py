@@ -19,7 +19,7 @@ class IDMBaseline:
     and mass-preserving spatial interpolation.
     """
     
-    def __init__(self, grid_resolution_meters: float = 100):
+    def __init__(self, config, grid_resolution_meters: float = 100):
         """
         Initialize IDM with proper NLCD 2019 coefficients
         
@@ -28,6 +28,10 @@ class IDMBaseline:
         grid_resolution_meters : float
             Grid resolution for IDM processing (He et al. used 300m, we use 100m for addresses)
         """
+        if config is None:
+            raise ValueError("Configuration is required. Please provide a config dict from config.yaml")
+            
+        self.config = config
         self.grid_resolution = grid_resolution_meters
         
         # NLCD 2019 16-class legend coefficients
@@ -282,16 +286,14 @@ class IDMBaseline:
         
         for i, coord in enumerate(coords):
             # Use smaller radius to reduce edge artifacts
-            local_radius = self._adaptive_radius(coords, i) * 0.5  # REDUCED radius
+            local_radius = self._adaptive_radius(coords, i) * 0.5  
             neighbors = tree.query_ball_point(coord, local_radius)
             
-            if len(neighbors) > 3:  # Require more neighbors for smoothing
+            if len(neighbors) > 3: 
                 neighbor_coeffs = pop_coefficients[neighbors]
                 local_variance = np.var(neighbor_coeffs)
-                # REDUCED smoothing influence
-                consistency_weight = 1.0 / (1.0 + local_variance * 2.0)  # Was 5.0
-                spatial_weights[i] = 0.8 + 0.2 * consistency_weight  # Less extreme
-            # REMOVED: No special edge detection that causes artifacts
+                consistency_weight = 1.0 / (1.0 + local_variance * 2.0)  
+                spatial_weights[i] = self.config.get("spatial_weight") * consistency_weight
         
         return spatial_weights
     
@@ -310,7 +312,7 @@ class IDMBaseline:
     def _mass_preserving_interpolation(self, coefficients: np.ndarray,
                                     tract_svi: float, n_addresses: int) -> np.ndarray:
         """
-        Mass-preserving interpolation with reduced edge artifacts
+        Generate spatial values without forcing mean preservation
         """
         total_weight = np.sum(coefficients)
         
@@ -320,20 +322,7 @@ class IDMBaseline:
         else:
             initial_values = np.full(n_addresses, tract_svi)
         
-        # Reduced iterations to minimize edge artifacts
-        adjusted_values = initial_values.copy()
-        
-        for iteration in range(2):  # Reduced from 3 to 2 iterations
-            current_mean = np.mean(adjusted_values)
-            
-            if abs(current_mean - tract_svi) < 0.005 * tract_svi:  # Relaxed tolerance
-                break
-            
-            adjustment_factor = tract_svi / current_mean if current_mean > 0 else 1.0
-            # Gentle adjustment to reduce edge artifacts
-            adjusted_values = 0.9 * adjusted_values * adjustment_factor + 0.1 * adjusted_values
-        
-        return adjusted_values
+        return initial_values
     
     def _calculate_idm_uncertainty(self, nlcd_classes: np.ndarray,
                                   predictions: np.ndarray, coords: np.ndarray) -> np.ndarray:

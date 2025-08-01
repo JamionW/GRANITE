@@ -7,13 +7,14 @@ import time
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+import matplotlib.pyplot as plt
 from datetime import datetime
 import torch
 import warnings
 warnings.filterwarnings('ignore')
 
 from ..data.loaders import DataLoader
-from ..models.gnn import prepare_graph_data, create_gnn_model
+from ..models.gnn import create_gnn_model, prepare_graph_data_with_nlcd, prepare_graph_data_topological
 from ..models.training import train_accessibility_gnn
 from ..metricgraph.interface import MetricGraphInterface
 from ..visualization.plots import DisaggregationVisualizer
@@ -53,16 +54,12 @@ class GRANITEPipeline:
         self.data_dir = data_dir
         self.output_dir = output_dir
         self.verbose = verbose
-
-        # Add right after config loading:
-        print(f"🔍 CONFIG DEBUG: spatial_weight = {self.config['model']['spatial_weight']}")
-        print(f"🔍 CONFIG DEBUG: Full model config = {self.config['model']}")
                 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
         
         # Initialize components
-        self.data_loader = DataLoader(data_dir, verbose)
+        self.data_loader = DataLoader(data_dir, verbose, config=config)
         self.mg_interface = MetricGraphInterface(
             verbose=verbose,
             config=self.config.get('metricgraph', {})
@@ -114,7 +111,7 @@ class GRANITEPipeline:
     
     def _load_data(self):
         """
-        UPDATED: Load data using real Chattanooga addresses
+        Load data using Chattanooga addresses
         """
         self._log("Loading data...")
         
@@ -147,10 +144,40 @@ class GRANITEPipeline:
         self._log(f"Loaded road network with {len(data['roads'])} segments")
         
         # Load transit stops
-        data['transit_stops'] = self.data_loader.load_transit_stops()
-        self._log(f"Loaded {len(data['transit_stops'])} transit stops")
+        transit_config = self.config.get('transit', {})
+        use_real_data = transit_config.get('download_real_data', True)
         
-        # UPDATED: Load real address points
+        data['transit_stops'] = self.data_loader.load_transit_stops(use_real_data=use_real_data)
+        
+        # Log transit data quality
+        if len(data['transit_stops']) > 0:
+            data_source = data['transit_stops']['data_source'].iloc[0]
+            unique_sources = data['transit_stops']['data_source'].unique()
+            
+            self._log(f"Loaded {len(data['transit_stops'])} transit stops")
+            self._log(f"  Primary source: {data_source}")
+            if len(unique_sources) > 1:
+                self._log(f"  Mixed sources: {list(unique_sources)}")
+            
+            # Log by route type
+            if 'route_type' in data['transit_stops'].columns:
+                route_counts = data['transit_stops']['route_type'].value_counts()
+                for route_type, count in route_counts.items():
+                    self._log(f"    {route_type}: {count} stops")
+            
+            # Quality assessment
+            if data_source == 'CARTA_GTFS':
+                self._log("  ✅ Using real GTFS data - highest quality for research")
+            elif data_source == 'OpenStreetMap':
+                self._log("  ✅ Using OSM data - good quality, community-verified")
+            elif data_source == 'Generated_Grid':
+                self._log("  ⚠️  Using generated grid - realistic but not real data")
+            else:
+                self._log("  ⚠️  Using minimal fallback - not recommended for research")
+        else:
+            self._log("❌ No transit stops loaded!")
+        
+        # Load address points
         data['addresses'] = self.data_loader.load_address_points(
             state_fips=state_fips, 
             county_fips=county_fips
@@ -176,7 +203,7 @@ class GRANITEPipeline:
     def _process_county_mode(self, data):
         self._log("Processing in county mode with SHARED GNN training")
         
-        # Step 1: GLOBAL GNN training on ALL tracts
+        # Step 1: Global GNN training on all tracts
         self._log("\n=== PHASE 1: Global GNN Training on All Tracts ===")
         global_gnn_model = self._train_global_gnn(data)
         
@@ -204,12 +231,14 @@ class GRANITEPipeline:
         return self._combine_results(all_results)
     
     def _train_global_gnn(self, data):
-        """Train ONE GNN on ALL tract networks combined"""
+        """Train one GNN on all tract networks combined with NLCD features"""
         self._log("Building combined network from all tracts...")
         
-        # Combine networks from ALL tracts
+        # Combine networks and NLCD features from all tracts
         combined_networks = []
         combined_svi_values = []
+        combined_nlcd_features = []
+        combined_addresses = []
         
         for idx, tract in data['tracts'].iterrows():
             if pd.isna(tract['RPL_THEMES']):
@@ -219,21 +248,68 @@ class GRANITEPipeline:
             if not tract_data['addresses'].empty:
                 combined_networks.append(tract_data['road_network'])
                 combined_svi_values.append(tract['RPL_THEMES'])
+                
+                # Collect NLCD features for this tract
+                try:
+                    tract_nlcd_features = self._load_nlcd_for_tract(tract_data)
+                    if tract_nlcd_features is not None and len(tract_nlcd_features) > 0:
+                        # Add tract identifier to avoid address_id conflicts
+                        tract_nlcd_features = tract_nlcd_features.copy()
+                        tract_nlcd_features['tract_id'] = tract['FIPS']
+                        tract_nlcd_features['address_id'] = (
+                            tract_nlcd_features['address_id'].astype(str) + 
+                            '_' + tract['FIPS']
+                        )
+                        combined_nlcd_features.append(tract_nlcd_features)
+                        
+                        # Also combine addresses with tract identifier
+                        tract_addresses = tract_data['addresses'].copy()
+                        tract_addresses['address_id'] = (
+                            tract_addresses.get('address_id', range(len(tract_addresses))).astype(str) + 
+                            '_' + tract['FIPS']
+                        )
+                        combined_addresses.append(tract_addresses)
+                        
+                except Exception as e:
+                    self._log(f"Warning: Could not load NLCD for tract {tract['FIPS']}: {e}")
         
-        # Create MEGA-GRAPH from all tracts
+        # Create single graph from all tracts
         mega_graph = self._combine_networks(combined_networks)
         
-        # Prepare graph data for training
-        graph_data, node_mapping = prepare_graph_data(mega_graph)
+        # Combine all NLCD features if available
+        if combined_nlcd_features:
+            mega_nlcd_features = pd.concat(combined_nlcd_features, ignore_index=True)
+            mega_addresses = pd.concat(combined_addresses, ignore_index=True)
+            
+            self._log(f"Combined NLCD features from {len(combined_nlcd_features)} tracts:")
+            self._log(f"  Total features: {len(mega_nlcd_features)}")
+            self._log(f"  Total addresses: {len(mega_addresses)}")
+            
+            # Prepare graph data with NLCD features
+            graph_data, node_mapping = prepare_graph_data_with_nlcd(
+                mega_graph, 
+                mega_nlcd_features,
+                addresses=mega_addresses
+            )
+            feature_type = "NLCD-based"
+            
+        else:
+            self._log("No NLCD features available, falling back to topological features")
+            # Fall back to topological features
+            graph_data, node_mapping = prepare_graph_data_topological(mega_graph)
+            feature_type = "topological"
         
-        # Train GNN on FULL spatial diversity
+        # Train GNN on full spatial diversity
         model = create_gnn_model(
             input_dim=graph_data.x.shape[1],
             hidden_dim=self.config['model']['hidden_dim'],
             output_dim=self.config['model']['output_dim']
         )
         
-        self._log(f"Training GNN on combined network: {mega_graph.number_of_nodes()} nodes")
+        self._log(f"Training GNN on combined network:")
+        self._log(f"  Nodes: {mega_graph.number_of_nodes()}")
+        self._log(f"  Features: {feature_type}")
+        self._log(f"  Input dimensions: {graph_data.x.shape[1]}")
         
         trained_model, _, training_metrics = train_accessibility_gnn(
             graph_data,
@@ -250,7 +326,6 @@ class GRANITEPipeline:
     def _load_nlcd_for_tract(self, tract_data):
         """
         Load NLCD data for tract area
-        NEW METHOD for your pipeline
         """
         try:
             # Get tract boundary for NLCD cropping
@@ -311,9 +386,19 @@ class GRANITEPipeline:
             
         try:
             # Step 1: Prepare graph data
-            graph_data, node_mapping = prepare_graph_data(tract_data['road_network'])
+            # Load NLCD features for this tract
+            nlcd_features = self._load_nlcd_for_tract(tract_data)
+
+            if nlcd_features is not None and len(nlcd_features) > 0:
+                graph_data, _ = prepare_graph_data_with_nlcd(
+                    tract_data['road_network'], 
+                    nlcd_features,
+                    addresses=tract_data['addresses']
+                )
+            else:
+                graph_data, _ = prepare_graph_data_topological(tract_data['road_network'])
             
-            # Step 2: Extract features using PRE-TRAINED model
+            # Step 2: Extract features using pre-trained model
             trained_model.eval()
             with torch.no_grad():
                 gnn_features = trained_model(graph_data.x, graph_data.edge_index).cpu().numpy()
@@ -366,17 +451,17 @@ class GRANITEPipeline:
             if not disagg_result.get('success', False):
                 raise RuntimeError(f"Disaggregation failed: {disagg_result.get('error', 'Unknown error')}")
             
-            # Step 6: Run IDM baseline (REPLACE kriging with IDM)
+            # Step 6: Run IDM baseline 
             self._log("  Running IDM baseline for comparison...")
             
-            # Load NLCD features if available
+            # Load NLCD features 
             nlcd_features = self._load_nlcd_for_tract(tract_data)
             
             idm_result = self.mg_interface._idm_baseline(
                 tract_observation=tract_observation,
                 prediction_locations=prediction_locations,
-                nlcd_features=nlcd_features,  # Now includes proper 16-class NLCD
-                tract_geometry=tract_data['tract_info'].geometry  # Pass tract geometry
+                nlcd_features=nlcd_features,  
+                tract_geometry=tract_data['tract_info'].geometry  
             )
             
             if idm_result is None:
@@ -421,15 +506,15 @@ class GRANITEPipeline:
                     diagnostic_fig.savefig(diagnostic_path, dpi=300, bbox_inches='tight')
                     plt.close(diagnostic_fig)
                     
-                    self._log(f"💾 Diagnostic plots saved to {diagnostic_path}")
+                    self._log(f"Diagnostic plots saved to {diagnostic_path}")
                     
                     # Log key findings
                     if diagnostic_results['issues_found']:
-                        self._log("🚨 DIAGNOSTIC ISSUES FOUND:")
+                        self._log("DIAGNOSTIC ISSUES FOUND:")
                         for issue in diagnostic_results['issues_found']:
                             self._log(f"  - {issue}")
                     else:
-                        self._log("✅ No major diagnostic issues detected")
+                        self._log("No major diagnostic issues detected")
                         
                     # Add diagnostics to return data
                     return {
@@ -441,14 +526,14 @@ class GRANITEPipeline:
                         'diagnostics': disagg_result['diagnostics'],
                         'idm_comparison': idm_result,
                         'validation_metrics': validation_metrics,
-                        'diagnostic_results': diagnostic_results,  # NEW
-                        'diagnostic_plot_path': diagnostic_path,   # NEW
+                        'diagnostic_results': diagnostic_results,  
+                        'diagnostic_plot_path': diagnostic_path,  
                         'network_data': self._prepare_network_data_for_viz(tract_data),
                         'timing': {'total': mg_time}
                     }
                     
                 except Exception as e:
-                    self._log(f"⚠️  Diagnostic analysis failed: {str(e)}")
+                    self._log(f"Diagnostic analysis failed: {str(e)}")
                     # Continue without diagnostics
 
             return {
@@ -458,7 +543,7 @@ class GRANITEPipeline:
                 'gnn_features': gnn_features,
                 'spde_params': disagg_result['spde_params'],
                 'diagnostics': disagg_result['diagnostics'],
-                'idm_comparison': idm_result,  # CHANGED: IDM instead of kriging
+                'idm_comparison': idm_result, 
                 'validation_metrics': validation_metrics,
                 'network_data': self._prepare_network_data_for_viz(tract_data),
                 'timing': {'total': mg_time}
@@ -470,7 +555,7 @@ class GRANITEPipeline:
 
     def _process_fips_mode(self, data):
         """
-        FIXED: Process specific FIPS codes with proper string handling
+        Process specific FIPS codes with proper string handling
         """
         # Get target FIPS from config
         target_fips = self.config.get('data', {}).get('target_fips')
@@ -516,7 +601,7 @@ class GRANITEPipeline:
     
     def _prepare_tract_data(self, tract, county_data):
         """
-        UPDATED: Prepare data for a single tract using real addresses
+        Prepare data for a single tract using real addresses
         """
         # Get tract geometry
         tract_geom = tract.geometry
@@ -527,7 +612,7 @@ class GRANITEPipeline:
             county_data['roads'].intersects(tract_geom)
         ].copy()
         
-        # UPDATED: Get real addresses for this specific tract
+        # Get real addresses for this specific tract
         tract_addresses = self.data_loader.get_addresses_for_tract(fips_code)
         
         # Fallback if no addresses found
@@ -547,7 +632,7 @@ class GRANITEPipeline:
         return {
             'tract_info': tract,
             'roads': tract_roads,
-            'addresses': tract_addresses,  # NOW REAL ADDRESSES
+            'addresses': tract_addresses, 
             'road_network': road_network,
             'svi_value': tract['RPL_THEMES'],
             'address_count': len(tract_addresses),
@@ -556,7 +641,7 @@ class GRANITEPipeline:
     
     def _process_single_tract(self, tract_data):
         """
-        UPDATED: Process a single tract with NLCD features
+        Process a single tract with NLCD features
         """
         fips = tract_data['tract_info']['FIPS']
         svi_value = tract_data['svi_value']
@@ -564,7 +649,7 @@ class GRANITEPipeline:
         self._log(f"  Processing tract {fips} with SVI={svi_value:.3f}")
         
         try:
-            # NEW: Load NLCD features
+            # Load NLCD features
             nlcd_features = self._load_nlcd_for_tract(tract_data)
             
             # Step 1: Train GNN with NLCD or topological features
@@ -573,10 +658,11 @@ class GRANITEPipeline:
             
             # Choose feature preparation method based on NLCD availability
             if nlcd_features is not None and len(nlcd_features) > 0:
-                self._log("  Using NLCD-based features (theoretically justified)")
+                self._log("  Using NLCD-based features")
                 graph_data, node_mapping = prepare_graph_data_with_nlcd(
                     tract_data['road_network'], 
-                    nlcd_features
+                    nlcd_features,
+                    addresses=tract_data['addresses']  
                 )
             else:
                 self._log("  WARNING: Falling back to topological features")
@@ -584,6 +670,27 @@ class GRANITEPipeline:
                     tract_data['road_network']
                 )
             
+            self._log(f"DEBUG: graph_data type = {type(graph_data)}")
+            if isinstance(graph_data, tuple):
+                self._log(f"DEBUG: graph_data is tuple with {len(graph_data)} elements")
+                graph_data = graph_data[0]  # Take first element
+                self._log(f"DEBUG: After unpacking, graph_data type = {type(graph_data)}")
+
+            # Verify it has the expected attributes
+            if not hasattr(graph_data, 'x'):
+                raise RuntimeError(f"graph_data missing 'x' attribute. Type: {type(graph_data)}, Attributes: {dir(graph_data)}")
+
+            self._log(f"DEBUG: graph_data type = {type(graph_data)}")
+            if isinstance(graph_data, tuple):
+                self._log(f"DEBUG: graph_data is tuple with {len(graph_data)} elements")
+                graph_data = graph_data[0]  # Take first element
+                self._log(f"DEBUG: After unpacking, graph_data type = {type(graph_data)}")
+
+            # Verify it has the expected attributes
+            if not hasattr(graph_data, 'x'):
+                raise RuntimeError(f"graph_data missing 'x' attribute. Type: {type(graph_data)}, Attributes: {dir(graph_data)}")
+
+
             # Create and train GNN model
             model = create_gnn_model(
                 input_dim=graph_data.x.shape[1],
@@ -593,7 +700,7 @@ class GRANITEPipeline:
             
             feature_history = [] 
 
-            trained_model, gnn_features, training_metrics = train_accessibility_gnn(
+            trained_model, gnn_features = train_accessibility_gnn(
                 graph_data,
                 model,
                 epochs=self.config['model']['epochs'],
@@ -701,7 +808,7 @@ class GRANITEPipeline:
                 if validation_metrics['method_correlation'] is not None:
                     self._log(f"    Method correlation: {validation_metrics['method_correlation']:.3f}")
                     if validation_metrics['method_correlation'] < 0.1:
-                        self._log("    ⚠️  LOW CORRELATION - CHECK IMPLEMENTATION")
+                        self._log("    LOW CORRELATION - CHECK IMPLEMENTATION")
                 
                 self._log(f"    Constraint error: {validation_metrics['constraint_error']:.1%}")
                 self._log(f"    Prediction variance: {validation_metrics['prediction_variance']:.6f}")
@@ -824,8 +931,6 @@ class GRANITEPipeline:
 
     def _prepare_transit_data_for_viz(self, tract_data):
         """Prepare transit data for visualization"""
-        # You might need to load transit routes if available
-        # For now, just use transit stops
         
         # Load transit stops from data loader if not already in tract_data
         if 'transit_stops' not in tract_data:
@@ -838,13 +943,12 @@ class GRANITEPipeline:
         local_stops = transit_stops[transit_stops.intersects(tract_geom.buffer(0.01))]
         
         return {
-            'stops': local_stops,
-            'routes': None  # Add if you have route data
+            'stops': local_stops
         }
 
     def _combine_results(self, tract_results):
         """
-        FIXED: Combine results with proper IDM baseline aggregation
+        Combine results with proper IDM baseline aggregation
         """
         if not tract_results:
             return {
@@ -854,14 +958,14 @@ class GRANITEPipeline:
         
         # Combine all predictions
         all_predictions = []
-        all_idm_predictions = []  # FIXED: Collect IDM predictions
+        all_idm_predictions = [] 
         
         for result in tract_results:
             if result['status'] == 'success':
                 # Add GNN predictions
                 all_predictions.append(result['predictions'])
                 
-                # FIXED: Add IDM predictions if available
+                # Add IDM predictions if available
                 if (result.get('idm_comparison') and 
                     result['idm_comparison'].get('success') and
                     'predictions' in result['idm_comparison']):
@@ -875,9 +979,9 @@ class GRANITEPipeline:
         if all_predictions:
             combined_predictions = pd.concat(all_predictions, ignore_index=True)
             
-            # FIXED: Create combined IDM comparison with proper naming
+            # Create combined IDM comparison with proper naming
             combined_idm = None
-            if all_idm_predictions:  # This should be populated if you collected IDM predictions
+            if all_idm_predictions:  
                 combined_idm_predictions = pd.concat(all_idm_predictions, ignore_index=True)
                 
                 if len(combined_predictions) == len(combined_idm_predictions):
@@ -915,7 +1019,7 @@ class GRANITEPipeline:
             return {
                 'success': True,
                 'predictions': combined_predictions,
-                'combined_idm': combined_idm,  # Make sure this is available for visualization
+                'combined_idm': combined_idm,  
                 'tract_results': tract_results,
                 'summary': summary_stats,
                 'global_validation': global_validation
@@ -923,7 +1027,7 @@ class GRANITEPipeline:
     
     def _compute_global_idm_validation_metrics(self, combined_predictions, combined_idm):
         """
-        FIXED: Compute validation metrics across all tracts (GNN vs IDM)
+        Compute validation metrics across all tracts (GNN vs IDM)
         """
         if not combined_idm or not combined_idm.get('success'):
             return {'method_correlation': None, 'error': 'No IDM baseline available'}
@@ -950,7 +1054,7 @@ class GRANITEPipeline:
         gnn_uncertainty = combined_predictions['sd'].values
         idm_uncertainty = combined_idm['predictions']['sd'].values
         
-        # EFFECTIVENESS CALCULATIONS
+        # Effectiveness Calculations
         gnn_variance = np.var(gnn_predictions)
         idm_variance = np.var(idm_predictions)
         
@@ -982,7 +1086,7 @@ class GRANITEPipeline:
 
     def _compute_idm_validation_metrics(self, gnn_predictions, idm_result, svi_value):
         """
-        FIXED: Compute GNN vs IDM validation metrics (single tract)
+        Compute GNN vs IDM validation metrics (single tract)
         """
         gnn_values = gnn_predictions['mean'].values
         gnn_uncertainty = gnn_predictions['sd'].values
@@ -1009,7 +1113,7 @@ class GRANITEPipeline:
             gnn_constraint_error = abs(np.mean(gnn_values) - svi_value) / svi_value
             idm_constraint_error = abs(np.mean(idm_values) - svi_value) / svi_value
             
-            # ADDED: Detailed diagnostics
+            # Detailed diagnostics
             self._log(f"    GNN vs IDM detailed comparison:")
             self._log(f"      GNN std: {np.std(gnn_values):.6f}")
             self._log(f"      IDM std: {np.std(idm_values):.6f}")
@@ -1023,9 +1127,7 @@ class GRANITEPipeline:
                 'idm_constraint_error': idm_constraint_error,
                 'gnn_uncertainty_mean': np.mean(gnn_uncertainty),
                 'idm_uncertainty_mean': np.mean(idm_uncertainty),
-                'comparison_method': 'GNN_vs_IDM',  # CHANGED
-                
-                # EFFECTIVENESS METRICS
+                'comparison_method': 'GNN_vs_IDM', 
                 'gnn_more_variable': gnn_variance > idm_variance,
                 'gnn_better_constraint': gnn_constraint_error < idm_constraint_error,
                 'gnn_effectiveness_score': (gnn_variance / idm_variance) * abs(correlation) if idm_variance > 0 else 1.0
@@ -1049,13 +1151,13 @@ class GRANITEPipeline:
         float
             Effectiveness score (>1.0 means GNN is better)
         """
-        # Spatial differentiation (higher variance often means more realistic)
+        # Spatial differentiation 
         spatial_score = gnn_var / idm_var if idm_var > 0 else 1.0
         
-        # Constraint preservation (lower error is better)
+        # Constraint preservation 
         constraint_score = idm_constraint / gnn_constraint if gnn_constraint > 0 else 1.0
         
-        # Correlation factor (closer to expected relationships)
+        # Correlation factor 
         correlation_factor = abs(correlation) if not np.isnan(correlation) else 0.5
         
         # Combined effectiveness
@@ -1063,61 +1165,103 @@ class GRANITEPipeline:
         
         return effectiveness
 
-    def _compute_proper_validation_metrics(self, predictions, baseline_result, svi_value):
+    def compute_proper_validation_metrics(self, predictions, baseline_result, svi_value):
         """
-        FIXED: Proper validation with correct baseline comparison
+        Proper validation with correct IDM baseline comparison
         """
         # Ensure both methods use same locations
         gnn_predictions = predictions['mean'].values
         gnn_uncertainty = predictions['sd'].values
         
-        # FIXED: Get baseline predictions on SAME locations
+        # Get IDM predictions on locations
         if baseline_result and 'predictions' in baseline_result:
-            kriging_predictions = baseline_result['predictions']['mean'].values
-            kriging_uncertainty = baseline_result['predictions']['sd'].values
+            idm_predictions = baseline_result['predictions']['mean'].values
+            idm_uncertainty = baseline_result['predictions']['sd'].values
             
             # Verify same number of predictions
-            if len(gnn_predictions) != len(kriging_predictions):
-                self._log(f"WARNING: Different prediction counts - GNN: {len(gnn_predictions)}, Kriging: {len(kriging_predictions)}")
+            if len(gnn_predictions) != len(idm_predictions):
+                self._log(f"WARNING: Different prediction counts - GNN: {len(gnn_predictions)}, IDM: {len(idm_predictions)}")
+                
                 # Take minimum length for comparison
-                min_len = min(len(gnn_predictions), len(kriging_predictions))
+                min_len = min(len(gnn_predictions), len(idm_predictions))
                 gnn_predictions = gnn_predictions[:min_len]
-                kriging_predictions = kriging_predictions[:min_len]
+                idm_predictions = idm_predictions[:min_len]
                 gnn_uncertainty = gnn_uncertainty[:min_len]
-                kriging_uncertainty = kriging_uncertainty[:min_len]
+                idm_uncertainty = idm_uncertainty[:min_len]
             
-            # FIXED: Compute correlation
-            correlation = np.corrcoef(gnn_predictions, kriging_predictions)[0, 1]
+            # Compute correlation between GNN and IDM
+            correlation = np.corrcoef(gnn_predictions, idm_predictions)[0, 1]
             
-            # CRITICAL: Check for concerning results
+            # Check for concerning results
             if correlation < 0.1:
                 self._log(f"WARNING: Low correlation ({correlation:.3f}) suggests implementation issues")
                 self._log(f"  GNN predictions range: [{gnn_predictions.min():.3f}, {gnn_predictions.max():.3f}]")
-                self._log(f"  Kriging predictions range: [{kriging_predictions.min():.3f}, {kriging_predictions.max():.3f}]")
+                self._log(f"  IDM predictions range: [{idm_predictions.min():.3f}, {idm_predictions.max():.3f}]")
+                
+                # Additional diagnostic for IDM comparison
+                gnn_variation = np.std(gnn_predictions)
+                idm_variation = np.std(idm_predictions)
+                variation_ratio = idm_variation / gnn_variation if gnn_variation > 0 else float('inf')
+                
+                self._log(f"  GNN spatial variation: {gnn_variation:.6f}")
+                self._log(f"  IDM spatial variation: {idm_variation:.6f}")
+                self._log(f"  IDM/GNN variation ratio: {variation_ratio:.2f}")
+                
+                if variation_ratio > 10:
+                    self._log(f"  🚨 CRITICAL: GNN shows {variation_ratio:.1f}x less spatial variation than IDM")
+                    self._log(f"     This suggests GNN over-smoothing or feature uniformity issues")
+            else:
+                self._log(f"✅ Good correlation with IDM baseline: {correlation:.3f}")
+                
         else:
-            self._log("No baseline comparison available")
+            self._log("No IDM baseline comparison available")
             correlation = None
-            kriging_predictions = None
-            kriging_uncertainty = None
+            idm_predictions = None
+            idm_uncertainty = None
         
-        # Constraint validation
+        # Constraint validation 
         predicted_tract_mean = np.mean(gnn_predictions)
         constraint_error = abs(predicted_tract_mean - svi_value) / svi_value if svi_value > 0 else 0
         
         # Parameter variability check
         prediction_variance = np.var(gnn_predictions)
         
+        # Enhanced validation results for IDM comparison
         validation_results = {
-            'method_correlation': correlation,
+            # Method comparison
+            'gnn_vs_idm_correlation': correlation,
+            'method_correlation': correlation,  # Legacy alias for backward compatibility
+            
+            # Constraint satisfaction 
             'constraint_error': constraint_error,
             'constraint_satisfied': constraint_error < 0.01,  # 1% tolerance
+            
+            # Spatial variation metrics
             'prediction_variance': prediction_variance,
             'gnn_prediction_std': np.std(gnn_predictions),
             'gnn_uncertainty_mean': np.mean(gnn_uncertainty),
-            'kriging_prediction_std': np.std(kriging_predictions) if kriging_predictions is not None else None,
-            'kriging_uncertainty_mean': np.mean(kriging_uncertainty) if kriging_uncertainty is not None else None,
+            'idm_prediction_std': np.std(idm_predictions) if idm_predictions is not None else None,
+            'idm_uncertainty_mean': np.mean(idm_uncertainty) if idm_uncertainty is not None else None,
+            
+            # Variation ratio
+            'spatial_variation_ratio': (np.std(idm_predictions) / np.std(gnn_predictions) 
+                                    if idm_predictions is not None and np.std(gnn_predictions) > 0 
+                                    else None),
+            
+            # Tract-level validation
             'predicted_tract_mean': predicted_tract_mean,
-            'actual_tract_svi': svi_value
+            'actual_tract_svi': svi_value,
+            
+            # Method-specific ranges
+            'gnn_prediction_range': (gnn_predictions.min(), gnn_predictions.max()),
+            'idm_prediction_range': ((idm_predictions.min(), idm_predictions.max()) 
+                                if idm_predictions is not None else None),
+            
+            # Quality flags
+            'concerning_low_correlation': correlation is not None and correlation < 0.1,
+            'excessive_gnn_smoothing': (correlation is not None and 
+                                    idm_predictions is not None and 
+                                    np.std(idm_predictions) / np.std(gnn_predictions) > 10),
         }
         
         return validation_results
@@ -1140,7 +1284,7 @@ class GRANITEPipeline:
             json.dump(results['summary'], f, indent=2)
         self._log(f"Saved summary to {summary_path}")
         
-        # ENHANCED: Create visualizations with clear GNN vs IDM comparison
+        # Create visualizations with clear GNN vs IDM comparison
         self._log("Creating enhanced visualizations...")
         
         # Get visualization data from first successful tract
@@ -1162,8 +1306,8 @@ class GRANITEPipeline:
                     break
         
         if viz_data and idm_predictions is not None:
-            # 1. NEW: Create clear GNN vs IDM comparison (main visualization)
-            clear_comparison_path = os.path.join(self.output_dir, 'clear_gnn_vs_idm_comparison.png')
+            # 1. Create GNN vs IDM comparison
+            clear_comparison_path = os.path.join(self.output_dir, 'gnn_vs_idm_comparison.png')
             self.visualizer.create_clear_method_comparison(
                 gnn_predictions=gnn_predictions,
                 idm_predictions=idm_predictions,
@@ -1171,10 +1315,10 @@ class GRANITEPipeline:
                 idm_results=viz_data.get('idm_comparison'),
                 output_path=clear_comparison_path
             )
-            self._log(f"Saved clear GNN vs IDM comparison to {clear_comparison_path}")
+            self._log(f"Saved GNN vs IDM comparison to {clear_comparison_path}")
             
-            # 2. OPTIONAL: Keep original visualization as backup
-            original_viz_path = os.path.join(self.output_dir, 'granite_visualization_original.png')
+            # 2. Keep original visualization as backup
+            original_viz_path = os.path.join(self.output_dir, 'granite_visualization.png')
             self.visualizer.create_disaggregation_plot(
                 predictions=results['predictions'],
                 results=results,
@@ -1202,7 +1346,7 @@ class GRANITEPipeline:
             )
             self._log(f"Saved accessibility gradients to {gradients_path}")
             
-            # 5. GNN attention maps (if available)
+            # 5. GNN attention maps 
             if viz_data.get('attention_weights') is not None:
                 attention_path = os.path.join(self.output_dir, 'gnn_attention_maps.png')
                 self.visualizer.plot_gnn_attention_maps(
@@ -1233,12 +1377,12 @@ class GRANITEPipeline:
                 )
                 self._log(f"Saved interpretability dashboard to {interpret_path}")
             
-            # 8. ENHANCED: Print comparison summary to console
+            # 8. Print comparison summary to console
             self._print_comparison_summary(gnn_predictions, idm_predictions)
         
         else:
             # Fallback: No IDM comparison available
-            self._log("⚠️  No IDM comparison data available - creating single-method visualization")
+            self._log("No IDM comparison data available - creating single-method visualization")
             
             fallback_path = os.path.join(self.output_dir, 'granite_visualization.png')
             self.visualizer.create_disaggregation_plot(
@@ -1272,7 +1416,7 @@ class GRANITEPipeline:
             ratio = idm_std / gnn_std if gnn_std > 0 else 0
             
             self._log(f"\n" + "="*60)
-            self._log(f"🎯 CLEAR GNN vs IDM COMPARISON SUMMARY")
+            self._log(f"GNN vs IDM COMPARISON SUMMARY")
             self._log(f"="*60)
             self._log(f"GNN (Learned Parameters):")
             self._log(f"  • Spatial Standard Deviation: {gnn_std:.6f}")

@@ -47,6 +47,46 @@ data:
   # Address generation
   n_addresses_per_tract: 100
   
+# Transit data configuration
+transit:
+  # Data source priority: 'gtfs', 'osm', 'grid', or 'minimal'
+  preferred_source: 'gtfs'
+  
+  # Whether to attempt downloading real data
+  download_real_data: true
+  
+  # GTFS configuration
+  gtfs:
+    # Local GTFS file path (relative to data_dir)
+    local_file: 'carta_gtfs.zip'
+    
+    # CARTA GTFS download URLs (tried in order)
+    download_urls:
+      - 'https://www.gocarta.org/gtfs/gtfs.zip'
+      - 'https://transitland.org/api/v1/gtfs_exports/carta.zip'
+    
+    # Download timeout in seconds
+    timeout: 30
+  
+  # OpenStreetMap configuration  
+  osm:
+    # Bounding box for Hamilton County [min_lat, min_lon, max_lat, max_lon]
+    bbox: [34.9, -85.5, 35.3, -85.0]
+    
+    # Overpass API timeout
+    timeout: 60
+  
+  # Grid generation configuration
+  grid:
+    # Whether to use demographic-aware placement
+    use_demographic_data: true
+    
+    # Minimum stop density (stops per square km)
+    min_stop_density: 0.5
+    
+    # Maximum stop density (stops per square km)  
+    max_stop_density: 2.0
+
 # GNN model configuration
 model:
   input_dim: 5      # Number of input features

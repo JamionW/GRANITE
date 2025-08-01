@@ -136,14 +136,12 @@ class DisaggregationVisualizer:
                     ax=ax, color='lightgray', linewidth=0.3, alpha=0.5, zorder=1
                 )
         
-        # Smaller, better-styled dots
-        scatter = ax.scatter(x, y, c=values, cmap='viridis_r',  # Note: _r for better SVI interpretation
-                            s=8,  # SMALLER DOTS as requested
+        scatter = ax.scatter(x, y, c=values, cmap='viridis_r',  
+                            s=8,  
                             alpha=0.8, 
-                            edgecolors='white', linewidth=0.2,  # White borders for clarity
-                            zorder=5)  # Ensure points are on top
+                            edgecolors='white', linewidth=0.2,  
+                            zorder=5)  
         
-        # Better colorbar
         cbar = plt.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04)
         cbar.set_label('Predicted SVI (Vulnerability)', rotation=270, labelpad=15)
         
@@ -155,7 +153,7 @@ class DisaggregationVisualizer:
         ax.set_aspect('equal', adjustable='box')
     
     def _plot_uncertainty(self, ax, predictions, title='Prediction Uncertainty'):
-        """Enhanced uncertainty with network awareness and size-coding"""
+        """Uncertainty with network awareness and size-coding"""
         
         if predictions is None or predictions.empty:
             ax.text(0.5, 0.5, 'No uncertainty data available', 
@@ -186,7 +184,7 @@ class DisaggregationVisualizer:
         cbar = plt.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04)
         cbar.set_label('Uncertainty (SD)', rotation=270, labelpad=15)
         
-        # Add size legend
+        # size legend
         legend_sizes = [np.min(uncertainty), np.median(uncertainty), np.max(uncertainty)]
         legend_labels = ['Low', 'Medium', 'High']
         for size_val, label in zip(legend_sizes, legend_labels):
@@ -256,7 +254,7 @@ class DisaggregationVisualizer:
                 ha='center', va='center', transform=ax.transAxes)
             return
         
-        # CRITICAL: Ensure same length
+        # Ensure same length
         min_len = min(len(values1), len(values2))
         if len(values1) != len(values2):
             print(f"WARNING: Prediction length mismatch - GNN: {len(values1)}, Baseline: {len(values2)}")
@@ -311,14 +309,14 @@ class DisaggregationVisualizer:
         
         # Box plots
         data_to_plot = [unc1, unc2]
-        bp = ax.boxplot(data_to_plot, labels=['GNN-WM', 'Kriging'])
+        bp = ax.boxplot(data_to_plot, labels=['GNN-WM', 'IDM'])
         
         # Add mean values
         means = [np.mean(unc1), np.mean(unc2)]
         ax.scatter([1, 2], means, marker='o', s=100, c='red', zorder=3)
         
         # Add statistics
-        ax.text(0.02, 0.98, f'Mean uncertainty:\nGNN-WM: {means[0]:.4f}\nKriging: {means[1]:.4f}',
+        ax.text(0.02, 0.98, f'Mean uncertainty:\nGNN-WM: {means[0]:.4f}\nIDM: {means[1]:.4f}',
                transform=ax.transAxes, va='top', fontsize=10,
                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
@@ -807,19 +805,19 @@ class DisaggregationVisualizer:
         
         # Determine verdict based on metrics
         if spatial_score > 2.0 and abs(correlation) < 0.3:
-            verdict = "🏆 IDM BETTER FOR SPATIAL DETAIL"
+            verdict = "IDM BETTER FOR SPATIAL DETAIL"
             verdict_color = "orange"
             explanation = "Fixed coefficients create\nmore realistic spatial variation"
         elif spatial_score < 0.5 and uncertainty_score > 1.5:
-            verdict = "🏆 GNN BETTER FOR UNCERTAINTY"
+            verdict = "GNN BETTER FOR UNCERTAINTY"
             verdict_color = "steelblue"
             explanation = "Learned parameters provide\nbetter uncertainty quantification"
         elif abs(correlation) > 0.7:
-            verdict = "⚖️ METHODS SIMILAR"
+            verdict = "METHODS SIMILAR"
             verdict_color = "lightgreen"
             explanation = "Both methods produce\nsimilar spatial patterns"
         else:
-            verdict = "🔬 HYBRID APPROACH NEEDED"
+            verdict = "HYBRID APPROACH NEEDED"
             verdict_color = "lightyellow"
             explanation = "Combine strengths of\nboth approaches"
         
@@ -1203,34 +1201,7 @@ class DisaggregationVisualizer:
         
         # 4. Model performance metrics (top row, right)
         ax4 = fig.add_subplot(gs[0, 3])
-        
-        # Create performance summary
-        performance_text = """
-Model Performance Summary
 
-Constraint Satisfaction: ✓
-Mass Conservation: Perfect
-Spatial Correlation: 0.949
-Mean Absolute Error: 0.023
-Uncertainty Coverage: 94.2%
-
-Network Awareness:
-• Road topology: Respected
-• Transit connectivity: Learned
-• Accessibility barriers: Captured
-
-GNN Contributions:
-• Spatial parameters: Adaptive
-• Feature learning: Data-driven
-• Network structure: Preserved
-        """
-        
-        ax4.text(0.05, 0.95, performance_text, transform=ax4.transAxes,
-                fontsize=9, verticalalignment='top', fontfamily='monospace',
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.8))
-        ax4.axis('off')
-        ax4.set_title('Performance Summary')
-        
         # 5. Prediction vs Ground Truth (middle row, spans 2 columns)
         ax5 = fig.add_subplot(gs[1, :2])
         
@@ -1315,10 +1286,10 @@ GNN Contributions:
                     break
         
         if idm_predictions is None:
-            print("❌ No IDM comparison found in results")
+            print("WARNING: No IDM comparison found in results")
             return
         
-        print("✅ Creating clear GNN vs IDM comparison visualization...")
+        print("Creating clear GNN vs IDM comparison visualization...")
         self.create_clear_method_comparison(
             gnn_predictions, idm_predictions, 
             gnn_results=results, 

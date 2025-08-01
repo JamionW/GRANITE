@@ -1,6 +1,5 @@
 """
-UPDATED granite/baselines/idm.py
-Replace your existing IDMBaseline class with this proper implementation
+granite/baselines/idm.py
 """
 import numpy as np
 import pandas as pd
@@ -13,7 +12,7 @@ from shapely.geometry import Point, Polygon
 
 class IDMBaseline:
     """
-    UPDATED: Proper IDM implementation following He et al. (2024) methodology
+    IDM implementation following He et al. (2024) methodology
     
     This implements the actual Intelligent Dasymetric Mapping approach
     using NLCD 2019 16-class legend with empirically-derived coefficients
@@ -31,7 +30,7 @@ class IDMBaseline:
         """
         self.grid_resolution = grid_resolution_meters
         
-        # PROPER NLCD 2019 16-class legend coefficients
+        # NLCD 2019 16-class legend coefficients
         # Based on empirical relationships between land cover and population density
         self.nlcd_population_coefficients = {
             # Water and ice (no population)
@@ -83,7 +82,7 @@ class IDMBaseline:
             90: 0.0, 95: 0.0                    # Wetlands: no vulnerability
         }
         
-        # UPDATED: Keep legacy support for existing 4-class system as fallback
+        # Keep legacy support for existing 4-class system as fallback
         self.legacy_coefficients = {
             0: 0.1,    # Water/undeveloped
             1: 0.6,    # Low development  
@@ -96,7 +95,7 @@ class IDMBaseline:
                         nlcd_features: pd.DataFrame = None,
                         tract_geometry: Optional[Polygon] = None) -> Dict:
         """
-        UPDATED: Proper IDM spatial disaggregation following He et al. (2024)
+        Proper IDM spatial disaggregation following He et al. (2024)
         
         Parameters:
         -----------
@@ -275,7 +274,7 @@ class IDMBaseline:
     def _calculate_idm_spatial_weights(self, coords: np.ndarray, 
                                     pop_coefficients: np.ndarray) -> np.ndarray:
         """
-        UPDATED: Calculate IDM spatial weights without aggressive edge corrections
+        Calculate IDM spatial weights without aggressive edge corrections
         """
         # SIMPLIFIED: Reduce edge effects that cause boundary artifacts
         tree = cKDTree(coords)
@@ -311,7 +310,7 @@ class IDMBaseline:
     def _mass_preserving_interpolation(self, coefficients: np.ndarray,
                                     tract_svi: float, n_addresses: int) -> np.ndarray:
         """
-        UPDATED: Mass-preserving interpolation with reduced edge artifacts
+        Mass-preserving interpolation with reduced edge artifacts
         """
         total_weight = np.sum(coefficients)
         
@@ -321,17 +320,17 @@ class IDMBaseline:
         else:
             initial_values = np.full(n_addresses, tract_svi)
         
-        # REDUCED iterations to minimize edge artifacts
+        # Reduced iterations to minimize edge artifacts
         adjusted_values = initial_values.copy()
         
-        for iteration in range(2):  # REDUCED from 3 to 2 iterations
+        for iteration in range(2):  # Reduced from 3 to 2 iterations
             current_mean = np.mean(adjusted_values)
             
-            if abs(current_mean - tract_svi) < 0.005 * tract_svi:  # RELAXED tolerance
+            if abs(current_mean - tract_svi) < 0.005 * tract_svi:  # Relaxed tolerance
                 break
             
             adjustment_factor = tract_svi / current_mean if current_mean > 0 else 1.0
-            # GENTLER adjustment to reduce edge artifacts
+            # Gentle adjustment to reduce edge artifacts
             adjusted_values = 0.9 * adjusted_values * adjustment_factor + 0.1 * adjusted_values
         
         return adjusted_values
@@ -381,7 +380,7 @@ class IDMBaseline:
                                 prediction_locations: pd.DataFrame,
                                 tract_geometry: Optional[Polygon]) -> Dict:
         """
-        UPDATED: Distance-based fallback with reduced edge artifacts
+        Distance-based fallback with reduced edge artifacts
         """
         coords = prediction_locations[['x', 'y']].values
         n_addresses = len(coords)
@@ -391,7 +390,7 @@ class IDMBaseline:
             centroid = tract_geometry.centroid
             center_x, center_y = centroid.x, centroid.y
             
-            # BETTER: Use tract boundary for distance normalization
+            # Use tract boundary for distance normalization
             bounds = tract_geometry.bounds
             tract_extent = max(bounds[2] - bounds[0], bounds[3] - bounds[1])
         else:
@@ -404,7 +403,7 @@ class IDMBaseline:
                         (coords[:, 1] - center_y)**2)
         normalized_distances = distances / tract_extent if tract_extent > 0 else distances
         
-        # IMPROVED urban pattern without edge artifacts
+        # Urban pattern without edge artifacts
         np.random.seed(42)
         n_clusters = max(2, n_addresses // 30)  # More clusters for less edge dependence
         cluster_centers = np.random.choice(n_addresses, n_clusters, replace=False)
@@ -416,14 +415,14 @@ class IDMBaseline:
             cluster_distances = np.sqrt(np.sum((coords - center_coord)**2, axis=1))
             # Use tract-relative scale
             cluster_influence = np.exp(-cluster_distances / (tract_extent * 0.1))
-            urban_coefficients += cluster_influence * 0.3  # REDUCED influence
+            urban_coefficients += cluster_influence * 0.3  # influence
         
-        # REDUCED edge effects
-        spatial_trend = 0.05 * normalized_distances  # REDUCED from 0.1
-        noise = np.random.normal(0, 0.03, n_addresses)  # REDUCED noise
+        # edge effects
+        spatial_trend = 0.05 * normalized_distances
+        noise = np.random.normal(0, 0.03, n_addresses)  
         
         final_coefficients = urban_coefficients + spatial_trend + noise
-        final_coefficients = np.clip(final_coefficients, 0.2, 1.5)  # REDUCED range
+        final_coefficients = np.clip(final_coefficients, 0.2, 1.5) 
         
         # Mass-preserving distribution
         disaggregated_values = self._mass_preserving_interpolation(
@@ -431,10 +430,10 @@ class IDMBaseline:
         )
         
         # Distance-based uncertainty without edge artifacts
-        base_uncertainty = 0.04 * disaggregated_values  # REDUCED base uncertainty
-        distance_uncertainty = 0.005 * normalized_distances  # REDUCED distance effect
+        base_uncertainty = 0.04 * disaggregated_values  
+        distance_uncertainty = 0.005 * normalized_distances 
         uncertainty = base_uncertainty + distance_uncertainty
-        uncertainty = np.clip(uncertainty, 0.01, 0.12)  # TIGHTER bounds
+        uncertainty = np.clip(uncertainty, 0.01, 0.12) 
         
         # Create results
         predictions_df = self._create_results_dataframe(

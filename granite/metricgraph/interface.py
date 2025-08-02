@@ -51,10 +51,15 @@ class MetricGraphInterface:
     
     def __init__(self, verbose=None, config=None):
         if verbose is None:
-            self.verbose = config.get('processing', {}).get('verbose', False)
+            self.verbose = config.get('processing', {}).get('verbose', False) if config else False
         else:
             self.verbose = verbose
+        
+        # Store full config for IDM access
         self.config = config or {}
+        
+        # Extract metricgraph-specific config  
+        self.mg_config = config.get('metricgraph', {}) if config else {}
         self.converter = pandas2ri.converter
         
         # Initialize R environment

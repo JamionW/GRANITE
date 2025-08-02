@@ -32,7 +32,7 @@ class GRANITEPipeline:
     rather than regression-based approaches.
     """
     
-    def __init__(self, config, data_dir='./data', output_dir='./output', verbose=False):
+    def __init__(self, config, data_dir='./data', output_dir='./output', verbose=None):
         """
         Initialize GRANITE pipeline
         
@@ -53,19 +53,16 @@ class GRANITEPipeline:
         self.config = config
         self.data_dir = data_dir
         self.output_dir = output_dir
-        if verbose is None:
-            self.verbose = config.get('processing', {}).get('verbose', False)
-        else:
-            self.verbose = verbose
+        self.verbose = config.get('processing', {}).get('verbose', False)
                 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
         
         # Initialize components
-        self.data_loader = DataLoader(data_dir, verbose, config=config)
+        self.data_loader = DataLoader(data_dir, config=config)
         self.mg_interface = MetricGraphInterface(
             verbose=verbose,
-            config=self.config.get('metricgraph', {})
+            config=self.config  # ← Pass full config!
         )
         self.visualizer = DisaggregationVisualizer()
         

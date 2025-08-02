@@ -20,7 +20,7 @@ import numpy as np
 class DataLoader:
     """Main data loader class for GRANITE framework"""
     
-    def __init__(self, data_dir: str = './data', verbose=False, config: dict = None):
+    def __init__(self, data_dir: str = './data', config: dict = None):
         """
         Initialize DataLoader
         
@@ -35,10 +35,7 @@ class DataLoader:
         """
         self.data_dir = data_dir
         self.config = config or {} 
-        if verbose is None:
-            self.verbose = config.get('processing', {}).get('verbose', False)
-        else:
-            self.verbose = verbose
+        self.verbose = config.get('processing', {}).get('verbose', False) if config else False
         
         # Cache for expensive operations
         self._address_cache = None
@@ -48,17 +45,10 @@ class DataLoader:
         
         # Create data directory if it doesn't exist
         os.makedirs(data_dir, exist_ok=True)
-        
-        if verbose:
-            print(f"DataLoader initialized with data_dir: {data_dir}")
-            if config and 'transit' in config:
-                transit_config = config['transit']
-                preferred_source = transit_config.get('preferred_source', 'gtfs')
-                print(f"Transit configuration: preferred_source = {preferred_source}")
     
     def _log(self, message: str):
         """Log message with timestamp"""
-        if 1==2: #self.verbose:
+        if self.verbose:  # ← Back to normal!
             timestamp = datetime.now().strftime("%H:%M:%S")
             print(f"[{timestamp}] DataLoader: {message}")
 

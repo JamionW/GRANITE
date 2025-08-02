@@ -191,39 +191,48 @@ class IDMBaseline:
                                 prediction_locations: pd.DataFrame,
                                 nlcd_features: pd.DataFrame,
                                 tract_geometry: Optional[Polygon]) -> Dict:
-        """
-        Core IDM algorithm following Mennis & Hultgren (2006) and He et al. (2024)
-        """
         print(f"IDM DEBUG: In _proper_idm_disaggregation")
         
         coords = prediction_locations[['x', 'y']].values
-        print(f"IDM DEBUG: _proper_idm_disaggregation coords X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
-            
-        # STEP 1: Extract NLCD classes at each address
-        nlcd_classes = nlcd_features['nlcd_class'].values[:len(coords)]
+        print(f"IDM DEBUG: tract_svi = {tract_svi}")
         
-        # STEP 2: Get population density coefficients for each location
+        # STEP 1: Extract NLCD classes
+        nlcd_classes = nlcd_features['nlcd_class'].values[:len(coords)]
+        print(f"IDM DEBUG: NLCD classes unique: {np.unique(nlcd_classes)}")
+        
+        # STEP 2: Get population density coefficients
         pop_coefficients = np.array([
             self.nlcd_population_coefficients.get(int(cls), 0.5) 
             for cls in nlcd_classes
         ])
+        print(f"IDM DEBUG: pop_coefficients range: [{pop_coefficients.min():.4f}, {pop_coefficients.max():.4f}]")
+        print(f"IDM DEBUG: pop_coefficients mean: {pop_coefficients.mean():.4f}")
         
         # STEP 3: Get SVI vulnerability multipliers  
         svi_multipliers = np.array([
             self.svi_multipliers.get(int(cls), 0.5)
             for cls in nlcd_classes
         ])
+        print(f"IDM DEBUG: svi_multipliers range: [{svi_multipliers.min():.4f}, {svi_multipliers.max():.4f}]")
+        print(f"IDM DEBUG: svi_multipliers mean: {svi_multipliers.mean():.4f}")
         
-        # STEP 4: IDM spatial interpolation with empirical weighting
+        # STEP 4: IDM spatial interpolation
         spatial_weights = self._calculate_idm_spatial_weights(coords, pop_coefficients)
+        print(f"IDM DEBUG: spatial_weights range: [{spatial_weights.min():.4f}, {spatial_weights.max():.4f}]")
+        print(f"IDM DEBUG: spatial_weights mean: {spatial_weights.mean():.4f}")
         
-        # STEP 5: Combine population and vulnerability components
+        # STEP 5: Combine coefficients
         combined_coefficients = pop_coefficients * svi_multipliers * spatial_weights
+        print(f"IDM DEBUG: combined_coefficients range: [{combined_coefficients.min():.6f}, {combined_coefficients.max():.6f}]")
+        print(f"IDM DEBUG: combined_coefficients sum: {combined_coefficients.sum():.6f}")
         
-        # STEP 6: Mass-preserving disaggregation (pycnophylactic property)
+        # STEP 6: Mass-preserving disaggregation
         disaggregated_values = self._mass_preserving_interpolation(
             combined_coefficients, tract_svi, len(coords)
         )
+        print(f"IDM DEBUG: disaggregated_values range: [{disaggregated_values.min():.6f}, {disaggregated_values.max():.6f}]")
+        print(f"IDM DEBUG: disaggregated_values mean: {disaggregated_values.mean():.6f}")
+        
         
         # STEP 7: IDM uncertainty based on land cover heterogeneity
         uncertainty = self._calculate_idm_uncertainty(
@@ -330,7 +339,7 @@ class IDMBaseline:
                 neighbor_coeffs = pop_coefficients[neighbors]
                 local_variance = np.var(neighbor_coeffs)
                 consistency_weight = 1.0 / (1.0 + local_variance * 2.0)  
-                spatial_weights[i] = self.config.get("spatial_weight") * consistency_weight
+                spatial_weights[i] = consistency_weight
         
         return spatial_weights
     
@@ -349,15 +358,18 @@ class IDMBaseline:
     def _mass_preserving_interpolation(self, coefficients: np.ndarray,
                                     tract_svi: float, n_addresses: int) -> np.ndarray:
         """
-        Generate spatial values without forcing mean preservation
+        Generate spatial values that preserve the tract mean
         """
         total_weight = np.sum(coefficients)
         
         if total_weight > 0:
-            normalized_weights = coefficients / total_weight
-            initial_values = normalized_weights * tract_svi * n_addresses
+            # Correct formula: ensures mean equals tract_svi while preserving proportions
+            initial_values = coefficients * (tract_svi * n_addresses / total_weight)
+            print(f"IDM DEBUG: Mass preservation - scaling factor: {(tract_svi * n_addresses / total_weight):.6f}")
+            print(f"IDM DEBUG: Mass preservation output - values mean: {initial_values.mean():.6f}")
         else:
             initial_values = np.full(n_addresses, tract_svi)
+            print(f"IDM DEBUG: Mass preservation fallback - uniform values: {tract_svi}")
         
         return initial_values
     

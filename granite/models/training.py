@@ -16,7 +16,7 @@ import time
 class AccessibilityTrainer:
     """Trainer class for GNN models learning SPDE parameters"""
     
-    def __init__(self, model: nn.Module, device: str = 'cpu', verbose: bool = True):
+    def __init__(self, model: nn.Module, device: str = 'cpu', verbose=None):
         """
         Initialize trainer
         
@@ -31,7 +31,10 @@ class AccessibilityTrainer:
         """
         self.model = model.to(device)
         self.device = device
-        self.verbose = verbose
+        if verbose is None:
+            self.verbose = config.get('processing', {}).get('verbose', False)
+        else:
+            self.verbose = verbose
         self.training_history = {
             'loss': [],
             'spatial_loss': [],

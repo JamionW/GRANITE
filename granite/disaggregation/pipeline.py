@@ -32,7 +32,7 @@ class GRANITEPipeline:
     rather than regression-based approaches.
     """
     
-    def __init__(self, config, data_dir='./data', output_dir='./output', verbose=True):
+    def __init__(self, config, data_dir='./data', output_dir='./output', verbose=None):
         """
         Initialize GRANITE pipeline
         
@@ -53,7 +53,10 @@ class GRANITEPipeline:
         self.config = config
         self.data_dir = data_dir
         self.output_dir = output_dir
-        self.verbose = verbose
+        if verbose is None:
+            self.verbose = config.get('processing', {}).get('verbose', False)
+        else:
+            self.verbose = verbose
                 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)

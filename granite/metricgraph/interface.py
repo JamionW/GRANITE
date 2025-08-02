@@ -11,14 +11,28 @@ os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning'
 os.environ['R_LIBS_SITE'] = ''  
 os.environ['R_ENVIRON_USER'] = ''
 os.environ['R_PROFILE_USER'] = ''
-import rpy2.robjects as ro
+# Suppress R output during MetricGraph operations
+import os
+os.environ['R_HOME'] = os.environ.get('R_HOME', '')
+os.environ['R_LIBS_SITE'] = ''
+with open(os.devnull, 'w') as devnull:
+    import contextlib
+    with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+        import rpy2.robjects as ro
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.conversion import localconverter
 import rpy2.robjects.packages as rpackages
 
 import numpy as np
 import pandas as pd
-import rpy2.robjects as ro
+# Suppress R output during MetricGraph operations
+import os
+os.environ['R_HOME'] = os.environ.get('R_HOME', '')
+os.environ['R_LIBS_SITE'] = ''
+with open(os.devnull, 'w') as devnull:
+    import contextlib
+    with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+        import rpy2.robjects as ro
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.conversion import localconverter
 import rpy2.robjects.packages as rpackages
@@ -825,15 +839,15 @@ class MetricGraphInterface:
             
             tract_svi = float(tract_observation['svi_value'].iloc[0])
             
-            # Create IDM instance (same class name, improved implementation)
-            idm = IDMBaseline(grid_resolution_meters=100)
+            # Create IDM instance 
+            idm = IDMBaseline(config=self.config, grid_resolution_meters=100)
             
-            # Run IDM disaggregation (same method name, improved implementation)
+            # Run IDM disaggregation
             idm_result = idm.disaggregate_svi(
                 tract_svi=tract_svi,
                 prediction_locations=prediction_locations,
                 nlcd_features=nlcd_features,
-                tract_geometry=tract_geometry  # Now supports tract geometry
+                tract_geometry=tract_geometry 
             )
             
             if idm_result['success']:

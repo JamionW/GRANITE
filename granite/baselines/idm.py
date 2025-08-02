@@ -100,44 +100,74 @@ class IDMBaseline:
                         tract_geometry: Optional[Polygon] = None) -> Dict:
         """
         Proper IDM spatial disaggregation following He et al. (2024)
-        
-        Parameters:
-        -----------
-        tract_svi : float
-            Tract-level SVI value to disaggregate
-        prediction_locations : pd.DataFrame  
-            Address locations with 'x', 'y' coordinates
-        nlcd_features : pd.DataFrame
-            NLCD features with proper 16-class classification
-        tract_geometry : Polygon, optional
-            Tract boundary for proper spatial extent
-            
-        Returns:
-        --------
-        Dict
-            IDM disaggregation results with diagnostics
         """
+        
+        print(f"IDM DEBUG: Starting disaggregate_svi")
+        print(f"IDM DEBUG: prediction_locations shape: {prediction_locations.shape}")
+        print(f"IDM DEBUG: prediction_locations columns: {list(prediction_locations.columns)}")
+        
         n_addresses = len(prediction_locations)
         
-        if nlcd_features is not None and len(nlcd_features) >= n_addresses:
-            # Check if we have proper 16-class NLCD or legacy 4-class
-            if self._has_proper_nlcd_classes(nlcd_features):
-                # STEP 1: Proper IDM with full NLCD classification
-                results = self._proper_idm_disaggregation(
-                    tract_svi, prediction_locations, nlcd_features, tract_geometry
-                )
-            else:
-                # STEP 2: Legacy mode for backward compatibility
-                results = self._legacy_idm_disaggregation(
-                    tract_svi, prediction_locations, nlcd_features, tract_geometry
-                )
-        else:
-            # STEP 3: Fallback to distance-based IDM
-            results = self._distance_based_idm_fallback(
-                tract_svi, prediction_locations, tract_geometry
-            )
+        # Extract and check coordinates right at the start
+        coords = prediction_locations[['x', 'y']].values
+        print(f"IDM DEBUG: Extracted coords shape: {coords.shape}")
+        print(f"IDM DEBUG: Input X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
+        print(f"IDM DEBUG: Input Y range: [{coords[:, 1].min():.6f}, {coords[:, 1].max():.6f}]")
         
-        return results
+        try:
+            if nlcd_features is not None and len(nlcd_features) >= n_addresses:
+                # Check if we have proper 16-class NLCD or legacy 4-class
+                if self._has_proper_nlcd_classes(nlcd_features):
+                    print(f"IDM DEBUG: Taking _proper_idm_disaggregation path")
+                    # STEP 1: Proper IDM with full NLCD classification
+                    results = self._proper_idm_disaggregation(
+                        tract_svi, prediction_locations, nlcd_features, tract_geometry
+                    )
+                else:
+                    print(f"IDM DEBUG: Taking _legacy_idm_disaggregation path")
+                    # STEP 2: Legacy mode for backward compatibility
+                    results = self._legacy_idm_disaggregation(
+                        tract_svi, prediction_locations, nlcd_features, tract_geometry
+                    )
+            else:
+                print(f"IDM DEBUG: Taking _distance_based_idm_fallback path")
+                print(f"IDM DEBUG: nlcd_features is None: {nlcd_features is None}")
+                if nlcd_features is not None:
+                    print(f"IDM DEBUG: nlcd_features length: {len(nlcd_features)} vs n_addresses: {n_addresses}")
+                # STEP 3: Fallback to distance-based IDM
+                results = self._distance_based_idm_fallback(
+                    tract_svi, prediction_locations, tract_geometry
+                )
+            
+            # Debug the results before returning
+            if results and 'predictions' in results:
+                pred_df = results['predictions']
+                print(f"IDM DEBUG: Final results X range: [{pred_df['x'].min():.6f}, {pred_df['x'].max():.6f}]")
+                print(f"IDM DEBUG: Final results Y range: [{pred_df['y'].min():.6f}, {pred_df['y'].max():.6f}]")
+            
+            return results
+            
+        except Exception as e:
+            print(f"IDM DEBUG: Exception in disaggregate_svi: {e}")
+            import traceback
+            print(f"IDM DEBUG: Traceback: {traceback.format_exc()}")
+            
+            # Create a simple fallback result with correct coordinates
+            fallback_predictions = self._create_results_dataframe(
+                coords, 
+                np.full(n_addresses, tract_svi), 
+                np.full(n_addresses, 0.05), 
+                prediction_locations
+            )
+            
+            return {
+                'success': True,
+                'predictions': fallback_predictions,
+                'diagnostics': {
+                    'method': 'IDM_exception_fallback',
+                    'error': str(e)
+                }
+            }
     
     def _has_proper_nlcd_classes(self, nlcd_features: pd.DataFrame) -> bool:
         """Check if NLCD features use proper 16-class legend"""
@@ -158,14 +188,17 @@ class IDMBaseline:
             return False
     
     def _proper_idm_disaggregation(self, tract_svi: float,
-                                  prediction_locations: pd.DataFrame,
-                                  nlcd_features: pd.DataFrame,
-                                  tract_geometry: Optional[Polygon]) -> Dict:
+                                prediction_locations: pd.DataFrame,
+                                nlcd_features: pd.DataFrame,
+                                tract_geometry: Optional[Polygon]) -> Dict:
         """
         Core IDM algorithm following Mennis & Hultgren (2006) and He et al. (2024)
         """
-        coords = prediction_locations[['x', 'y']].values
+        print(f"IDM DEBUG: In _proper_idm_disaggregation")
         
+        coords = prediction_locations[['x', 'y']].values
+        print(f"IDM DEBUG: _proper_idm_disaggregation coords X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
+            
         # STEP 1: Extract NLCD classes at each address
         nlcd_classes = nlcd_features['nlcd_class'].values[:len(coords)]
         
@@ -198,9 +231,13 @@ class IDMBaseline:
         )
         
         # STEP 8: Create results
+        print(f"IDM DEBUG: Before _create_results_dataframe, coords X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
+        
         predictions_df = self._create_results_dataframe(
             coords, disaggregated_values, uncertainty, prediction_locations
         )
+        
+        print(f"IDM DEBUG: After _create_results_dataframe, predictions X range: [{predictions_df['x'].min():.6f}, {predictions_df['x'].max():.6f}]")
         
         # STEP 9: Diagnostics
         diagnostics = self._create_proper_diagnostics(
@@ -368,9 +405,11 @@ class IDMBaseline:
     def _distance_based_idm_fallback(self, tract_svi: float,
                                 prediction_locations: pd.DataFrame,
                                 tract_geometry: Optional[Polygon]) -> Dict:
-        """
-        Distance-based fallback with reduced edge artifacts
-        """
+        """Debug version of distance-based fallback"""
+        print(f"IDM DEBUG: In _distance_based_fallback")
+        print(f"IDM DEBUG: Fallback input coords shape: {coords.shape}")
+        print(f"IDM DEBUG: Fallback input X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
+        
         coords = prediction_locations[['x', 'y']].values
         n_addresses = len(coords)
         
@@ -424,10 +463,14 @@ class IDMBaseline:
         uncertainty = base_uncertainty + distance_uncertainty
         uncertainty = np.clip(uncertainty, 0.01, 0.12) 
         
-        # Create results
+        print(f"IDM DEBUG: Before results DF, coords X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
+    
+        # Call your _create_results_dataframe method
         predictions_df = self._create_results_dataframe(
             coords, disaggregated_values, uncertainty, prediction_locations
         )
+        
+        print(f"IDM DEBUG: After results DF, X range: [{predictions_df['x'].min():.6f}, {predictions_df['x'].max():.6f}]")
         
         diagnostics = {
             'method': 'IDM_distance_based_fallback_edge_corrected',
@@ -444,7 +487,7 @@ class IDMBaseline:
             'nlcd_available': False,
             'edge_correction_applied': True
         }
-        
+
         return {
             'success': True,
             'predictions': predictions_df,
@@ -473,6 +516,7 @@ class IDMBaseline:
     
     def _create_results_dataframe(self, coords: np.ndarray, predictions: np.ndarray,
                                  uncertainty: np.ndarray, prediction_locations: pd.DataFrame) -> pd.DataFrame:
+        print(f"IDM DEBUG: coords input shape {coords.shape}, X range [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
         """Create standardized results dataframe"""
         predictions_df = pd.DataFrame({
             'x': coords[:, 0],

@@ -32,7 +32,7 @@ class GRANITEPipeline:
     rather than regression-based approaches.
     """
     
-    def __init__(self, config, data_dir='./data', output_dir='./output', verbose=None):
+    def __init__(self, config, data_dir='./data', output_dir='./output', verbose=False):
         """
         Initialize GRANITE pipeline
         

@@ -20,7 +20,7 @@ import numpy as np
 class DataLoader:
     """Main data loader class for GRANITE framework"""
     
-    def __init__(self, data_dir: str = './data', verbose=None, config: dict = None):
+    def __init__(self, data_dir: str = './data', verbose=False, config: dict = None):
         """
         Initialize DataLoader
         
@@ -34,11 +34,11 @@ class DataLoader:
             Configuration dictionary with transit and other settings
         """
         self.data_dir = data_dir
+        self.config = config or {} 
         if verbose is None:
             self.verbose = config.get('processing', {}).get('verbose', False)
         else:
             self.verbose = verbose
-        self.config = config or {}  # Store config for use in loading methods
         
         # Cache for expensive operations
         self._address_cache = None
@@ -58,11 +58,11 @@ class DataLoader:
     
     def _log(self, message: str):
         """Log message with timestamp"""
-        if self.verbose:
+        if 1==2: #self.verbose:
             timestamp = datetime.now().strftime("%H:%M:%S")
             print(f"[{timestamp}] DataLoader: {message}")
 
-    def load_nlcd_data(self, county_bounds: gpd.GeoDataFrame, 
+    def load_nlcd_data(self, county_bounds: gpd.GeoDataFrame,
                     nlcd_path: str = "./data/nlcd_hamilton_county.tif") -> dict:
         """
         Load NLCD data with proper CRS handling
@@ -75,23 +75,26 @@ class DataLoader:
                 return None
                 
             with rasterio.open(nlcd_path) as src:
-                self._log(f"🔍 NLCD FILE DIAGNOSTICS:")
-                self._log(f"  File: {nlcd_path}")
-                self._log(f"  Raster CRS: {src.crs}")
-                self._log(f"  Raster shape: {src.shape}")
-                self._log(f"  Raster bounds: {src.bounds}")
+                if self.verbose:
+                    self._log(f"NLCD data loaded: {nlcd_path}")
+                    self._log(f"  Raster CRS: {src.crs}")
+                    self._log(f"  Raster shape: {src.shape}")
+                    self._log(f"  Raster bounds: {src.bounds}")
                 
-                # Get county bounds
+                # Get county bounds info
                 county_bounds_orig_crs = county_bounds.crs
-                self._log(f"  County bounds CRS: {county_bounds_orig_crs}")
-                self._log(f"  County bounds: {county_bounds.total_bounds}")
+                if self.verbose:
+                    self._log(f"  County bounds CRS: {county_bounds_orig_crs}")
+                    self._log(f"  County bounds: {county_bounds.total_bounds}")
                 
                 # CRITICAL: Reproject county bounds to match raster CRS
                 if county_bounds.crs != src.crs:
-                    self._log(f"  🔄 Reprojecting county bounds from {county_bounds.crs} to {src.crs}")
+                    if self.verbose:
+                        self._log(f"  🔄 Reprojecting county bounds from {county_bounds.crs} to {src.crs}")
                     county_geom_reprojected = county_bounds.to_crs(src.crs).geometry
                     reprojected_bounds = county_bounds.to_crs(src.crs).total_bounds
-                    self._log(f"  Reprojected bounds: {reprojected_bounds}")
+                    if self.verbose:
+                        self._log(f"  Reprojected bounds: {reprojected_bounds}")
                 else:
                     county_geom_reprojected = county_bounds.geometry
                 
@@ -108,20 +111,30 @@ class DataLoader:
                 )
                 
                 if not has_overlap:
-                    self._log(f"  No overlap between county bounds and NLCD raster!")
-                    self._log(f"     County: {county_bounds_proj}")
-                    self._log(f"     Raster: {raster_bounds}")
+                    if self.verbose:
+                        self._log(f"  No overlap between county bounds and NLCD raster!")
+                        self._log(f"     County: {county_bounds_proj}")
+                        self._log(f"     Raster: {raster_bounds}")
                     return None
                 else:
-                    self._log(f"  County/raster overlap confirmed")
+                    if self.verbose:
+                        self._log(f"  County/raster overlap confirmed")
                 
                 # Crop NLCD to county bounds with proper CRS
                 try:
-                    nlcd_cropped, nlcd_transform = rasterio.mask.mask(
-                        src, county_geom_reprojected, crop=True, filled=True, fill_value=250
-                    )
+                    # Try with fill_value first (newer rasterio versions)
+                    try:
+                        nlcd_cropped, nlcd_transform = rasterio.mask.mask(
+                            src, county_geom_reprojected, crop=True, filled=True, fill_value=250
+                        )
+                    except TypeError:
+                        # Fallback for older rasterio versions without fill_value
+                        nlcd_cropped, nlcd_transform = rasterio.mask.mask(
+                            src, county_geom_reprojected, crop=True, filled=True
+                        )
                     
-                    self._log(f"  Cropped NLCD shape: {nlcd_cropped.shape}")
+                    if self.verbose:
+                        self._log(f"  Cropped NLCD shape: {nlcd_cropped.shape}")
                     
                     # Check if we got valid data
                     if nlcd_cropped.size == 0:
@@ -130,13 +143,15 @@ class DataLoader:
                     
                     # Check for all no-data
                     unique_values = np.unique(nlcd_cropped[0])  # First band
-                    self._log(f"  Unique NLCD values in cropped area: {unique_values}")
+                    if self.verbose:
+                        self._log(f"  Unique NLCD values in cropped area: {unique_values}")
                     
                     if len(unique_values) == 1 and unique_values[0] == 250:
                         self._log(f"  WARNING: Cropped area contains only 'no data' values!")
                     elif 250 in unique_values:
                         pct_no_data = np.sum(nlcd_cropped[0] == 250) / nlcd_cropped[0].size * 100
-                        self._log(f"  No data percentage: {pct_no_data:.1f}%")
+                        if self.verbose:
+                            self._log(f"  No data percentage: {pct_no_data:.1f}%")
                     
                     # Update metadata
                     nlcd_meta = src.meta.copy()
@@ -147,7 +162,8 @@ class DataLoader:
                         "crs": src.crs  # Keep original raster CRS
                     })
                     
-                    self._log(f"  NLCD data successfully loaded and cropped")
+                    if self.verbose:
+                        self._log(f"  NLCD data successfully loaded and cropped")
                     
                     return {
                         'data': nlcd_cropped[0],  # First band contains land cover classes
@@ -222,7 +238,7 @@ class DataLoader:
             return gpd.GeoDataFrame(geometry=[])
 
     def extract_nlcd_features_at_addresses(self, addresses: gpd.GeoDataFrame, 
-                                       nlcd_data: dict) -> pd.DataFrame:
+                                    nlcd_data: dict) -> pd.DataFrame:
         """
         Extract NLCD features using proper 16-class legend following He et al. (2024)
         
@@ -246,11 +262,23 @@ class DataLoader:
         # Ensure addresses are in same CRS as NLCD
         addresses_proj = addresses.to_crs(nlcd_data['crs'])
         
-        # Extract NLCD values at point locations
+        # Extract coordinates - Ensure we get exactly the right number
         coords = [(geom.x, geom.y) for geom in addresses_proj.geometry]
+        n_addresses = len(addresses)
+        n_coords = len(coords)
         
+        if n_addresses != n_coords:
+            self._log(f"WARNING: Address count ({n_addresses}) != coordinate count ({n_coords})")
+            # Ensure we process exactly n_addresses coordinates
+            coords = coords[:n_addresses]
+        
+        # Extract NLCD values at point locations
         nlcd_values = []
-        for coord in coords:
+        for i, coord in enumerate(coords):
+            # Safety check to prevent over-processing
+            if i >= n_addresses:
+                break
+                
             try:
                 row, col = rasterio.transform.rowcol(nlcd_data['transform'], coord[0], coord[1])
                 
@@ -262,42 +290,71 @@ class DataLoader:
                     if value in self._get_valid_nlcd_classes():
                         nlcd_values.append(int(value))
                     else:
-                        # Map legacy values to NLCD classes
-                        if value in self._get_valid_nlcd_classes():
-                            nlcd_values.append(int(value))
+                        # If center pixel is 250, check neighboring pixels
+                        if value == 250:
+                            # Sample 3x3 neighborhood
+                            neighbor_values = []
+                            for dr in [-1, 0, 1]:
+                                for dc in [-1, 0, 1]:
+                                    nr, nc = row + dr, col + dc
+                                    if (0 <= nr < nlcd_data['data'].shape[0] and 
+                                        0 <= nc < nlcd_data['data'].shape[1]):
+                                        neighbor_val = nlcd_data['data'][nr, nc]
+                                        if neighbor_val != 250:
+                                            neighbor_values.append(neighbor_val)
+                            
+                            # Use most common valid neighbor value, or default to 22
+                            if neighbor_values:
+                                value = max(set(neighbor_values), key=neighbor_values.count)
+                            else:
+                                value = 22
                         else:
-                            # If center pixel is 250, check neighboring pixels
-                            if value == 250:
-                                # Sample 3x3 neighborhood
-                                neighbor_values = []
-                                for dr in [-1, 0, 1]:
-                                    for dc in [-1, 0, 1]:
-                                        nr, nc = row + dr, col + dc
-                                        if (0 <= nr < nlcd_data['data'].shape[0] and 
-                                            0 <= nc < nlcd_data['data'].shape[1]):
-                                            neighbor_val = nlcd_data['data'][nr, nc]
-                                            if neighbor_val != 250:
-                                                neighbor_values.append(neighbor_val)
-                                
-                                # Use most common valid neighbor value, or default to 22
-                                if neighbor_values:
-                                    value = max(set(neighbor_values), key=neighbor_values.count)
-                                else:
-                                    value = 22
+                            value = 22  # Default: low-intensity residential
+                        
+                        nlcd_values.append(int(value))
                 else:
                     nlcd_values.append(22)  # Default: low-intensity residential
+                    
             except Exception as e:
                 self._log(f"Error extracting NLCD at {coord}: {e}")
                 nlcd_values.append(22)  # Default for errors
         
-        # Create feature dataframe
+        # Ensure arrays have exactly the same length
+        if len(nlcd_values) != n_addresses:
+            self._log(f"WARNING: NLCD values ({len(nlcd_values)}) != addresses ({n_addresses})")
+            
+            if len(nlcd_values) > n_addresses:
+                # Trim excess values
+                nlcd_values = nlcd_values[:n_addresses]
+                self._log(f"  Trimmed NLCD values to {len(nlcd_values)}")
+            else:
+                # Pad with default values
+                while len(nlcd_values) < n_addresses:
+                    nlcd_values.append(22)  # Default: low-intensity residential
+                self._log(f"  Padded NLCD values to {len(nlcd_values)}")
+        
+        # Create address_id array with same length
+        if 'address_id' in addresses.columns:
+            address_ids = addresses['address_id'].iloc[:n_addresses].values
+        else:
+            address_ids = list(range(n_addresses))
+        
+        # Create feature dataframe with guaranteed matching lengths
         features_df = pd.DataFrame({
-            'address_id': addresses['address_id'] if 'address_id' in addresses.columns else range(len(addresses)),
+            'address_id': address_ids,
             'nlcd_class': nlcd_values
         })
         
+        # Verify DataFrame integrity
+        if len(features_df) != n_addresses:
+            raise ValueError(f"DataFrame length mismatch: {len(features_df)} != {n_addresses}")
+        
         # Add derived features using NLCD methodology
         features_df = self._add_nlcd_derived_features(features_df)
+        
+        # Final verification
+        if len(features_df) != n_addresses:
+            raise ValueError(f"Final DataFrame length mismatch after derived features: {len(features_df)} != {n_addresses}")
         
         # Quality check and logging
         self._log_nlcd_extraction_quality(features_df)
@@ -404,25 +461,13 @@ class DataLoader:
         # Get class names
         class_names = self._get_nlcd_class_names()
         
-        self._log(f"NLCD Extraction Quality Report:")
-        self._log(f"  Total addresses: {len(features_df)}")
-        self._log(f"  Unique NLCD classes: {len(unique_classes)}")
-        
-        for nlcd_class in sorted(unique_classes):
-            count = class_counts.get(nlcd_class, 0)
-            percentage = (count / len(features_df)) * 100
-            class_name = class_names.get(nlcd_class, f"Unknown({nlcd_class})")
-            self._log(f"    {nlcd_class}: {class_name} - {count} addresses ({percentage:.1f}%)")
-        
-        # Check for spatial variation
-        idm_std = features_df['idm_coefficient'].std()
-        pop_std = features_df['population_density_coeff'].std()
-        vuln_std = features_df['svi_vulnerability_coeff'].std()
-        
-        self._log(f"  Coefficient variation:")
-        self._log(f"    IDM coefficient std: {idm_std:.4f}")
-        self._log(f"    Population density std: {pop_std:.4f}")  
-        self._log(f"    Vulnerability std: {vuln_std:.4f}")
+        self._log(f"NLCD features extracted: {len(features_df)} addresses, {len(unique_classes)} land cover classes")
+        if self.verbose:
+            for nlcd_class in sorted(unique_classes):
+                count = class_counts.get(nlcd_class, 0)
+                percentage = (count / len(features_df)) * 100
+                class_name = class_names.get(nlcd_class, f"Unknown({nlcd_class})")
+                self._log(f"  {nlcd_class}: {class_name} - {count} addresses ({percentage:.1f}%)")
         
         # Check for proper vs legacy classes
         proper_classes = self._get_valid_nlcd_classes()

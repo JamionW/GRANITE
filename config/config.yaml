@@ -1,151 +1,71 @@
 # GRANITE Framework Configuration
-# Graph-Refined Accessibility Network for Integrated Transit Equity
-# All parameters in this file are functional and used by the codebase
 
 data:
-  # Geographic scope
-  state: "Tennessee"
+  # Geographic scope 
   state_fips: "47"
-  county: "Hamilton"
   county_fips: "065"
   census_year: 2020
   address_file: "chattanooga.geojson"
   use_real_addresses: true
-  address_buffer_meters: 200
-  #target_fips: "47065000600" 
   
-  # Processing mode: "county" or "fips"
+  # Processing mode 
   processing_mode: "county"
   
-  # FIPS-based processing configuration
-  fips_config:
-    # Single tract processing (set to FIPS code or null)
-    single_fips: null
-    
-    # Batch processing options
-    batch:
-      target_list: []  # Explicit FIPS codes, e.g., ["47065001100", "47065001200"]
-      auto_select:
-        enabled: true
-        mode: "range"  # "all", "range", or "sample"
-        range_start: 1
-        range_end: 5
-        sample_size: 10  # Only used if mode is "sample"
-    
-    # Memory management
-    memory:
-      tract_buffer_degrees: 0.01  # Buffer around tract boundary
-      max_network_nodes: 10000    # Maximum nodes per tract
-      max_network_edges: 20000    # Maximum edges per tract
-      preserve_network: true      # Preserve full network granularity
-  
-  # Data file paths
+  # Essential file paths only 
   svi_file: "data/raw/SVI2020_US_tract.csv"
   roads_file: "data/raw/tl_2023_47065_roads.shp"
   census_tracts_file: "data/raw/tl_2020_47_tract.shp"
-  
-  # Address generation
-  n_addresses_per_tract: 100
-  
-# Transit data configuration
-transit:
-  # Data source priority: 'gtfs', 'osm', 'grid', or 'minimal'
-  preferred_source: 'gtfs'
-  
-  # Whether to attempt downloading real data
-  download_real_data: true
-  
-  # GTFS configuration
-  gtfs:
-    # Local GTFS file path (relative to data_dir)
-    local_file: 'carta_gtfs.zip'
-    
-    # CARTA GTFS download URLs (tried in order)
-    download_urls:
-      - 'https://www.gocarta.org/gtfs/gtfs.zip'
-      - 'https://transitland.org/api/v1/gtfs_exports/carta.zip'
-    
-    # Download timeout in seconds
-    timeout: 30
-  
-  # OpenStreetMap configuration  
-  osm:
-    # Bounding box for Hamilton County [min_lat, min_lon, max_lat, max_lon]
-    bbox: [34.9, -85.5, 35.3, -85.0]
-    
-    # Overpass API timeout
-    timeout: 60
-  
-  # Grid generation configuration
-  grid:
-    # Whether to use demographic-aware placement
-    use_demographic_data: true
-    
-    # Minimum stop density (stops per square km)
-    min_stop_density: 0.5
-    
-    # Maximum stop density (stops per square km)  
-    max_stop_density: 2.0
 
-# GNN model configuration
+# Transit - simplified 
+transit:
+  preferred_source: 'gtfs'
+  local_file: 'carta_gtfs.zip'
+
+# GNN model configuration 
 model:
-  input_dim: 5      # Number of input features
+  # Core architecture 
+  input_dim: 5      # Number of input features 
   hidden_dim: 128    # Hidden layer dimension
-  output_dim: 3     # SPDE parameters: kappa, alpha, tau
+  output_dim: 3     # SPDE parameters: kappa, alpha, tau 
   dropout: 0.2
   epochs: 20
   learning_rate: 0.0001
   
+  # Features 
   features:
-    type: "topological"  # vs "nlcd" 
-    fallback_to_topological: true
+    type: "nlcd" 
     nlcd_path: "./data/nlcd_hamilton_county.tif"
 
   # Training parameters
-  spatial_weight: 0.0      # Weight for spatial smoothness loss
-  regularization_weight: 0.01  # Weight for parameter regularization
-
-  diversity_weight: 0.2             # NEW: Encourage parameter variation
-  realism_weight: 0.01              # NEW: Keep parameters reasonable
+  spatial_weight: 0.01              # INCREASED from 0.0 to enable spatial learning
+  regularization_weight: 0.01      # Keep for parameter stability
   
+  # REMOVED: diversity_weight, realism_weight (not implemented)
   
-# MetricGraph configuration
+# MetricGraph configuration 
 metricgraph:
-  # Whittle-Matérn parameters
-  alpha: 1               # Smoothness parameter
-  mesh_resolution: 0.05   # Mesh resolution for SPDE
-  
-  # R processing limits
-  max_edges: 50000        # Maximum edges for MetricGraph
-  batch_size: 300         # Edge batch processing size
-  
-  # Smart sampling (reduces network complexity)
-  enable_sampling: false   # Enable smart network sampling
-  sampling_strategy: "centrality"  # "centrality" or "spatial"
-  
-# Output configuration
+  alpha: 1                          # Smoothness parameter
+  mesh_resolution: 0.05             # Used in console output
+  max_edges: 50000                  # Prevents memory issues
+
+# Output
 output:
   save_predictions: true
-  save_features: true
-  save_model: true
   save_plots: true
   
-  # Output organization
-  create_tract_folders: true
-  save_batch_summary: true
-  
+# Baselines 
 baselines:
   enable_idm: true
-  compare_methods: ["gnn_nlcd", "idm_fixed", "kriging"]
 
-# Processing configuration
+# Processing 
 processing:
-  continue_on_error: true  # Continue batch processing on individual failures
-  verbose: true            # Detailed logging
-  random_seed: 42         # For reproducibility
-  
-# Validation configuration
-validation:
-  compute_metrics: true
-  tract_aggregation: true  # Validate mass preservation
-  uncertainty_calibration: true
+  continue_on_error: true
+  verbose: false  
+  random_seed: 42
+
+# REMOVED SECTIONS:
+# - Complex FIPS batch processing (use command line)
+# - Detailed transit configs (GTFS works)
+# - Unimplemented validation settings
+# - Memory management configs (defaults work)
+# - Sampling strategies (not implemented)

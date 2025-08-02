@@ -20,7 +20,7 @@ import numpy as np
 class DataLoader:
     """Main data loader class for GRANITE framework"""
     
-    def __init__(self, data_dir: str = './data', verbose: bool = True, config: dict = None):
+    def __init__(self, data_dir: str = './data', verbose=None, config: dict = None):
         """
         Initialize DataLoader
         
@@ -34,7 +34,10 @@ class DataLoader:
             Configuration dictionary with transit and other settings
         """
         self.data_dir = data_dir
-        self.verbose = verbose
+        if verbose is None:
+            self.verbose = config.get('processing', {}).get('verbose', False)
+        else:
+            self.verbose = verbose
         self.config = config or {}  # Store config for use in loading methods
         
         # Cache for expensive operations

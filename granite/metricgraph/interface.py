@@ -35,8 +35,11 @@ class MetricGraphInterface:
     Optimized for spatial disaggregation rather than regression
     """
     
-    def __init__(self, verbose=True, config=None):
-        self.verbose = verbose
+    def __init__(self, verbose=None, config=None):
+        if verbose is None:
+            self.verbose = config.get('processing', {}).get('verbose', False)
+        else:
+            self.verbose = verbose
         self.config = config or {}
         self.converter = pandas2ri.converter
         

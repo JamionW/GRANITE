@@ -92,11 +92,11 @@ class SPDEParameterGNN(nn.Module):
         # Kappa (precision) should be positive
         # Alpha (smoothness) should be between 0 and 2
         # Tau (nugget) should be positive and small
-        params = torch.stack([
-            0.2 + 2.0 * torch.sigmoid(params[:, 0]),  # Kappa: [0.2, 2.2]
-            0.8 + 1.5 * torch.sigmoid(params[:, 1]),  # Alpha: [0.8, 2.3] 
-            0.1 + 0.8 * torch.sigmoid(params[:, 2])   # Tau: [0.1, 0.9]
-        ], dim=1)
+        #params = torch.stack([
+        #    0.2 + 2.0 * torch.sigmoid(params[:, 0]),  # Kappa: [0.2, 2.2]
+        #    0.8 + 1.5 * torch.sigmoid(params[:, 1]),  # Alpha: [0.8, 2.3] 
+        #    0.1 + 0.8 * torch.sigmoid(params[:, 2])   # Tau: [0.1, 0.9]
+        #], dim=1)
         
         return params
 

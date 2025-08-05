@@ -246,6 +246,30 @@ class AccessibilityTrainer:
             
             # Forward pass - learn SPDE parameters
             params = self.model(graph_data.x, graph_data.edge_index)
+
+            # Feature diversity analysis every 10 epochs
+            if (epoch + 1) % 10 == 0:
+                with torch.no_grad():
+                    # Analyze input feature diversity
+                    feature_std = torch.std(graph_data.x, dim=0)
+                    feature_mean_std = torch.mean(feature_std)
+                    
+                    # Analyze output parameter diversity 
+                    param_std = torch.std(params, dim=0)
+                    param_mean_std = torch.mean(param_std)
+                    
+                    print(f"🔍 FEATURE ANALYSIS Epoch {epoch+1}:")
+                    print(f"   Input feature std (mean): {feature_mean_std:.6f}")
+                    print(f"   Output param std (mean): {param_mean_std:.6f}")
+                    print(f"   Kappa std: {param_std[0]:.6f}")
+                    print(f"   Alpha std: {param_std[1]:.6f}")  
+                    print(f"   Tau std: {param_std[2]:.6f}")
+                    
+                    # Check if features are actually varying
+                    if feature_mean_std < 0.01:
+                        print("   ⚠️  WARNING: Input features have very low variation!")
+                    if param_mean_std < 0.01:
+                        print("   ⚠️  WARNING: Parameters have very low variation!")
             
             # Collect feature snapshots for visualization
             if collect_history and feature_history is not None:
@@ -269,15 +293,22 @@ class AccessibilityTrainer:
                     f"diversity_l={diversity_loss.item():.6f}, total_l={loss.item():.6f}")
             
             # Additional loss components
-            diversity_loss = self.diversity_penalty(params)
+            #diversity_loss = self.diversity_penalty(params)
+            diversity_loss = torch.tensor(0.0)  # Placeholder for diversity loss
             realism_loss = self.physical_realism_penalty(params)
 
             # Total loss with strong diversity weighting
-            loss = (spatial_weight * spatial_loss +      # 0.001 (weak)
-                reg_weight * reg_loss +               # 0.01 (moderate)  
-                0.1 * diversity_loss +                # 0.1
-                0.01 * realism_loss)                  # 0.01 (weak)
-            
+            loss = torch.tensor(0.001, requires_grad=True)
+            #loss = (spatial_weight * spatial_loss)# +      
+                #reg_weight * reg_loss +              
+                #0.0001 * diversity_loss +                
+                #0.01 * realism_loss +                
+                #0.05 * self.feature_utilization_loss(params, graph_data.x)) 
+            print("🔧 UNIQUE: Test B code is running!")
+            print(f"🔧 LOSS DEBUG: spatial_only_loss = {loss.item():.8f}")
+            print(f"🔧 LOSS DEBUG: spatial_weight = {spatial_weight}")
+            print(f"🔧 LOSS DEBUG: spatial_loss = {spatial_loss.item():.8f}")  
+                        
             # Backward pass
             loss.backward()
             optimizer.step()
@@ -324,6 +355,33 @@ class AccessibilityTrainer:
             'history': self.training_history
         }
     
+    def feature_utilization_loss(self, params: torch.Tensor, features: torch.Tensor) -> torch.Tensor:
+        """
+        Encourage GNN to use input features meaningfully
+        """
+        if not features.requires_grad:
+            features = features.clone().detach().requires_grad_(True)
+        
+        # Calculate how much each feature influences the parameters
+        # Use sum to create a scalar for gradient computation
+        param_sum = params.sum()
+        
+        # Compute gradients
+        gradients = torch.autograd.grad(
+            outputs=param_sum,
+            inputs=features,
+            create_graph=True,
+            retain_graph=True,
+            allow_unused=True
+        )[0]
+        
+        if gradients is None:
+            return torch.tensor(0.0, device=self.device)
+        
+        # Encourage high feature importance (negative because we want to maximize)
+        feature_importance = torch.mean(torch.abs(gradients))
+        return -feature_importance
+
     def extract_features(self, graph_data) -> np.ndarray:
         """
         Extract learned SPDE parameters from trained model

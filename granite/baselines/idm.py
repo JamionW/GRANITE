@@ -102,38 +102,27 @@ class IDMBaseline:
         Proper IDM spatial disaggregation following He et al. (2024)
         """
         
-        print(f"IDM DEBUG: Starting disaggregate_svi")
-        print(f"IDM DEBUG: prediction_locations shape: {prediction_locations.shape}")
-        print(f"IDM DEBUG: prediction_locations columns: {list(prediction_locations.columns)}")
-        
         n_addresses = len(prediction_locations)
         
         # Extract and check coordinates right at the start
         coords = prediction_locations[['x', 'y']].values
-        print(f"IDM DEBUG: Extracted coords shape: {coords.shape}")
-        print(f"IDM DEBUG: Input X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
-        print(f"IDM DEBUG: Input Y range: [{coords[:, 1].min():.6f}, {coords[:, 1].max():.6f}]")
         
         try:
             if nlcd_features is not None and len(nlcd_features) >= n_addresses:
                 # Check if we have proper 16-class NLCD or legacy 4-class
                 if self._has_proper_nlcd_classes(nlcd_features):
-                    print(f"IDM DEBUG: Taking _proper_idm_disaggregation path")
                     # STEP 1: Proper IDM with full NLCD classification
                     results = self._proper_idm_disaggregation(
                         tract_svi, prediction_locations, nlcd_features, tract_geometry
                     )
                 else:
-                    print(f"IDM DEBUG: Taking _legacy_idm_disaggregation path")
                     # STEP 2: Legacy mode for backward compatibility
                     results = self._legacy_idm_disaggregation(
                         tract_svi, prediction_locations, nlcd_features, tract_geometry
                     )
             else:
-                print(f"IDM DEBUG: Taking _distance_based_idm_fallback path")
-                print(f"IDM DEBUG: nlcd_features is None: {nlcd_features is None}")
                 if nlcd_features is not None:
-                    print(f"IDM DEBUG: nlcd_features length: {len(nlcd_features)} vs n_addresses: {n_addresses}")
+                    print(f"nlcd_features length: {len(nlcd_features)} vs n_addresses: {n_addresses}")
                 # STEP 3: Fallback to distance-based IDM
                 results = self._distance_based_idm_fallback(
                     tract_svi, prediction_locations, tract_geometry
@@ -142,15 +131,11 @@ class IDMBaseline:
             # Debug the results before returning
             if results and 'predictions' in results:
                 pred_df = results['predictions']
-                print(f"IDM DEBUG: Final results X range: [{pred_df['x'].min():.6f}, {pred_df['x'].max():.6f}]")
-                print(f"IDM DEBUG: Final results Y range: [{pred_df['y'].min():.6f}, {pred_df['y'].max():.6f}]")
-            
+                
             return results
             
         except Exception as e:
-            print(f"IDM DEBUG: Exception in disaggregate_svi: {e}")
             import traceback
-            print(f"IDM DEBUG: Traceback: {traceback.format_exc()}")
             
             # Create a simple fallback result with correct coordinates
             fallback_predictions = self._create_results_dataframe(
@@ -191,63 +176,45 @@ class IDMBaseline:
                                 prediction_locations: pd.DataFrame,
                                 nlcd_features: pd.DataFrame,
                                 tract_geometry: Optional[Polygon]) -> Dict:
-        print(f"IDM DEBUG: In _proper_idm_disaggregation")
         
         coords = prediction_locations[['x', 'y']].values
-        print(f"IDM DEBUG: tract_svi = {tract_svi}")
         
         # STEP 1: Extract NLCD classes
         nlcd_classes = nlcd_features['nlcd_class'].values[:len(coords)]
-        print(f"IDM DEBUG: NLCD classes unique: {np.unique(nlcd_classes)}")
         
         # STEP 2: Get population density coefficients
         pop_coefficients = np.array([
             self.nlcd_population_coefficients.get(int(cls), 0.5) 
             for cls in nlcd_classes
         ])
-        print(f"IDM DEBUG: pop_coefficients range: [{pop_coefficients.min():.4f}, {pop_coefficients.max():.4f}]")
-        print(f"IDM DEBUG: pop_coefficients mean: {pop_coefficients.mean():.4f}")
         
         # STEP 3: Get SVI vulnerability multipliers  
         svi_multipliers = np.array([
             self.svi_multipliers.get(int(cls), 0.5)
             for cls in nlcd_classes
         ])
-        print(f"IDM DEBUG: svi_multipliers range: [{svi_multipliers.min():.4f}, {svi_multipliers.max():.4f}]")
-        print(f"IDM DEBUG: svi_multipliers mean: {svi_multipliers.mean():.4f}")
         
         # STEP 4: IDM spatial interpolation
         spatial_weights = self._calculate_idm_spatial_weights(coords, pop_coefficients)
-        print(f"IDM DEBUG: spatial_weights range: [{spatial_weights.min():.4f}, {spatial_weights.max():.4f}]")
-        print(f"IDM DEBUG: spatial_weights mean: {spatial_weights.mean():.4f}")
         
         # STEP 5: Combine coefficients
         combined_coefficients = pop_coefficients * svi_multipliers * spatial_weights
-        print(f"IDM DEBUG: combined_coefficients range: [{combined_coefficients.min():.6f}, {combined_coefficients.max():.6f}]")
-        print(f"IDM DEBUG: combined_coefficients sum: {combined_coefficients.sum():.6f}")
         
         # STEP 6: Mass-preserving disaggregation
         disaggregated_values = self._mass_preserving_interpolation(
             combined_coefficients, tract_svi, len(coords)
         )
-        print(f"IDM DEBUG: disaggregated_values range: [{disaggregated_values.min():.6f}, {disaggregated_values.max():.6f}]")
-        print(f"IDM DEBUG: disaggregated_values mean: {disaggregated_values.mean():.6f}")
-        
         
         # STEP 7: IDM uncertainty based on land cover heterogeneity
         uncertainty = self._calculate_idm_uncertainty(
             nlcd_classes, disaggregated_values, coords
         )
         
-        # STEP 8: Create results
-        print(f"IDM DEBUG: Before _create_results_dataframe, coords X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
-        
+        # STEP 8: Create results        
         predictions_df = self._create_results_dataframe(
             coords, disaggregated_values, uncertainty, prediction_locations
         )
-        
-        print(f"IDM DEBUG: After _create_results_dataframe, predictions X range: [{predictions_df['x'].min():.6f}, {predictions_df['x'].max():.6f}]")
-        
+                
         # STEP 9: Diagnostics
         diagnostics = self._create_proper_diagnostics(
             disaggregated_values, uncertainty, tract_svi, nlcd_classes
@@ -365,11 +332,8 @@ class IDMBaseline:
         if total_weight > 0:
             # Correct formula: ensures mean equals tract_svi while preserving proportions
             initial_values = coefficients * (tract_svi * n_addresses / total_weight)
-            print(f"IDM DEBUG: Mass preservation - scaling factor: {(tract_svi * n_addresses / total_weight):.6f}")
-            print(f"IDM DEBUG: Mass preservation output - values mean: {initial_values.mean():.6f}")
         else:
             initial_values = np.full(n_addresses, tract_svi)
-            print(f"IDM DEBUG: Mass preservation fallback - uniform values: {tract_svi}")
         
         return initial_values
     
@@ -417,10 +381,6 @@ class IDMBaseline:
     def _distance_based_idm_fallback(self, tract_svi: float,
                                 prediction_locations: pd.DataFrame,
                                 tract_geometry: Optional[Polygon]) -> Dict:
-        """Debug version of distance-based fallback"""
-        print(f"IDM DEBUG: In _distance_based_fallback")
-        print(f"IDM DEBUG: Fallback input coords shape: {coords.shape}")
-        print(f"IDM DEBUG: Fallback input X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
         
         coords = prediction_locations[['x', 'y']].values
         n_addresses = len(coords)
@@ -474,16 +434,12 @@ class IDMBaseline:
         distance_uncertainty = 0.005 * normalized_distances 
         uncertainty = base_uncertainty + distance_uncertainty
         uncertainty = np.clip(uncertainty, 0.01, 0.12) 
-        
-        print(f"IDM DEBUG: Before results DF, coords X range: [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
-    
+            
         # Call your _create_results_dataframe method
         predictions_df = self._create_results_dataframe(
             coords, disaggregated_values, uncertainty, prediction_locations
         )
-        
-        print(f"IDM DEBUG: After results DF, X range: [{predictions_df['x'].min():.6f}, {predictions_df['x'].max():.6f}]")
-        
+                
         diagnostics = {
             'method': 'IDM_distance_based_fallback_edge_corrected',
             'constraint_satisfied': True,
@@ -528,7 +484,6 @@ class IDMBaseline:
     
     def _create_results_dataframe(self, coords: np.ndarray, predictions: np.ndarray,
                                  uncertainty: np.ndarray, prediction_locations: pd.DataFrame) -> pd.DataFrame:
-        print(f"IDM DEBUG: coords input shape {coords.shape}, X range [{coords[:, 0].min():.6f}, {coords[:, 0].max():.6f}]")
         """Create standardized results dataframe"""
         predictions_df = pd.DataFrame({
             'x': coords[:, 0],

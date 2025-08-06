@@ -177,10 +177,17 @@ class AccessibilityTrainer:
         alpha = params[:, 1] 
         tau = params[:, 2]
         
-        # Preferred parameter ranges
-        kappa_penalty = torch.mean(F.relu(kappa - 5.0).pow(2))    
-        alpha_penalty = torch.mean(F.relu(alpha - 3.0).pow(2))      
-        tau_penalty = torch.mean(F.relu(tau - 2.0).pow(2)) 
+        # Kappa should be in [0.1, 5.0] for numerical stability
+        kappa_penalty = (torch.mean(F.relu(0.1 - kappa).pow(2)) +  # Lower bound
+                        torch.mean(F.relu(kappa - 5.0).pow(2)))   # Upper bound
+        
+        # Alpha should be in [0.5, 2.5] for reasonable smoothness
+        alpha_penalty = (torch.mean(F.relu(0.5 - alpha).pow(2)) +  # Lower bound
+                        torch.mean(F.relu(alpha - 2.5).pow(2)))   # Upper bound
+        
+        # Tau should be in [0.01, 1.0] for proper nugget effect  
+        tau_penalty = (torch.mean(F.relu(0.01 - tau).pow(2)) +     # Lower bound
+                    torch.mean(F.relu(tau - 1.0).pow(2)))       # Upper bound
         
         return kappa_penalty + alpha_penalty + tau_penalty
     
@@ -216,7 +223,6 @@ class AccessibilityTrainer:
             Training metrics
         """
         print(f"TRAINING DEBUG: spatial_weight received = {spatial_weight}")
-        print(f"TRAINING DEBUG: Using hardcoded default = {spatial_weight == 0.5}")
     
         start_time = time.time()
         self._log(f"Starting GNN training for {epochs} epochs...")
@@ -257,19 +263,6 @@ class AccessibilityTrainer:
                     # Analyze output parameter diversity 
                     param_std = torch.std(params, dim=0)
                     param_mean_std = torch.mean(param_std)
-                    
-                    print(f"🔍 FEATURE ANALYSIS Epoch {epoch+1}:")
-                    print(f"   Input feature std (mean): {feature_mean_std:.6f}")
-                    print(f"   Output param std (mean): {param_mean_std:.6f}")
-                    print(f"   Kappa std: {param_std[0]:.6f}")
-                    print(f"   Alpha std: {param_std[1]:.6f}")  
-                    print(f"   Tau std: {param_std[2]:.6f}")
-                    
-                    # Check if features are actually varying
-                    if feature_mean_std < 0.01:
-                        print("   ⚠️  WARNING: Input features have very low variation!")
-                    if param_mean_std < 0.01:
-                        print("   ⚠️  WARNING: Parameters have very low variation!")
             
             # Collect feature snapshots for visualization
             if collect_history and feature_history is not None:
@@ -286,28 +279,14 @@ class AccessibilityTrainer:
             )
             
             reg_loss = self.parameter_regularization(params)
-
-            if (epoch + 1) % 5 == 0:
-                print(f"🔍 DEBUG Epoch {epoch+1}: "
-                    f"spatial_w={spatial_weight}, spatial_l={spatial_loss.item():.6f}, "
-                    f"diversity_l={diversity_loss.item():.6f}, total_l={loss.item():.6f}")
             
             # Additional loss components
-            #diversity_loss = self.diversity_penalty(params)
-            diversity_loss = torch.tensor(0.0)  # Placeholder for diversity loss
+            diversity_loss = self.diversity_penalty(params)
             realism_loss = self.physical_realism_penalty(params)
 
-            # Total loss with strong diversity weighting
-            loss = torch.tensor(0.001, requires_grad=True)
-            #loss = (spatial_weight * spatial_loss)# +      
-                #reg_weight * reg_loss +              
-                #0.0001 * diversity_loss +                
-                #0.01 * realism_loss +                
-                #0.05 * self.feature_utilization_loss(params, graph_data.x)) 
-            print("🔧 UNIQUE: Test B code is running!")
-            print(f"🔧 LOSS DEBUG: spatial_only_loss = {loss.item():.8f}")
-            print(f"🔧 LOSS DEBUG: spatial_weight = {spatial_weight}")
-            print(f"🔧 LOSS DEBUG: spatial_loss = {spatial_loss.item():.8f}")  
+            # Total loss 
+            loss = (10.0 * self.feature_utilization_loss(params, graph_data.x) +
+                5.0 * self.diversity_penalty(params))
                         
             # Backward pass
             loss.backward()
@@ -345,6 +324,18 @@ class AccessibilityTrainer:
         training_time = time.time() - start_time
         self._log(f"Training complete in {training_time:.2f}s")
         self._log(f"Final loss: {loss.item():.4f}")
+
+        feature_data, param_data = self.complete_feature_diagnostic(
+            graph_data=graph_data,
+            feature_names=[
+                'development_intensity',
+                'svi_coefficient', 
+                'is_developed',
+                'is_uninhabited',
+                'normalized_nlcd_class',
+                'normalized_degree'
+            ]
+        )
         
         # Return training metrics
         return {
@@ -354,6 +345,97 @@ class AccessibilityTrainer:
             'training_time': training_time,
             'history': self.training_history
         }
+    
+    def minimal_validity_constraint(self, params: torch.Tensor) -> torch.Tensor:
+        """
+        Ensure only mathematical validity (Tau > 0)
+        """
+        tau = params[:, 2]
+        # Strong penalty for negative Tau (breaks SPDE math)
+        tau_positivity = torch.mean(F.relu(-tau + 0.01).pow(2)) * 10.0
+        return tau_positivity
+
+    def complete_feature_diagnostic(self, graph_data, feature_names):
+        """
+        Comprehensive diagnostic of all features and their correlations
+        """
+        import numpy as np
+        
+        self.model.eval()
+        with torch.no_grad():
+            params = self.model(graph_data.x, graph_data.edge_index)
+        
+        features_np = graph_data.x.cpu().numpy()
+        params_np = params.cpu().numpy()
+        
+        print("\n🔍 COMPLETE FEATURE DIAGNOSTIC")
+        print("=" * 60)
+        
+        # Check feature array dimensions
+        print(f"Feature array shape: {features_np.shape}")
+        print(f"Feature names provided: {len(feature_names)}")
+        print(f"Expected features: {feature_names}")
+        
+        # Analyze each feature individually
+        print(f"\n📊 INDIVIDUAL FEATURE ANALYSIS:")
+        for f_idx, feature_name in enumerate(feature_names):
+            if f_idx < features_np.shape[1]:
+                feature_vals = features_np[:, f_idx]
+                f_mean = np.mean(feature_vals)
+                f_std = np.std(feature_vals)
+                f_min = np.min(feature_vals)
+                f_max = np.max(feature_vals)
+                f_unique = len(np.unique(feature_vals))
+                
+                status = "✅ GOOD" if f_std > 0.01 else "⚠️ LOW_VAR" if f_std > 0.001 else "❌ NO_VAR"
+                
+                print(f"  {f_idx}. {feature_name}:")
+                print(f"     Range: [{f_min:.6f}, {f_max:.6f}]")
+                print(f"     Mean: {f_mean:.6f}, Std: {f_std:.6f}")
+                print(f"     Unique values: {f_unique}, Status: {status}")
+            else:
+                print(f"  {f_idx}. {feature_name}: ❌ INDEX OUT OF BOUNDS")
+        
+        # Test correlations with ALL features
+        print(f"\n🔗 CORRELATION MATRIX (All Features vs All Parameters):")
+        param_names = ['Kappa', 'Alpha', 'Tau']
+        
+        print(f"{'Feature':<25} {'Kappa':<10} {'Alpha':<10} {'Tau':<10}")
+        print("-" * 55)
+        
+        for f_idx, feature_name in enumerate(feature_names):
+            if f_idx < features_np.shape[1]:
+                feature_vals = features_np[:, f_idx]
+                row = f"{feature_name:<25}"
+                
+                for p_idx in range(3):
+                    param_vals = params_np[:, p_idx]
+                    try:
+                        if np.std(feature_vals) > 0 and np.std(param_vals) > 0:
+                            corr = np.corrcoef(feature_vals, param_vals)[0, 1]
+                            row += f"{corr:>9.3f} "
+                        else:
+                            row += f"{'NO_VAR':>9} "
+                    except:
+                        row += f"{'ERROR':>9} "
+                print(row)
+            else:
+                print(f"{feature_name:<25} OUT_OF_BOUNDS")
+        
+        # Check if feature array matches expectations
+        print(f"\n🚨 POTENTIAL ISSUES:")
+        if features_np.shape[1] != len(feature_names):
+            print(f"❌ MISMATCH: Feature array has {features_np.shape[1]} columns but {len(feature_names)} names provided")
+        
+        zero_var_features = []
+        for f_idx in range(min(features_np.shape[1], len(feature_names))):
+            if np.std(features_np[:, f_idx]) < 0.001:
+                zero_var_features.append(feature_names[f_idx] if f_idx < len(feature_names) else f"Feature_{f_idx}")
+        
+        if zero_var_features:
+            print(f"❌ ZERO VARIATION: {zero_var_features}")
+        
+        return features_np, params_np
     
     def feature_utilization_loss(self, params: torch.Tensor, features: torch.Tensor) -> torch.Tensor:
         """

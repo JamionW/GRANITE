@@ -328,12 +328,10 @@ class AccessibilityTrainer:
         feature_data, param_data = self.complete_feature_diagnostic(
             graph_data=graph_data,
             feature_names=[
-                'development_intensity',
-                'svi_coefficient', 
-                'is_developed',
-                'is_uninhabited',
-                'normalized_nlcd_class',
-                'normalized_degree'
+                'development_intensity',      # Core NLCD-derived (both methods use)
+                'svi_coefficient',           # Core vulnerability mapping (both methods use)
+                'development_gradient',      # Rate of development change (both methods use)  
+                'normalized_degree'          # Network topology (GNN-specific)
             ]
         )
         

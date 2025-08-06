@@ -89,14 +89,11 @@ class SPDEParameterGNN(nn.Module):
         params = self.param_head(x)
         
         # Apply constraints to ensure valid parameter ranges
-        # Kappa (precision) should be positive
-        # Alpha (smoothness) should be between 0 and 2
-        # Tau (nugget) should be positive and small
-        #params = torch.stack([
-        #    0.2 + 2.0 * torch.sigmoid(params[:, 0]),  # Kappa: [0.2, 2.2]
-        #    0.8 + 1.5 * torch.sigmoid(params[:, 1]),  # Alpha: [0.8, 2.3] 
-        #    0.1 + 0.8 * torch.sigmoid(params[:, 2])   # Tau: [0.1, 0.9]
-        #], dim=1)
+        params = torch.stack([
+            F.softplus(params[:, 0]) + 0.01,  # Kappa > 0.01
+            params[:, 1],                     # Alpha can be any value
+            F.softplus(params[:, 2]) + 0.01,  # Tau > 0.01  
+        ], dim=1)
         
         return params
 
@@ -121,73 +118,55 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
                                 nlcd_features: pd.DataFrame,
                                 addresses: pd.DataFrame = None) -> Tuple[Data, Dict]:
     """
-    Prepare graph data for GNN with NLCD-based features
-    
-    Parameters:
-    -----------
-    road_network : nx.Graph
-        Road network graph with nodes as (x, y) coordinates
-    nlcd_features : pd.DataFrame
-        NLCD features with derived coefficients
-    addresses : pd.DataFrame, optional
-        Address data with coordinates for spatial matching
-        
-    Returns:
-    --------
-    Tuple[Data, Dict]
-        PyTorch Geometric Data object and node ID mapping
+    Prepare graph data for GNN with enhanced NLCD-based features
     """
+    import numpy as np
+    from scipy.spatial import cKDTree
+    from scipy.spatial.distance import cdist
+    
     nodes = list(road_network.nodes())
     node_to_idx = {node: i for i, node in enumerate(nodes)}
     
-    # Initialize spatial lookup components
+    # Build spatial index for NLCD feature lookup
     feature_tree = None
     feature_coords = None
     
-    # Build spatial index for NLCD feature lookup
-    if len(nlcd_features) > 0:
-        # Try to get coordinates from addresses if provided
-        if addresses is not None and len(addresses) > 0:
-            # Match nlcd_features to addresses by address_id
-            if 'address_id' in nlcd_features.columns and 'address_id' in addresses.columns:
-                # Merge to get coordinates
-                features_with_coords = nlcd_features.merge(
-                    addresses[['address_id', 'geometry']], 
-                    on='address_id', 
-                    how='left'
-                )
-                
-                # Extract coordinates
-                valid_features = features_with_coords.dropna(subset=['geometry'])
-                if len(valid_features) > 0:
-                    feature_coords = np.array([
-                        [geom.x, geom.y] for geom in valid_features.geometry
-                    ])
-                    
-                    # Build spatial index
-                    from scipy.spatial import cKDTree
-                    feature_tree = cKDTree(feature_coords)
-                    
-                    print(f"Built spatial index with {len(feature_coords)} address features")
-                else:
-                    print("WARNING: No valid coordinates found in addresses")
-            else:
-                print("WARNING: Cannot match nlcd_features to addresses - missing address_id")
-        else:
-            print("WARNING: No addresses provided for spatial matching")
+    if len(nlcd_features) > 0 and addresses is not None and len(addresses) > 0:
+        # Match nlcd_features to addresses by address_id
+        if 'address_id' in nlcd_features.columns and 'address_id' in addresses.columns:
+            features_with_coords = nlcd_features.merge(
+                addresses[['address_id', 'geometry']], 
+                on='address_id', 
+                how='left'
+            )
+            
+            valid_features = features_with_coords.dropna(subset=['geometry'])
+            if len(valid_features) > 0:
+                feature_coords = np.array([
+                    [geom.x, geom.y] for geom in valid_features.geometry
+                ])
+                feature_tree = cKDTree(feature_coords)
+                print(f"Built spatial index with {len(feature_coords)} address features")
     
-    # Extract node features
+    # Extract enhanced node features
     node_features = []
     successful_lookups = 0
+    
+    # Pre-compute spatial features for efficiency
+    water_classes = [11, 12, 90, 95]
+    forest_classes = [41, 42, 43]
+    developed_classes = [21, 22, 23, 24]
     
     for node in nodes:
         node_x, node_y = node[0], node[1]
         
-        # Default feature values (fallback)
+        # Default feature values
         development_intensity = 0.5
         svi_coefficient = 0.3
-        is_developed = 1.0
-        is_uninhabited = 0.0
+        land_cover_diversity = 0.0
+        development_gradient = 0.0  
+        distance_to_water = 1.0
+        distance_to_forest = 1.0
         normalized_nlcd_class = 0.23
         
         # Try spatial lookup if available
@@ -196,61 +175,71 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
                 # Find nearest address
                 distance, nearest_idx = feature_tree.query([node_x, node_y])
                 
-                # Use a reasonable distance threshold (e.g., 1000 meters in projected coords)
-                if distance < 1000: 
+                if distance < 1000:  # Within 1km
                     # Get corresponding feature row
-                    if 'address_id' in nlcd_features.columns:
-                        # Need to map back to original nlcd_features
-                        feature_row = nlcd_features.iloc[nearest_idx]
-                    else:
-                        feature_row = nlcd_features.iloc[nearest_idx]
+                    feature_row = nlcd_features.iloc[nearest_idx]
                     
-                    # Extract actual feature values
+                    # Extract basic features
                     development_intensity = feature_row.get('development_intensity', 0.5)
                     svi_coefficient = feature_row.get('svi_coefficient', 
                                                    feature_row.get('svi_vulnerability_coeff', 0.3))
-                    is_developed = float(feature_row.get('is_developed', 1.0))
-                    is_uninhabited = float(feature_row.get('is_uninhabited', 0.0))
                     
-                    # Normalize NLCD class (0-1 scale)
+                    # 1. Land Cover Diversity (Shannon entropy in neighborhood)
+                    land_cover_diversity = calculate_land_cover_diversity(
+                        node_x, node_y, feature_tree, feature_coords, 
+                        nlcd_features, radius=500
+                    )
+                    
+                    # 2. Development Gradient (rate of development change)
+                    development_gradient = calculate_development_gradient(
+                        node_x, node_y, feature_tree, feature_coords,
+                        nlcd_features, radius=300
+                    )
+                    
+                    # 3. Distance to Water Features  
+                    distance_to_water = calculate_distance_to_feature_class(
+                        node_x, node_y, feature_tree, feature_coords,
+                        nlcd_features, target_classes=water_classes
+                    )
+                    
+                    # 4. Distance to Forest Features
+                    distance_to_forest = calculate_distance_to_feature_class(
+                        node_x, node_y, feature_tree, feature_coords,
+                        nlcd_features, target_classes=forest_classes
+                    )
+                    
+                    # Normalize NLCD class
                     nlcd_class = feature_row.get('nlcd_class', 22)
-                    normalized_nlcd_class = nlcd_class / 95.0  # Max NLCD class is 95
+                    normalized_nlcd_class = nlcd_class / 95.0
                     
                     successful_lookups += 1
                     
             except Exception as e:
                 print(f"Error in spatial lookup for node {node}: {e}")
-                # Keep default values
         
-        # Construct feature vector
+        # Construct enhanced feature vector
         features = [
-            # Geographic features
-            #node_x,                    # X coordinate
-            #node_y,                    # Y coordinate
-            
-            # NLCD-derived features 
+            # Core NLCD-derived features (both GNN and IDM can use)
             development_intensity,     # 0.0-1.0 based on NLCD class
             svi_coefficient,          # 0.0-1.5 based on land cover vulnerability
-            is_developed,             # 0 or 1 binary indicator
-            is_uninhabited,           # 0 or 1 binary indicator  
-            normalized_nlcd_class,    # 0.0-1.0 normalized NLCD class
+            development_gradient,     # 0.0-1.0 rate of development change  
             
-            # Topological features
+            # Network topology (GNN-specific)
             min(road_network.degree(node), 10) / 10.0,  # Normalized degree
         ]
         
         node_features.append(features)
     
-    print(f"✅ Feature extraction complete:")
+    print(f"  Enhanced feature extraction complete:")
     print(f"   Total nodes: {len(nodes)}")
     print(f"   Successful NLCD lookups: {successful_lookups}")
-    print(f"   Lookup success rate: {successful_lookups/len(nodes)*100:.1f}%")
+    print(f"   Features per node: {len(features)}")
     
     # Convert to tensor and normalize
     node_features = torch.FloatTensor(node_features)
     node_features = safe_feature_normalization_vectorized(node_features)
     
-    # Build edges 
+    # Build edges (unchanged)
     edge_list = []
     edge_attrs = []
     
@@ -360,3 +349,92 @@ def create_gnn_model(input_dim: int = 5, hidden_dim: int = 128,
         GNN model
     """
     return SPDEParameterGNN(input_dim, hidden_dim, output_dim)
+
+def calculate_land_cover_diversity(node_x, node_y, feature_tree, feature_coords, 
+                                  nlcd_features, radius=500):
+    """Simplified land cover diversity calculation"""
+    try:
+        # Check if we have the required data
+        if feature_tree is None or 'nlcd_class' not in nlcd_features.columns:
+            return 0.0
+            
+        # Find neighbors within radius  
+        neighbor_indices = feature_tree.query_ball_point([node_x, node_y], radius)
+        
+        if len(neighbor_indices) < 2:
+            return 0.0
+        
+        # Get NLCD classes for neighbors
+        neighbor_classes = nlcd_features.iloc[neighbor_indices]['nlcd_class'].values
+        unique_classes = len(set(neighbor_classes))
+        
+        # Simple diversity measure: number of unique classes / max possible
+        return min(unique_classes / 4.0, 1.0)  # Normalize by 4 expected classes
+        
+    except Exception as e:
+        print(f"Land cover diversity error: {e}")
+        return 0.0
+
+
+def calculate_development_gradient(node_x, node_y, feature_tree, feature_coords,
+                                 nlcd_features, radius=300):
+    """Calculate rate of development intensity change in neighborhood"""
+    try:
+        # Find neighbors within radius
+        neighbor_indices = feature_tree.query_ball_point([node_x, node_y], radius)
+        
+        if len(neighbor_indices) < 2:
+            return 0.0
+        
+        # Get development intensities
+        neighbor_features = nlcd_features.iloc[neighbor_indices]
+        dev_intensities = neighbor_features['development_intensity'].values
+        
+        # Calculate distances from node
+        neighbor_coords = feature_coords[neighbor_indices]
+        distances = np.sqrt(np.sum((neighbor_coords - [node_x, node_y])**2, axis=1))
+        
+        # Calculate gradient (correlation between distance and development)
+        if len(set(distances)) > 1 and len(set(dev_intensities)) > 1:
+            correlation = np.corrcoef(distances, dev_intensities)[0, 1]
+            return abs(correlation) if not np.isnan(correlation) else 0.0
+        
+        return 0.0
+        
+    except:
+        return 0.0
+
+
+def calculate_distance_to_feature_class(node_x, node_y, feature_tree, feature_coords,
+                                       nlcd_features, target_classes):
+    """Simplified distance calculation"""
+    try:
+        if feature_tree is None or 'nlcd_class' not in nlcd_features.columns:
+            return 1.0
+            
+        # Check if any target classes exist in the data
+        has_targets = nlcd_features['nlcd_class'].isin(target_classes).any()
+        if not has_targets:
+            return 1.0  # No target classes found
+            
+        # Find all addresses within reasonable distance
+        all_indices = feature_tree.query_ball_point([node_x, node_y], 2000)  # 2km radius
+        
+        if len(all_indices) == 0:
+            return 1.0
+            
+        # Check which ones have target classes
+        for idx in all_indices:
+            if idx < len(nlcd_features):
+                nlcd_class = nlcd_features.iloc[idx]['nlcd_class']
+                if nlcd_class in target_classes:
+                    # Calculate distance to this target
+                    target_coord = feature_coords[idx]
+                    distance = np.sqrt((target_coord[0] - node_x)**2 + (target_coord[1] - node_y)**2)
+                    return min(distance / 2000.0, 1.0)  # Normalize by 2km
+                    
+        return 1.0  # No targets found
+        
+    except Exception as e:
+        print(f"Distance calculation error: {e}")
+        return 1.0

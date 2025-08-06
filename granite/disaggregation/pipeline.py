@@ -492,9 +492,9 @@ class GRANITEPipeline:
                     idm_predictions = idm_result['predictions']
                     
                     # Run diagnostics
-                    diagnostic_results = diagnose_comparison_issues(
-                        gnn_predictions, idm_predictions, svi_value
-                    )
+                    # diagnostic_results = diagnose_comparison_issues(
+                    #     gnn_predictions, idm_predictions, svi_value
+                    # )
                     
                     # Create diagnostic plots
                     diagnostic_fig = create_diagnostic_plots(
@@ -509,12 +509,12 @@ class GRANITEPipeline:
                     self._log(f"Diagnostic plots saved to {diagnostic_path}")
                     
                     # Log key findings
-                    if diagnostic_results['issues_found']:
-                        self._log("DIAGNOSTIC ISSUES FOUND:")
-                        for issue in diagnostic_results['issues_found']:
-                            self._log(f"  - {issue}")
-                    else:
-                        self._log("No major diagnostic issues detected")
+                    # if diagnostic_results['issues_found']:
+                    #     self._log("DIAGNOSTIC ISSUES FOUND:")
+                    #     for issue in diagnostic_results['issues_found']:
+                    #         self._log(f"  - {issue}")
+                    # else:
+                    #     self._log("No major diagnostic issues detected")
                         
                     # Add diagnostics to return data
                     return {

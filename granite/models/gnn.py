@@ -225,8 +225,8 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
         # Construct feature vector
         features = [
             # Geographic features
-            node_x,                    # X coordinate
-            node_y,                    # Y coordinate
+            #node_x,                    # X coordinate
+            #node_y,                    # Y coordinate
             
             # NLCD-derived features 
             development_intensity,     # 0.0-1.0 based on NLCD class

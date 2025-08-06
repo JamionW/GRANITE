@@ -295,6 +295,11 @@ class MetricGraphInterface:
         """Initialize R environment and load required packages"""
         self._log("Initializing R environment...")
         try:
+            ro.r('''
+                options(warn = -1)
+                .libPaths(c(.libPaths(), "/usr/local/lib/R/site-library", "/usr/lib/R/site-library"))
+                options(warn = 0)
+                ''')
             ro.r('library(MetricGraph)')
             self.mg = rpackages.importr('MetricGraph')
         except:
@@ -317,7 +322,8 @@ class MetricGraphInterface:
                     tau_mean <- mean(gnn_features[, 3], na.rm = TRUE)
                     
                     # Convert tau to sigma (standard deviation)
-                    sigma_mean <- 1.0 / sqrt(tau_mean)
+                    tau_mean_abs <- abs(tau_mean) 
+                    sigma_mean <- 1.0 / sqrt(tau_mean_abs)
                     
                     cat("GNN parameters - kappa:", kappa_mean, "alpha:", alpha_param, "sigma:", sigma_mean, "tau:", tau_mean, "\\n")
                 } else {

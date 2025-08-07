@@ -670,21 +670,15 @@ class GRANITEPipeline:
                     tract_data['road_network']
                 )
             
-            self._log(f"DEBUG: graph_data type = {type(graph_data)}")
             if isinstance(graph_data, tuple):
-                self._log(f"DEBUG: graph_data is tuple with {len(graph_data)} elements")
                 graph_data = graph_data[0]  # Take first element
-                self._log(f"DEBUG: After unpacking, graph_data type = {type(graph_data)}")
 
             # Verify it has the expected attributes
             if not hasattr(graph_data, 'x'):
                 raise RuntimeError(f"graph_data missing 'x' attribute. Type: {type(graph_data)}, Attributes: {dir(graph_data)}")
 
-            self._log(f"DEBUG: graph_data type = {type(graph_data)}")
             if isinstance(graph_data, tuple):
-                self._log(f"DEBUG: graph_data is tuple with {len(graph_data)} elements")
                 graph_data = graph_data[0]  # Take first element
-                self._log(f"DEBUG: After unpacking, graph_data type = {type(graph_data)}")
 
             # Verify it has the expected attributes
             if not hasattr(graph_data, 'x'):

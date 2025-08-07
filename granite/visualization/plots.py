@@ -270,29 +270,6 @@ Recommendation:
                 values = pred_df[val_col].values
                 break
         
-        # Debug information
-        print(f"DEBUG {title}:")
-        print(f"  DataFrame columns: {list(pred_df.columns)}")
-        print(f"  DataFrame shape: {pred_df.shape}")
-        if x is not None:
-            print(f"  X range: [{x.min():.6f}, {x.max():.6f}]")
-        if y is not None:
-            print(f"  Y range: [{y.min():.6f}, {y.max():.6f}]")
-        if values is not None:
-            print(f"  Values range: [{values.min():.6f}, {values.max():.6f}]")
-        
-        if x is None or y is None or values is None:
-            ax.text(0.5, 0.5, f'Missing data:\nx={x is not None}, y={y is not None}, values={values is not None}', 
-                ha='center', va='center', transform=ax.transAxes)
-            ax.set_title(title)
-            return
-        
-        if len(x) == 0 or len(values) == 0:
-            ax.text(0.5, 0.5, 'Empty coordinate arrays', 
-                ha='center', va='center', transform=ax.transAxes)
-            ax.set_title(title)
-            return
-        
         # Add network background if available
         if self.network_data and 'edges_gdf' in self.network_data:
             self.network_data['edges_gdf'].plot(
@@ -382,11 +359,6 @@ Recommendation:
                 return
         else:
             values2 = pred2['mean'].values
-        
-        # Debug output
-        print(f"DEBUG Method Comparison:")
-        print(f"  GNN values: {len(values1)} points, range [{values1.min():.6f}, {values1.max():.6f}]")
-        print(f"  IDM values: {len(values2)} points, range [{values2.min():.6f}, {values2.max():.6f}]")
         
         # Ensure same length
         min_len = min(len(values1), len(values2))

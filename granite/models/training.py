@@ -221,13 +221,9 @@ class AccessibilityTrainer:
         --------
         Dict
             Training metrics
-        """
-        print(f"TRAINING DEBUG: spatial_weight received = {spatial_weight}")
-    
+        """    
         start_time = time.time()
         self._log(f"Starting GNN training for {epochs} epochs...")
-
-        print(f"TRAINING DEBUG: Training started with spatial_weight = {spatial_weight}")
         
         # Move data to device
         graph_data = graph_data.to(self.device)
@@ -366,16 +362,11 @@ class AccessibilityTrainer:
         features_np = graph_data.x.cpu().numpy()
         params_np = params.cpu().numpy()
         
-        print("\n🔍 COMPLETE FEATURE DIAGNOSTIC")
-        print("=" * 60)
-        
-        # Check feature array dimensions
-        print(f"Feature array shape: {features_np.shape}")
-        print(f"Feature names provided: {len(feature_names)}")
+        # Check features
         print(f"Expected features: {feature_names}")
         
         # Analyze each feature individually
-        print(f"\n📊 INDIVIDUAL FEATURE ANALYSIS:")
+        print(f"\nIndividual Feature Analysis:")
         for f_idx, feature_name in enumerate(feature_names):
             if f_idx < features_np.shape[1]:
                 feature_vals = features_np[:, f_idx]
@@ -385,7 +376,7 @@ class AccessibilityTrainer:
                 f_max = np.max(feature_vals)
                 f_unique = len(np.unique(feature_vals))
                 
-                status = "✅ GOOD" if f_std > 0.01 else "⚠️ LOW_VAR" if f_std > 0.001 else "❌ NO_VAR"
+                status = "GOOD" if f_std > 0.01 else "LOW_VAR" if f_std > 0.001 else "NO_VAR"
                 
                 print(f"  {f_idx}. {feature_name}:")
                 print(f"     Range: [{f_min:.6f}, {f_max:.6f}]")
@@ -395,7 +386,7 @@ class AccessibilityTrainer:
                 print(f"  {f_idx}. {feature_name}: ❌ INDEX OUT OF BOUNDS")
         
         # Test correlations with ALL features
-        print(f"\n🔗 CORRELATION MATRIX (All Features vs All Parameters):")
+        print(f"\nCorrelation Matrix (Features vs Parameters):")
         param_names = ['Kappa', 'Alpha', 'Tau']
         
         print(f"{'Feature':<25} {'Kappa':<10} {'Alpha':<10} {'Tau':<10}")
@@ -420,18 +411,10 @@ class AccessibilityTrainer:
             else:
                 print(f"{feature_name:<25} OUT_OF_BOUNDS")
         
-        # Check if feature array matches expectations
-        print(f"\n🚨 POTENTIAL ISSUES:")
-        if features_np.shape[1] != len(feature_names):
-            print(f"❌ MISMATCH: Feature array has {features_np.shape[1]} columns but {len(feature_names)} names provided")
-        
         zero_var_features = []
         for f_idx in range(min(features_np.shape[1], len(feature_names))):
             if np.std(features_np[:, f_idx]) < 0.001:
                 zero_var_features.append(feature_names[f_idx] if f_idx < len(feature_names) else f"Feature_{f_idx}")
-        
-        if zero_var_features:
-            print(f"❌ ZERO VARIATION: {zero_var_features}")
         
         return features_np, params_np
     

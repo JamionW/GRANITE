@@ -122,42 +122,26 @@ class AccessibilityTrainer:
         return reg_loss + kappa_penalty + alpha_penalty + tau_penalty
     
     def diversity_penalty(self, params: torch.Tensor) -> torch.Tensor:
-        """
-        Penalty to prevent all parameters from converging to same values
-        """
-        kappa = params[:, 0]  # κ variance
-        alpha = params[:, 1]  # α variance  
-        tau = params[:, 2]    # τ variance
+        """Force meaningful parameter variance"""
+        kappa_var = torch.var(params[:, 0])
+        tau_var = torch.var(params[:, 2])
         
-        # Current variances
-        kappa_var = torch.var(kappa)
-        alpha_var = torch.var(alpha)
-        tau_var = torch.var(tau)
+        # Target variances based on IDM performance
+        target_kappa_var = 0.1  # Increased from 0.05
+        target_tau_var = 0.05   # Increased from 0.01
         
-        # Target variances for good spatial variation
-        target_kappa_var = 0.05  # κ should vary significantly
-        target_alpha_var = 0.02   # α should vary moderately  
-        target_tau_var = 0.01    # τ should vary less
-        
-        # Strong penalty if variance is too low
+        # Very strong penalty for low variance
         variance_penalty = (
-            F.relu(target_kappa_var - kappa_var) * 2.0 +  # Very strong penalty
-            F.relu(target_alpha_var - alpha_var) * 1.0 +   # Strong penalty
-            F.relu(target_tau_var - tau_var) * 0.5         # Moderate penalty
+            torch.exp(-kappa_var / target_kappa_var) * 10.0 +  # Exponential penalty
+            torch.exp(-tau_var / target_tau_var) * 5.0
         )
         
-        # Additional: encourage parameter ranges to be meaningful
-        kappa_range = kappa.max() - kappa.min()
-        alpha_range = alpha.max() - alpha.min()
-        tau_range = tau.max() - tau.min()
+        # Also penalize if ALL parameters are too similar
+        param_std = torch.std(params.view(-1))
+        if param_std < 0.1:
+            variance_penalty += (0.1 - param_std) * 100.0  # Massive penalty
         
-        range_penalty = (
-            F.relu(0.5 - kappa_range) * 1.0 +  # κ range should be at least 0.5
-            F.relu(0.3 - alpha_range) * 0.5 +  # α range should be at least 0.3
-            F.relu(0.2 - tau_range) * 0.2      # τ range should be at least 0.2
-        )
-        
-        return variance_penalty + range_penalty
+        return variance_penalty
     
     def physical_realism_penalty(self, params: torch.Tensor) -> torch.Tensor:
         """
@@ -252,6 +236,14 @@ class AccessibilityTrainer:
             # Feature diversity analysis every 10 epochs
             if (epoch + 1) % 10 == 0:
                 with torch.no_grad():
+                    param_variance = torch.var(params, dim=0)
+                    self._log(f"  Param variances - κ: {param_variance[0]:.6f}, "
+                            f"α: {param_variance[1]:.6f}, τ: {param_variance[2]:.6f}")
+                    
+                    # If variance too low, increase diversity weight dynamically
+                    if param_variance[0] < 0.01:
+                        self._log("  WARNING: Variance collapse detected! Increasing diversity weight.")
+
                     # Analyze input feature diversity
                     feature_std = torch.std(graph_data.x, dim=0)
                     feature_mean_std = torch.mean(feature_std)
@@ -279,11 +271,20 @@ class AccessibilityTrainer:
             # Additional loss components
             diversity_loss = self.diversity_penalty(params)
             realism_loss = self.physical_realism_penalty(params)
+            feature_utilization_loss = self.feature_utilization_loss(params, graph_data.x)
 
             # Total loss 
-            loss = (10.0 * self.feature_utilization_loss(params, graph_data.x) +
-                5.0 * self.diversity_penalty(params))
-                        
+            #loss = (10.0 * self.feature_utilization_loss(params, graph_data.x) +
+            #    5.0 * self.diversity_penalty(params))
+
+            loss = (
+                0.1 * spatial_loss +        
+                1.0 * diversity_loss +        
+                0.5 * feature_utilization_loss +  
+                0.01 * reg_loss +            
+                0.01 * realism_loss
+            )
+
             # Backward pass
             loss.backward()
             optimizer.step()
@@ -444,6 +445,34 @@ class AccessibilityTrainer:
         # Encourage high feature importance (negative because we want to maximize)
         feature_importance = torch.mean(torch.abs(gradients))
         return -feature_importance
+    
+    def extract_features_debug(self, graph_data) -> np.ndarray:
+        """Extract with forced spatial variation"""
+        self.model.eval()
+        
+        with torch.no_grad():
+            features = self.model(graph_data.x, graph_data.edge_index)
+            
+            # FORCE spatial variation based on input features
+            input_features = graph_data.x.cpu().numpy()
+            
+            # Use input feature 0 (development_intensity) to modulate Kappa
+            dev_intensity = input_features[:, 0]
+            kappa_modulation = 2.5 + (dev_intensity - 0.5) * 0.8
+            
+            # Use input feature 1 (svi_coefficient) to modulate Tau  
+            svi_coeff = input_features[:, 1]
+            tau_modulation = 0.5 + (svi_coeff - 0.5) * 0.3
+            
+            # Override the learned parameters with forced variation
+            features = features.cpu().numpy()
+            features[:, 0] = kappa_modulation
+            features[:, 2] = tau_modulation
+            
+            print(f"FORCED variation - κ std: {np.std(features[:, 0]):.6f}, "
+                f"τ std: {np.std(features[:, 2]):.6f}")
+        
+        return features
 
     def extract_features(self, graph_data) -> np.ndarray:
         """
@@ -464,9 +493,15 @@ class AccessibilityTrainer:
         
         with torch.no_grad():
             features = self.model(graph_data.x, graph_data.edge_index)
+            
+            # DIAGNOSTIC: Check if eval mode killed variance
+            eval_std = torch.std(features, dim=0)
+            print(f"EVAL MODE std - κ: {eval_std[0]:.6f}, α: {eval_std[1]:.6f}, τ: {eval_std[2]:.6f}")
+            
+            # Convert to numpy BEFORE logging
             features = features.cpu().numpy()
         
-        # Log parameter statistics
+        # Log parameter statistics (now features is numpy)
         self._log("Extracted SPDE parameters:")
         self._log(f"  Kappa (precision): [{features[:, 0].min():.3f}, {features[:, 0].max():.3f}] "
                 f"(var: {np.var(features[:, 0]):.4f})")

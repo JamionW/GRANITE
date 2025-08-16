@@ -62,7 +62,7 @@ class GRANITEPipeline:
         self.data_loader = DataLoader(data_dir, config=config)
         self.mg_interface = MetricGraphInterface(
             verbose=verbose,
-            config=self.config  # ← Pass full config!
+            config=self.config  
         )
         self.visualizer = DisaggregationVisualizer()
         
@@ -379,6 +379,7 @@ class GRANITEPipeline:
     
     def _apply_trained_gnn_to_tract(self, tract_data, trained_model):
         """Apply pre-trained GNN to individual tract with IDM comparison"""
+        """Note this only works in multi-tract mode"""
         fips = tract_data['tract_info']['FIPS']
         svi_value = tract_data['svi_value']
         

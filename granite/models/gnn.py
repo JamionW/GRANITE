@@ -16,6 +16,91 @@ import pandas as pd
 
 
 class SPDEParameterGNN(nn.Module):
+    """GNN with explicit variance preservation"""
+    
+    def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 3):
+        super(SPDEParameterGNN, self).__init__()
+        
+        # CHANGE 1: Residual connections to preserve input variance
+        self.input_projection = nn.Linear(input_dim, hidden_dim)
+        
+        # CHANGE 2: Use BatchNorm to maintain variance
+        self.conv1 = GCNConv(hidden_dim, hidden_dim)
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        
+        self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        self.bn2 = nn.BatchNorm1d(hidden_dim)
+        
+        self.conv3 = GCNConv(hidden_dim, hidden_dim)
+        self.bn3 = nn.BatchNorm1d(hidden_dim)
+        
+        # CHANGE 3: Direct feature bypass to preserve input signal
+        self.feature_bypass = nn.Linear(input_dim, output_dim)
+        
+        # Output heads
+        self.param_head = nn.Linear(hidden_dim + output_dim, output_dim)
+        
+        # Minimal dropout
+        self.dropout = nn.Dropout(0.05)
+    
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        # Save original features for bypass
+        original_features = x
+        
+        # Project input
+        x = self.input_projection(x)
+        identity = x  # For residual
+        
+        # Conv block 1 with residual
+        x = self.conv1(x, edge_index)
+        x = self.bn1(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = x + identity  # Residual connection
+        
+        # Conv block 2 with residual
+        identity = x
+        x = self.conv2(x, edge_index)
+        x = self.bn2(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = x + identity
+        
+        # Conv block 3
+        x = self.conv3(x, edge_index)
+        x = self.bn3(x)
+        x = F.relu(x)
+        
+        # CRITICAL: Combine with bypassed features
+        bypass_params = self.feature_bypass(original_features)
+        combined = torch.cat([x, bypass_params], dim=1)
+        
+        # Final parameters with NO COMPRESSION
+        params = self.param_head(combined)
+    
+        # # Scale parameters but ENSURE valid ranges
+        # kappa = params[:, 0] * 2.0 + 1.5    # Raw scaling
+        # alpha = params[:, 1] * 0.5           
+        # tau = params[:, 2] * 0.5 + 0.3       
+        
+        # # CRITICAL: Ensure parameters stay in valid SPDE ranges
+        # kappa = torch.clamp(kappa, min=0.1, max=5.0)  # Kappa must be > 0
+        # alpha = torch.clamp(alpha, min=-1.0, max=2.0)  # Alpha reasonable range
+        # tau = torch.clamp(tau, min=0.01, max=1.0)      # Tau MUST be positive!
+
+        kappa = params[:, 0] * 5.0 + 2.5    # Kappa in [2.5-5, 2.5+5] = [-2.5, 7.5]
+        alpha = params[:, 1] * 1.0           
+        tau = params[:, 2] * 1.0 + 0.5       # Tau in [0.5-1, 0.5+1] = [-0.5, 1.5]
+
+        # But clamp to valid ranges
+        kappa = torch.clamp(kappa, min=0.2, max=10.0)  
+        tau = torch.clamp(tau, min=0.05, max=2.0) 
+        
+        params = torch.stack([kappa, alpha, tau], dim=1)
+        
+        return params
+
+class SPDEParameterGNN_old(nn.Module):
     """
     GNN for learning spatially-varying SPDE parameters
     
@@ -89,11 +174,20 @@ class SPDEParameterGNN(nn.Module):
         params = self.param_head(x)
         
         # Apply constraints to ensure valid parameter ranges
+        # params = torch.stack([
+        #     F.softplus(params[:, 0]) + 0.01,  # Kappa > 0.01
+        #     params[:, 1],                     # Alpha can be any value
+        #     F.softplus(params[:, 2]) + 0.01,  # Tau > 0.01  
+        # ], dim=1)
         params = torch.stack([
-            F.softplus(params[:, 0]) + 0.01,  # Kappa > 0.01
-            params[:, 1],                     # Alpha can be any value
-            F.softplus(params[:, 2]) + 0.01,  # Tau > 0.01  
+            torch.sigmoid(params[:, 0]) * 4.0 + 0.5,  # Kappa in [0.5, 4.5]
+            torch.tanh(params[:, 1]) * 1.5,           # Alpha in [-1.5, 1.5]
+            torch.sigmoid(params[:, 2]) * 0.8 + 0.1,  # Tau in [0.1, 0.9]
         ], dim=1)
+
+        #if self.training:
+        #    noise = torch.randn_like(params) * 0.1
+        #    params = params + noise
         
         return params
 

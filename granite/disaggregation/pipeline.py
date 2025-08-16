@@ -2,24 +2,29 @@
 Main disaggregation pipeline for GRANITE framework
 Updated to use spatial disaggregation instead of regression
 """
+# Standard library imports
 import os
 import time
+import warnings
+from datetime import datetime
+
+# Third-party imports
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
-from datetime import datetime
 import torch
-import warnings
+
+# Configure warnings
 warnings.filterwarnings('ignore')
 
+# Local imports
 from ..data.loaders import DataLoader
 from ..models.gnn import create_gnn_model, prepare_graph_data_with_nlcd, prepare_graph_data_topological
 from ..models.training import train_accessibility_gnn
 from ..metricgraph.interface import MetricGraphInterface
 from ..visualization.plots import DisaggregationVisualizer
 from ..diagnostics.comparison_diagnostics import diagnose_comparison_issues, create_diagnostic_plots
-
 
 
 class GRANITEPipeline:

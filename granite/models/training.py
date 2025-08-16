@@ -4,14 +4,19 @@ Training utilities for GRANITE GNN models
 This module provides training functionality for Graph Neural Networks
 that learn accessibility features for MetricGraph integration.
 """
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-import torch.nn.functional as F
+# Standard library imports
+import time
 from datetime import datetime
 from typing import Dict, Tuple, Optional
-import time
+
+# Third-party imports
+import numpy as np
+
+# PyTorch imports
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 
 class AccessibilityTrainer:
     """Trainer class for GNN models learning SPDE parameters"""

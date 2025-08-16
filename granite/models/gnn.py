@@ -4,15 +4,22 @@ Graph Neural Network models for GRANITE framework
 This module implements GNN architectures for learning SPDE parameters
 from road network structure.
 """
+# Standard library imports
+from typing import Tuple, Dict
+
+# Third-party imports
+import numpy as np
+import pandas as pd
+import networkx as nx
+
+# PyTorch imports
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+# PyTorch Geometric imports
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data
-import numpy as np
-import networkx as nx
-from typing import Tuple, Dict
-import pandas as pd
 
 
 class SPDEParameterGNN(nn.Module):
@@ -21,10 +28,10 @@ class SPDEParameterGNN(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 3):
         super(SPDEParameterGNN, self).__init__()
         
-        # CHANGE 1: Residual connections to preserve input variance
+        # Residual connections to preserve input variance
         self.input_projection = nn.Linear(input_dim, hidden_dim)
         
-        # CHANGE 2: Use BatchNorm to maintain variance
+        # Use BatchNorm to maintain variance
         self.conv1 = GCNConv(hidden_dim, hidden_dim)
         self.bn1 = nn.BatchNorm1d(hidden_dim)
         
@@ -34,7 +41,7 @@ class SPDEParameterGNN(nn.Module):
         self.conv3 = GCNConv(hidden_dim, hidden_dim)
         self.bn3 = nn.BatchNorm1d(hidden_dim)
         
-        # CHANGE 3: Direct feature bypass to preserve input signal
+        # Direct feature bypass to preserve input signal
         self.feature_bypass = nn.Linear(input_dim, output_dim)
         
         # Output heads
@@ -71,22 +78,12 @@ class SPDEParameterGNN(nn.Module):
         x = self.bn3(x)
         x = F.relu(x)
         
-        # CRITICAL: Combine with bypassed features
+        # Combine with bypassed features
         bypass_params = self.feature_bypass(original_features)
         combined = torch.cat([x, bypass_params], dim=1)
         
-        # Final parameters with NO COMPRESSION
+        # Final parameters with no compression
         params = self.param_head(combined)
-    
-        # # Scale parameters but ENSURE valid ranges
-        # kappa = params[:, 0] * 2.0 + 1.5    # Raw scaling
-        # alpha = params[:, 1] * 0.5           
-        # tau = params[:, 2] * 0.5 + 0.3       
-        
-        # # CRITICAL: Ensure parameters stay in valid SPDE ranges
-        # kappa = torch.clamp(kappa, min=0.1, max=5.0)  # Kappa must be > 0
-        # alpha = torch.clamp(alpha, min=-1.0, max=2.0)  # Alpha reasonable range
-        # tau = torch.clamp(tau, min=0.01, max=1.0)      # Tau MUST be positive!
 
         kappa = params[:, 0] * 5.0 + 2.5    # Kappa in [2.5-5, 2.5+5] = [-2.5, 7.5]
         alpha = params[:, 1] * 1.0           
@@ -97,97 +94,6 @@ class SPDEParameterGNN(nn.Module):
         tau = torch.clamp(tau, min=0.05, max=2.0) 
         
         params = torch.stack([kappa, alpha, tau], dim=1)
-        
-        return params
-
-class SPDEParameterGNN_old(nn.Module):
-    """
-    GNN for learning spatially-varying SPDE parameters
-    
-    This model learns to predict Whittle-Matérn SPDE parameters
-    (kappa, alpha, tau) for each node in the road network.
-    """
-    
-    def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 3):
-        """
-        Initialize GNN model
-        
-        Parameters:
-        -----------
-        input_dim : int
-            Number of input node features
-        hidden_dim : int
-            Hidden layer dimension
-        output_dim : int
-            Output dimension (3 for kappa, alpha, tau)
-        """
-        super(SPDEParameterGNN, self).__init__()
-        
-        # Graph convolution layers
-        self.conv1 = GCNConv(input_dim, hidden_dim)
-        self.conv2 = GCNConv(hidden_dim, hidden_dim)
-        self.conv3 = GCNConv(hidden_dim, hidden_dim)
-        self.conv4 = GCNConv(hidden_dim, hidden_dim // 2) 
-        
-        # Output layer for SPDE parameters
-        self.param_head = nn.Linear(hidden_dim // 2, output_dim) 
-        
-        # Dropout for regularization
-        self.dropout = nn.Dropout(0.1)
-    
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass
-        
-        Parameters:
-        -----------
-        x : torch.Tensor
-            Node features [num_nodes, input_dim]
-        edge_index : torch.Tensor
-            Edge connectivity [2, num_edges]
-            
-        Returns:
-        --------
-        torch.Tensor
-            SPDE parameters [num_nodes, 3]
-        """
-        # First convolution
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = self.dropout(x)
-        
-        # Second convolution
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-        x = self.dropout(x)
-        
-        # Third convolution
-        x = self.conv3(x, edge_index)
-        x = F.relu(x)
-        x = self.dropout(x)
-        
-        # Fourth convolution
-        x = self.conv4(x, edge_index)
-        x = F.relu(x)
-        
-        # Output SPDE parameters
-        params = self.param_head(x)
-        
-        # Apply constraints to ensure valid parameter ranges
-        # params = torch.stack([
-        #     F.softplus(params[:, 0]) + 0.01,  # Kappa > 0.01
-        #     params[:, 1],                     # Alpha can be any value
-        #     F.softplus(params[:, 2]) + 0.01,  # Tau > 0.01  
-        # ], dim=1)
-        params = torch.stack([
-            torch.sigmoid(params[:, 0]) * 4.0 + 0.5,  # Kappa in [0.5, 4.5]
-            torch.tanh(params[:, 1]) * 1.5,           # Alpha in [-1.5, 1.5]
-            torch.sigmoid(params[:, 2]) * 0.8 + 0.1,  # Tau in [0.1, 0.9]
-        ], dim=1)
-
-        #if self.training:
-        #    noise = torch.randn_like(params) * 0.1
-        #    params = params + noise
         
         return params
 

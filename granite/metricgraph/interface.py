@@ -16,20 +16,20 @@ import pandas as pd
 from scipy.spatial.distance import cdist
 
 # Suppress warnings and configure R environment
-warnings.filterwarnings('ignore', category=UserWarning, module='rpy2')
-os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning'
-os.environ['R_HOME'] = os.environ.get('R_HOME', '')
-os.environ['R_LIBS_SITE'] = ''
-os.environ['R_ENVIRON_USER'] = ''
-os.environ['R_PROFILE_USER'] = ''
+# warnings.filterwarnings('ignore', category=UserWarning, module='rpy2')
+# os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning'
+# os.environ['R_HOME'] = os.environ.get('R_HOME', '')
+# os.environ['R_LIBS_SITE'] = ''
+# os.environ['R_ENVIRON_USER'] = ''
+# os.environ['R_PROFILE_USER'] = ''
 
-# Import rpy2 with suppressed output
-with open(os.devnull, 'w') as devnull:
-    with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-        import rpy2.robjects as ro
-        from rpy2.robjects import pandas2ri
-        from rpy2.robjects.conversion import localconverter
-        import rpy2.robjects.packages as rpackages
+# # Import rpy2 with suppressed output
+# with open(os.devnull, 'w') as devnull:
+#     with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+#         import rpy2.robjects as ro
+#         from rpy2.robjects import pandas2ri
+#         from rpy2.robjects.conversion import localconverter
+#         import rpy2.robjects.packages as rpackages
 
 logger = logging.getLogger(__name__) 
 

@@ -236,20 +236,7 @@ class GRANITEPipeline:
             self._log("IDM baseline failed", level='ERROR')
             return idm_result
         
-        # Handle different column names from IDM
-        predictions_df = idm_result['predictions']
-        if 'svi_prediction' in predictions_df.columns:
-            idm_predictions = predictions_df['svi_prediction'].values
-        else:
-            # Use first numeric column (excluding x, y, uncertainty)
-            numeric_cols = predictions_df.select_dtypes(include=[np.number]).columns
-            valid_cols = [c for c in numeric_cols if c not in ['x', 'y', 'uncertainty', 'address_id']]
-            if valid_cols:
-                idm_predictions = predictions_df[valid_cols[0]].values
-            else:
-                # Fallback to tract mean
-                idm_predictions = np.full(len(predictions_df), tract_svi)
-                
+        idm_predictions = idm_result['predictions']['svi_prediction'].values
         self._log(f"IDM baseline: mean={np.mean(idm_predictions):.3f}, "
                  f"std={np.std(idm_predictions):.3f}")
         

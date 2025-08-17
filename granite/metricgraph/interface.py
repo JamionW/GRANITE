@@ -936,6 +936,17 @@ class MetricGraphInterface:
             # Fallback to simple distance-based method
             return self._simple_distance_fallback(tract_observation, prediction_locations)
 
+    def apply_corrections(self, baseline_predictions, corrections, addresses):
+        """Apply GNN corrections with spatial smoothing"""
+        # This can use existing spatial smoothing logic
+        combined = baseline_predictions + corrections
+        
+        # Apply Whittle-Matérn smoothing if available
+        if self.r_available:
+            smoothed = self._apply_spatial_smoothing(combined, addresses)
+            return smoothed
+        return combined
+
     def _simple_distance_fallback(self, tract_observation: pd.DataFrame,
                                 prediction_locations: pd.DataFrame) -> Dict:
         """

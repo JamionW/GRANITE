@@ -23,24 +23,26 @@ transit:
 
 # GNN model configuration 
 model:
-  # Core architecture 
-  input_dim: 5      # Number of input features 
-  hidden_dim: 128    # Hidden layer dimension
-  output_dim: 3     # SPDE parameters: kappa, alpha, tau 
-  dropout: 0.2
-  epochs: 20
-  learning_rate: 0.0001
+  # Hybrid architecture parameters
+  idm_weight: 0.7           # 70% IDM, 30% GNN corrections
+  correction_scale: 0.3     # Maximum GNN correction magnitude
   
-  # Features 
-  features:
-    type: "nlcd" 
-    nlcd_path: "./data/nlcd_hamilton_county.tif"
-
-  # Training parameters
-  spatial_weight: 0.01              # INCREASED from 0.0 to enable spatial learning
-  regularization_weight: 0.01      # Keep for parameter stability
+  # GNN architecture (keep existing)
+  input_dim: 17             # NLCD features (16) + IDM baseline (1)
+  hidden_dim: 64
+  output_dim: 1             # Single correction value, not 3 SPDE params!
   
-  # REMOVED: diversity_weight, realism_weight (not implemented)
+  # Training parameters (updated)
+  epochs: 100
+  learning_rate: 0.001
+  
+  # Loss function weights (NEW)
+  loss_config:
+    smoothness_weight: 1.0
+    diversity_weight: 0.5    # Prevents collapse to zero
+    variation_weight: 0.3    # Maintains spatial heterogeneity
+    feature_weight: 0.2
+    constraint_weight: 0.1   # Soft constraint, not hard
   
 # MetricGraph configuration 
 metricgraph:

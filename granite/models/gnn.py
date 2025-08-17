@@ -22,11 +22,11 @@ from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data
 
 
-class SPDEParameterGNN(nn.Module):
+class AccessibilityGNNCorrector(nn.Module):
     """GNN with explicit variance preservation"""
     
     def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 3):
-        super(SPDEParameterGNN, self).__init__()
+        super(AccessibilityGNNCorrector, self).__init__()
         
         # Residual connections to preserve input variance
         self.input_projection = nn.Linear(input_dim, hidden_dim)
@@ -49,6 +49,8 @@ class SPDEParameterGNN(nn.Module):
         
         # Minimal dropout
         self.dropout = nn.Dropout(0.05)
+
+        self.correction_head = nn.Linear(hidden_dim // 2, 1)  # Was output_dim=3
     
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         # Save original features for bypass
@@ -95,7 +97,9 @@ class SPDEParameterGNN(nn.Module):
         
         params = torch.stack([kappa, alpha, tau], dim=1)
         
-        return params
+        corrections = self.correction_head(x)
+        corrections = torch.tanh(corrections) * self.correction_scale
+        return corrections
 
 def safe_feature_normalization_vectorized(node_features):
     """
@@ -261,6 +265,12 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
     
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     
+    if idm_baseline is not None:
+        baseline_feature = torch.tensor(idm_baseline).unsqueeze(1)
+        x = torch.cat([x, baseline_feature], dim=1)
+    
+    return Data(x=x, edge_index=edge_index), node_mapping
+
     return data, node_to_idx
 
 def prepare_graph_data_topological(road_network: nx.Graph) -> Tuple[Data, Dict]:

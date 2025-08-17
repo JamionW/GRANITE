@@ -23,13 +23,13 @@ from scipy.spatial.distance import cdist
 # os.environ['R_ENVIRON_USER'] = ''
 # os.environ['R_PROFILE_USER'] = ''
 
-# # Import rpy2 with suppressed output
-# with open(os.devnull, 'w') as devnull:
-#     with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-#         import rpy2.robjects as ro
-#         from rpy2.robjects import pandas2ri
-#         from rpy2.robjects.conversion import localconverter
-#         import rpy2.robjects.packages as rpackages
+# Import rpy2 with suppressed output
+with open(os.devnull, 'w') as devnull:
+    with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+        import rpy2.robjects as ro
+        from rpy2.robjects import pandas2ri
+        from rpy2.robjects.conversion import localconverter
+        import rpy2.robjects.packages as rpackages
 
 logger = logging.getLogger(__name__) 
 

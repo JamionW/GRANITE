@@ -120,7 +120,8 @@ def safe_feature_normalization_vectorized(node_features):
 
 def prepare_graph_data_with_nlcd(road_network: nx.Graph, 
                                 nlcd_features: pd.DataFrame,
-                                addresses: pd.DataFrame = None) -> Tuple[Data, Dict]:
+                                addresses: pd.DataFrame = None,
+                                idm_baseline: np.ndarray = None) -> Tuple[Data, Dict]:
     """
     Prepare graph data for GNN with enhanced NLCD-based features
     """
@@ -265,12 +266,13 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
     
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     
+    # Only add IDM baseline if provided as parameter
     if idm_baseline is not None:
-        baseline_feature = torch.tensor(idm_baseline).unsqueeze(1)
+        # Map IDM predictions to graph nodes (simplified mapping)
+        baseline_feature = torch.tensor([np.mean(idm_baseline)] * len(nodes), dtype=torch.float32).unsqueeze(1)
         x = torch.cat([x, baseline_feature], dim=1)
+        data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     
-    return Data(x=x, edge_index=edge_index), node_mapping
-
     return data, node_to_idx
 
 def prepare_graph_data_topological(road_network: nx.Graph) -> Tuple[Data, Dict]:

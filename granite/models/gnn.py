@@ -136,7 +136,7 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
     feature_tree = None
     feature_coords = None
     
-    if len(nlcd_features) > 0 and addresses is not None and len(addresses) > 0:
+    if nlcd_features is not None and len(nlcd_features) > 0 and addresses is not None and len(addresses) > 0:
         # Match nlcd_features to addresses by address_id
         if 'address_id' in nlcd_features.columns and 'address_id' in addresses.columns:
             features_with_coords = nlcd_features.merge(

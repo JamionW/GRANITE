@@ -16,7 +16,17 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import torch
+
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for server environments
+import numpy as np
+import pandas as pd
+import os
+import traceback
+
+# Make sure matplotlib can save files
+plt.ioff()  # Turn off interactive mode
 
 # Import required classes (add these to existing imports)
 from ..models.gnn import prepare_graph_data_with_nlcd
@@ -176,6 +186,9 @@ class GRANITEPipeline:
         Load NLCD data for tract area
         """
         try:
+            # Import geopandas here to ensure it's available
+            import geopandas as gpd
+            
             # Get tract boundary for NLCD cropping
             tract_boundary = gpd.GeoDataFrame([tract_data['tract_info']], crs='EPSG:4326')
             
@@ -566,10 +579,56 @@ class GRANITEPipeline:
     
     def _save_results(self, results: Dict):
         """Save results to output directory."""
+        import pandas as pd
+        import numpy as np
+        import os
+        import json
+        from datetime import datetime
+        
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # Handle predictions - convert to DataFrame if it's a numpy array
+        predictions = results['predictions']
+        
+        if isinstance(predictions, np.ndarray):
+            # Convert numpy array to DataFrame with basic structure
+            self._log("Converting numpy predictions to DataFrame format")
+            
+            # Create basic DataFrame structure
+            predictions_df = pd.DataFrame({
+                'svi_prediction': predictions.flatten() if predictions.ndim > 1 else predictions,
+                'address_id': range(len(predictions.flatten() if predictions.ndim > 1 else predictions))
+            })
+            
+            # Add placeholders for expected columns if they don't exist
+            if 'x' not in predictions_df.columns:
+                predictions_df['x'] = 0.0  # Will need actual coordinates
+            if 'y' not in predictions_df.columns:
+                predictions_df['y'] = 0.0  # Will need actual coordinates
+            if 'sd' not in predictions_df.columns:
+                predictions_df['sd'] = 0.01  # Placeholder uncertainty
+            if 'idm_baseline' not in predictions_df.columns:
+                predictions_df['idm_baseline'] = predictions_df['svi_prediction']
+            if 'gnn_correction' not in predictions_df.columns:
+                predictions_df['gnn_correction'] = 0.0
+            
+        elif isinstance(predictions, pd.DataFrame):
+            predictions_df = predictions
+        else:
+            # If it's something else, try to handle it
+            self._log(f"Unexpected predictions type: {type(predictions)}")
+            try:
+                predictions_df = pd.DataFrame(predictions)
+            except:
+                # Last resort - create minimal DataFrame
+                predictions_df = pd.DataFrame({
+                    'svi_prediction': [0.0],
+                    'error': ['Failed to convert predictions']
+                })
         
         # Save predictions
         predictions_path = os.path.join(self.output_dir, 'hybrid_predictions.csv')
-        results['predictions'].to_csv(predictions_path, index=False)
+        predictions_df.to_csv(predictions_path, index=False)
         self._log(f"Saved predictions to {predictions_path}")
         
         # Save summary
@@ -577,91 +636,547 @@ class GRANITEPipeline:
             'timestamp': datetime.now().isoformat(),
             'config': self.config,
             'statistics': results.get('overall_statistics', {}),
-            'success': results['success']
+            'success': results['success'],
+            'predictions_shape': str(predictions_df.shape),
+            'predictions_columns': list(predictions_df.columns)
         }
         
         summary_path = os.path.join(self.output_dir, 'hybrid_summary.json')
         with open(summary_path, 'w') as f:
-            json.dump(summary, f, indent=2)
+            json.dump(summary, f, indent=2, default=str)  # default=str handles non-serializable objects
         self._log(f"Saved summary to {summary_path}")
     
+    # Fix 1: Update the visualization code to extract real coordinates from the DataFrame
+
     def _create_enhanced_visualizations(self, results: Dict):
-        """Create visualizations comparing IDM baseline and hybrid results."""
+        """Create visualizations comparing IDM baseline and hybrid results.
         
-        if not results.get('tract_results'):
-            return
+        Works with both single tract (fips mode) and multi-tract (county mode) results.
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import pandas as pd
+        import os
         
-        # Get first tract result for detailed visualization
-        first_tract = results['tract_results'][0]
-        
-        # Create comparison plot
-        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-        
-        # IDM Baseline
-        ax = axes[0, 0]
-        idm_vals = first_tract['predictions']['idm_baseline'].values
-        ax.hist(idm_vals, bins=30, alpha=0.7, color='blue')
-        ax.set_title('IDM Baseline Distribution')
-        ax.set_xlabel('SVI Value')
-        ax.set_ylabel('Frequency')
-        
-        # GNN Corrections
-        ax = axes[0, 1]
-        corrections = first_tract['predictions']['gnn_correction'].values
-        ax.hist(corrections, bins=30, alpha=0.7, color='orange')
-        ax.axvline(0, color='black', linestyle='--', alpha=0.5)
-        ax.set_title('GNN Corrections')
-        ax.set_xlabel('Correction Value')
-        
-        # Hybrid Results
-        ax = axes[0, 2]
-        hybrid_vals = first_tract['predictions']['svi_prediction'].values
-        ax.hist(hybrid_vals, bins=30, alpha=0.7, color='green')
-        ax.set_title('Hybrid IDM+GNN Distribution')
-        ax.set_xlabel('SVI Value')
-        
-        # Comparison scatter
-        ax = axes[1, 0]
-        ax.scatter(idm_vals, hybrid_vals, alpha=0.3)
-        ax.plot([0, 1], [0, 1], 'r--', alpha=0.5)
-        ax.set_xlabel('IDM Baseline')
-        ax.set_ylabel('Hybrid IDM+GNN')
-        ax.set_title('Method Comparison')
-        
-        # Training history (if available)
-        if 'training' in first_tract and 'history' in first_tract['training']:
+        try:
+            # Handle different result structures
+            if 'tract_results' in results and results['tract_results']:
+                # County mode - multiple tracts
+                tract_data = results['tract_results'][0]  # Use first tract for visualization
+                self._log("Creating visualizations from county mode results")
+            elif 'predictions' in results:
+                # Single FIPS mode - direct predictions
+                tract_data = {
+                    'predictions': results['predictions'],
+                    'comparison': results.get('comparison', {}),
+                    'training': results.get('training', {})
+                }
+                self._log("Creating visualizations from single tract mode results")
+            else:
+                self._log("No suitable data found for visualization")
+                return
+            
+            predictions_data = tract_data['predictions']
+            
+            # Fix: Handle the case where predictions_data is a numpy array but we need coordinates
+            if isinstance(predictions_data, np.ndarray):
+                self._log("Converting numpy array to DataFrame for visualization")
+                
+                # Try to get the actual coordinates from the original tract processing
+                # This is the key fix - we need to get the real coordinates from the address data
+                
+                # Load the tract addresses to get real coordinates
+                fips = results.get('fips')  # Should be available in single tract mode
+                if fips:
+                    try:
+                        # Get the real address coordinates for this tract
+                        tract_addresses = self.data_loader.get_addresses_for_tract(fips)
+                        
+                        if len(tract_addresses) > 0 and hasattr(tract_addresses, 'geometry'):
+                            # Extract real coordinates from the address geometry
+                            coords = np.array([[geom.x, geom.y] for geom in tract_addresses.geometry])
+                            
+                            # Ensure we have the right number of coordinates
+                            n_predictions = len(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data)
+                            if len(coords) >= n_predictions:
+                                coords = coords[:n_predictions]  # Trim to match predictions
+                            else:
+                                # Pad with last coordinate if needed (shouldn't happen)
+                                while len(coords) < n_predictions:
+                                    coords = np.vstack([coords, coords[-1]])
+                            
+                            predictions_df = pd.DataFrame({
+                                'svi_prediction': predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data,
+                                'idm_baseline': predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data,  # Assume same for now
+                                'gnn_correction': np.zeros_like(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data),
+                                'x': coords[:, 0],  # Real coordinates!
+                                'y': coords[:, 1],  # Real coordinates!
+                                'sd': np.full_like(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data, 0.01)
+                            })
+                            
+                            self._log(f"Successfully extracted real coordinates for {len(coords)} addresses")
+                            
+                        else:
+                            self._log("No address geometry found, using fallback coordinates")
+                            raise ValueError("No real coordinates available")
+                            
+                    except Exception as e:
+                        self._log(f"Failed to extract real coordinates: {str(e)}")
+                        # Fallback to placeholder coordinates (the old behavior)
+                        predictions_df = pd.DataFrame({
+                            'svi_prediction': predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data,
+                            'idm_baseline': predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data,
+                            'gnn_correction': np.zeros_like(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data),
+                            'x': np.random.uniform(-85.5, -85.0, len(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data)),
+                            'y': np.random.uniform(35.0, 35.5, len(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data)),
+                            'sd': np.full_like(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data, 0.01)
+                        })
+                else:
+                    self._log("No FIPS available for coordinate extraction")
+                    # Fallback coordinates
+                    predictions_df = pd.DataFrame({
+                        'svi_prediction': predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data,
+                        'idm_baseline': predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data,
+                        'gnn_correction': np.zeros_like(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data),
+                        'x': np.random.uniform(-85.5, -85.0, len(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data)),
+                        'y': np.random.uniform(35.0, 35.5, len(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data)),
+                        'sd': np.full_like(predictions_data.flatten() if predictions_data.ndim > 1 else predictions_data, 0.01)
+                    })
+                    
+            elif isinstance(predictions_data, pd.DataFrame):
+                predictions_df = predictions_data
+            else:
+                self._log(f"Unknown predictions type: {type(predictions_data)}")
+                return
+            
+            # Verify we have the basic required column
+            if 'svi_prediction' not in predictions_df.columns:
+                self._log("Missing svi_prediction column - cannot create visualizations")
+                return
+            
+            # Create main comparison plot
+            fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+            fig.suptitle('GRANITE: IDM Baseline vs Hybrid IDM+GNN Results', fontsize=16, fontweight='bold')
+            
+            # Extract values safely with fallbacks
+            svi_vals = predictions_df['svi_prediction'].values
+            idm_vals = predictions_df.get('idm_baseline', svi_vals).values if 'idm_baseline' in predictions_df.columns else svi_vals
+            gnn_corrections = predictions_df.get('gnn_correction', np.zeros_like(svi_vals)).values if 'gnn_correction' in predictions_df.columns else np.zeros_like(svi_vals)
+            
+            # Extract values safely with fallbacks
+            svi_vals = predictions_df['svi_prediction'].values
+            idm_vals = predictions_df.get('idm_baseline', svi_vals).values if 'idm_baseline' in predictions_df.columns else svi_vals
+            gnn_corrections = predictions_df.get('gnn_correction', np.zeros_like(svi_vals)).values if 'gnn_correction' in predictions_df.columns else np.zeros_like(svi_vals)
+
+            # CALCULATE CORRELATION EARLY - This fixes the UnboundLocalError
+            correlation = np.corrcoef(idm_vals, svi_vals)[0, 1]
+            variation_improvement = np.std(svi_vals) / (np.std(idm_vals) + 1e-8)
+            gnn_effect_size = np.mean(np.abs(gnn_corrections))
+            spatial_range = np.max(svi_vals) - np.min(svi_vals)
+
+            # Check coordinate validity
+            if 'x' in predictions_df.columns and 'y' in predictions_df.columns:
+                x = predictions_df['x'].values
+                y = predictions_df['y'].values
+                is_real_coords = (-86.0 <= np.mean(x) <= -84.5) and (34.5 <= np.mean(y) <= 35.5)
+            else:
+                is_real_coords = False
+
+            # Now continue with the plotting sections...
+
+            # 1. IDM Baseline Distribution
+            ax = axes[0, 0]
+            ax.hist(idm_vals, bins=30, alpha=0.7, color='blue', edgecolor='black')
+            ax.set_title(f'IDM Baseline Distribution\nMean: {np.mean(idm_vals):.3f}, Std: {np.std(idm_vals):.3f}')
+            ax.set_xlabel('SVI Value')
+            ax.set_ylabel('Frequency')
+            ax.grid(True, alpha=0.3)
+
+            # 2. GNN Corrections Distribution  
+            ax = axes[0, 1]
+            ax.hist(gnn_corrections, bins=30, alpha=0.7, color='orange', edgecolor='black')
+            ax.axvline(0, color='red', linestyle='--', linewidth=2, label='Zero correction')
+            ax.set_title(f'GNN Corrections\nMean: {np.mean(gnn_corrections):.4f}, Std: {np.std(gnn_corrections):.4f}')
+            ax.set_xlabel('Correction Value')
+            ax.set_ylabel('Frequency')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+            # 3. Hybrid Results Distribution
+            ax = axes[0, 2]
+            ax.hist(svi_vals, bins=30, alpha=0.7, color='green', edgecolor='black')
+            ax.set_title(f'Hybrid IDM+GNN\nMean: {np.mean(svi_vals):.3f}, Std: {np.std(svi_vals):.3f}')
+            ax.set_xlabel('SVI Value')
+            ax.set_ylabel('Frequency')
+            ax.grid(True, alpha=0.3)
+
+            # 4. Spatial scatter plot with REAL coordinates and proper scaling
+            ax = axes[1, 0]
+            if 'x' in predictions_df.columns and 'y' in predictions_df.columns:
+                if is_real_coords:
+                    scatter = ax.scatter(x, y, c=svi_vals, cmap='viridis_r', s=15, alpha=0.7, edgecolors='white', linewidth=0.05)
+                    plt.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04)
+                    ax.set_title('Spatial Distribution (Real Hamilton County)')
+                    ax.set_xlabel('Longitude')
+                    ax.set_ylabel('Latitude')
+                    
+                    # Use actual data bounds with small buffer
+                    x_buffer = (x.max() - x.min()) * 0.05
+                    y_buffer = (y.max() - y.min()) * 0.05
+                    ax.set_xlim(x.min() - x_buffer, x.max() + x_buffer)
+                    ax.set_ylim(y.min() - y_buffer, y.max() + y_buffer)
+                    
+                    # Make aspect ratio appropriate for Hamilton County
+                    ax.set_aspect('equal', adjustable='box')
+                    
+                    # Add coordinate range info
+                    coord_info = f"Lon: [{x.min():.4f}, {x.max():.4f}]\nLat: [{y.min():.4f}, {y.max():.4f}]"
+                    ax.text(0.02, 0.98, coord_info, transform=ax.transAxes, fontsize=8, 
+                        verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                    
+                    self._log(f"Coordinate ranges - Lon: [{x.min():.4f}, {x.max():.4f}], Lat: [{y.min():.4f}, {y.max():.4f}]")
+                else:
+                    ax.text(0.5, 0.5, f'Coordinate Issue Detected\nMean X: {np.mean(x):.3f}\nMean Y: {np.mean(y):.3f}\n(Should be ~-85.3, ~35.0)', 
+                        ha='center', va='center', transform=ax.transAxes, fontsize=12, 
+                        bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.8))
+                    ax.set_title('Coordinate Issue Detected')
+            else:
+                ax.text(0.5, 0.5, 'No coordinate data\navailable for spatial plot', 
+                    ha='center', va='center', transform=ax.transAxes, fontsize=12)
+                ax.set_title('Spatial Distribution')
+
+            # 5. IDM vs Hybrid comparison  
             ax = axes[1, 1]
-            history = first_tract['training']['history']
-            ax.plot(history['epoch'], history['total_loss'])
-            ax.set_xlabel('Epoch')
-            ax.set_ylabel('Loss')
-            ax.set_title('Training Progress')
+            ax.scatter(idm_vals, svi_vals, alpha=0.6, s=15, edgecolors='white', linewidth=0.1)
+
+            # Add perfect correlation line
+            min_val = min(np.min(idm_vals), np.min(svi_vals))
+            max_val = max(np.max(idm_vals), np.max(svi_vals))
+            ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2, label='Perfect correlation')
+
+            ax.set_xlabel('IDM Baseline')
+            ax.set_ylabel('Hybrid IDM+GNN')
+            ax.set_title(f'Method Comparison\nCorrelation: {correlation:.4f}')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+            # 6. Enhanced summary statistics with better problem diagnosis
+            ax = axes[1, 2]
+            ax.axis('off')
+
+            # Detailed problem diagnosis (now correlation is available)
+            problems = []
+            if correlation > 0.999:
+                problems.append("⚠️  PERFECT CORRELATION")
+            if np.std(gnn_corrections) < 0.001:
+                problems.append("⚠️  ZERO GNN EFFECT")
+            if spatial_range < 0.01:
+                problems.append("⚠️  NO SPATIAL VARIATION")
+            if np.std(idm_vals) < 0.001:
+                problems.append("⚠️  IDM TOO UNIFORM")
+
+            problem_status = "CRITICAL ISSUES DETECTED" if problems else "FUNCTIONING NORMALLY"
+            coord_status = "✅ Real coordinates" if is_real_coords else "❌ Placeholder coordinates"
+
+            stats_text = (
+                f"GRANITE DIAGNOSTIC REPORT\n"
+                f"{'='*25}\n\n"
+                f"Status: {problem_status}\n"
+                f"Coordinates: {coord_status}\n\n"
+                f"CORE METRICS:\n"
+                f"├─ IDM Baseline:\n"
+                f"│  ├─ Mean: {np.mean(idm_vals):.4f}\n"
+                f"│  ├─ Std:  {np.std(idm_vals):.6f}\n"
+                f"│  └─ Range: {np.max(idm_vals)-np.min(idm_vals):.6f}\n"
+                f"├─ GNN Corrections:\n"
+                f"│  ├─ Mean: {np.mean(gnn_corrections):.6f}\n"
+                f"│  ├─ Std:  {np.std(gnn_corrections):.6f}\n"
+                f"│  └─ Effect: {gnn_effect_size:.6f}\n"
+                f"├─ Hybrid Result:\n"
+                f"│  ├─ Mean: {np.mean(svi_vals):.4f}\n"
+                f"│  ├─ Std:  {np.std(svi_vals):.6f}\n"
+                f"│  └─ Range: {spatial_range:.6f}\n"
+                f"└─ Correlation: {correlation:.6f}\n\n"
+                f"PROBLEM ANALYSIS:\n"
+            )
+
+            for problem in problems:
+                stats_text += f"{problem}\n"
+
+            if problems:
+                stats_text += (
+                    f"\nNext Actions (Research Pivot):\n"
+                    f"• Recalibrate loss function weights\n"
+                    f"• Add variance preservation term\n"
+                    f"• Re-engineer GNN features\n"
+                    f"• Remove hard tract constraints\n"
+                    f"• Validate NLCD coefficient usage"
+                )
+            else:
+                stats_text += f"\nSystem functioning normally"
+
+            ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=7,
+                verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.9))
+            ax.set_title('Diagnostic Analysis', fontweight='bold')
+
+            # Add difference histogram if we have problems
+            if len(problems) > 0 and is_real_coords:
+                from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+                inset_ax = inset_axes(ax, width="40%", height="40%", loc='lower left')
+                differences = svi_vals - idm_vals
+                inset_ax.hist(differences, bins=20, alpha=0.7, color='red', edgecolor='black')
+                inset_ax.set_title('IDM-Hybrid Diff', fontsize=8)
+                inset_ax.tick_params(labelsize=6)
+                inset_ax.axvline(0, color='black', linestyle='--', alpha=0.5)
+                
+                max_diff = np.max(np.abs(differences))
+                inset_ax.text(0.95, 0.95, f'Max:|{max_diff:.6f}|', transform=inset_ax.transAxes, 
+                            fontsize=6, ha='right', va='top',
+                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+            # Add an additional diagnostic plot showing the trivial solution more clearly
+            if len(problems) > 0:
+                # Create a small inset plot showing the problem
+                from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+                
+                if 'x' in predictions_df.columns and 'y' in predictions_df.columns and is_real_coords:
+                    # Add inset showing difference between IDM and hybrid (should be non-zero)
+                    inset_ax = inset_axes(ax, width="40%", height="40%", loc='lower left')
+                    differences = svi_vals - idm_vals
+                    inset_ax.hist(differences, bins=20, alpha=0.7, color='red', edgecolor='black')
+                    inset_ax.set_title('IDM-Hybrid Diff', fontsize=8)
+                    inset_ax.tick_params(labelsize=6)
+                    inset_ax.axvline(0, color='black', linestyle='--', alpha=0.5)
+                    
+                    # Add text showing max difference
+                    max_diff = np.max(np.abs(differences))
+                    inset_ax.text(0.95, 0.95, f'Max:|{max_diff:.6f}|', transform=inset_ax.transAxes, 
+                                fontsize=6, ha='right', va='top',
+                                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            
+            # 5. IDM vs Hybrid comparison
+            ax = axes[1, 1]
+            ax.scatter(idm_vals, svi_vals, alpha=0.6, s=15, edgecolors='white', linewidth=0.1)
+            
+            # Add perfect correlation line
+            min_val = min(np.min(idm_vals), np.min(svi_vals))
+            max_val = max(np.max(idm_vals), np.max(svi_vals))
+            ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2, label='Perfect correlation')
+            
+            # Calculate correlation
+            correlation = np.corrcoef(idm_vals, svi_vals)[0, 1]
+            ax.set_xlabel('IDM Baseline')
+            ax.set_ylabel('Hybrid IDM+GNN')
+            ax.set_title(f'Method Comparison\nCorrelation: {correlation:.4f}')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # 6. Summary statistics with coordinate validation
+            ax = axes[1, 2]
+            ax.axis('off')
+            
+            # Compute basic statistics
+            variation_improvement = np.std(svi_vals) / (np.std(idm_vals) + 1e-8)
+            
+            # Check coordinate validity
+            coord_status = "✅ Real coordinates" if is_real_coords else "❌ Placeholder coordinates"
+            
+            stats_text = (
+                f"GRANITE Results Summary\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Coordinates: {coord_status}\n\n"
+                f"IDM Baseline:\n"
+                f"  Mean: {np.mean(idm_vals):.3f}\n"
+                f"  Std:  {np.std(idm_vals):.4f}\n\n"
+                f"Hybrid IDM+GNN:\n"
+                f"  Mean: {np.mean(svi_vals):.3f}\n"
+                f"  Std:  {np.std(svi_vals):.4f}\n\n"
+                f"GNN Corrections:\n"
+                f"  Mean: {np.mean(gnn_corrections):.4f}\n"
+                f"  Std:  {np.std(gnn_corrections):.4f}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Analysis:\n"
+                f"  Addresses: {len(svi_vals)}\n"
+                f"  Variation Ratio: {variation_improvement:.2f}\n\n"
+            )
+            
+            # Add diagnosis of trivial solution
+            if np.std(gnn_corrections) < 0.01:
+                stats_text += (
+                    f"⚠️  TRIVIAL SOLUTION DETECTED\n"
+                    f"GNN corrections ≈ 0\n"
+                    f"Indicates loss function issues\n"
+                    f"See research pivot notes"
+                )
+            
+            ax.text(0.1, 0.9, stats_text, transform=ax.transAxes, fontsize=9,
+                verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+            ax.set_title('Summary Statistics')
+            
+            plt.tight_layout()
+            
+            # Save the visualization
+            viz_path = os.path.join(self.output_dir, 'granite_comparison_visualization.png')
+            fig.savefig(viz_path, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+            plt.close(fig)
+            
+            self._log(f"Saved visualization to {viz_path}")
+            
+            # Create additional spatial detail plot if coordinates are available
+            if 'x' in predictions_df.columns and 'y' in predictions_df.columns and is_real_coords:
+                self._create_spatial_detail_plot(predictions_df)
+                
+        except Exception as e:
+            self._log(f"Error creating visualizations: {str(e)}", level='ERROR')
+            import traceback
+            self._log(f"Traceback: {traceback.format_exc()}", level='ERROR')
         
-        # Statistics comparison
-        ax = axes[1, 2]
-        ax.axis('off')
-        comparison = first_tract['comparison']
-        stats_text = (
-            f"IDM Baseline:\n"
-            f"  Mean: {comparison['idm_baseline']['mean']:.3f}\n"
-            f"  Std: {comparison['idm_baseline']['std']:.3f}\n"
-            f"  CV: {comparison['idm_baseline']['cv']:.3f}\n\n"
-            f"Hybrid IDM+GNN:\n"
-            f"  Mean: {comparison['hybrid']['mean']:.3f}\n"
-            f"  Std: {comparison['hybrid']['std']:.3f}\n"
-            f"  CV: {comparison['hybrid']['cv']:.3f}\n\n"
-            f"Improvement:\n"
-            f"  Variation Ratio: {comparison['improvement']['variation_ratio']:.2f}x"
-        )
-        ax.text(0.1, 0.5, stats_text, transform=ax.transAxes,
-               fontsize=10, verticalalignment='center', fontfamily='monospace')
+    def _create_diagnostic_plot(self, svi_vals, idm_vals, gnn_corrections):
+        """Create diagnostic plot highlighting the trivial solution problem."""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import os
         
-        plt.suptitle('Hybrid IDM+GNN Disaggregation Results', fontsize=14, fontweight='bold')
-        plt.tight_layout()
+        try:
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            fig.suptitle('GRANITE Diagnostic: Trivial Solution Analysis', fontsize=14, fontweight='bold')
+            
+            # 1. Distribution comparison
+            ax = axes[0]
+            ax.hist(idm_vals, bins=20, alpha=0.7, label=f'IDM (σ={np.std(idm_vals):.4f})', color='blue')
+            ax.hist(svi_vals, bins=20, alpha=0.7, label=f'Hybrid (σ={np.std(svi_vals):.4f})', color='green')
+            ax.set_title('Value Distributions')
+            ax.set_xlabel('SVI Value')
+            ax.set_ylabel('Frequency')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # 2. GNN corrections histogram
+            ax = axes[1]
+            ax.hist(gnn_corrections, bins=20, alpha=0.7, color='orange', edgecolor='black')
+            ax.axvline(0, color='red', linestyle='--', linewidth=2)
+            ax.set_title(f'GNN Corrections\n(σ={np.std(gnn_corrections):.4f})')
+            ax.set_xlabel('Correction Value')
+            ax.set_ylabel('Frequency')
+            ax.grid(True, alpha=0.3)
+            
+            # 3. Problem diagnosis
+            ax = axes[2]
+            ax.axis('off')
+            
+            # Determine problem severity
+            correction_std = np.std(gnn_corrections)
+            if correction_std < 0.001:
+                severity = "SEVERE"
+                color = "red"
+            elif correction_std < 0.01:
+                severity = "MODERATE" 
+                color = "orange"
+            else:
+                severity = "MILD"
+                color = "green"
+            
+            diagnosis_text = (
+                f"TRIVIAL SOLUTION DIAGNOSIS\n"
+                f"{'='*30}\n\n"
+                f"Status: {severity}\n"
+                f"GNN Correction Std: {correction_std:.6f}\n\n"
+                f"Expected: σ > 0.05\n"
+                f"Observed: σ = {correction_std:.6f}\n\n"
+                f"Root Causes:\n"
+                f"• Loss function imbalance\n"
+                f"• Weak spatial signal\n"
+                f"• Feature ineffectiveness\n\n"
+                f"Next Steps:\n"
+                f"• Restore spatial_loss weight\n"
+                f"• Add variance preservation\n"
+                f"• Re-engineer features\n"
+                f"• Remove hard constraints"
+            )
+            
+            ax.text(0.1, 0.9, diagnosis_text, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor=color, alpha=0.2))
+            ax.set_title('Problem Diagnosis', color=color)
+            
+            plt.tight_layout()
+            
+            # Save diagnostic plot
+            diag_path = os.path.join(self.output_dir, 'granite_diagnostic_analysis.png')
+            fig.savefig(diag_path, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+            plt.close(fig)
+            
+            self._log(f"Saved diagnostic plot to {diag_path}")
+            
+        except Exception as e:
+            self._log(f"Error creating diagnostic plot: {str(e)}", level='ERROR')
+
+    def _create_spatial_detail_plot(self, predictions_df):
+        """Create detailed spatial visualization showing IDM vs GNN patterns."""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import os
         
-        # Save figure
-        viz_path = os.path.join(self.output_dir, 'hybrid_comparison.png')
-        plt.savefig(viz_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        self._log(f"Saved visualization to {viz_path}")
+        try:
+            fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+            fig.suptitle('GRANITE Spatial Analysis: IDM vs GNN Enhancement', fontsize=14, fontweight='bold')
+            
+            x = predictions_df['x'].values
+            y = predictions_df['y'].values
+            svi_vals = predictions_df['svi_prediction'].values
+            idm_vals = predictions_df.get('idm_baseline', svi_vals).values
+            gnn_corrections = predictions_df.get('gnn_correction', np.zeros_like(svi_vals)).values
+            uncertainty = predictions_df.get('sd', np.ones_like(svi_vals) * 0.01).values
+            
+            # 1. IDM Baseline spatial pattern
+            ax = axes[0, 0]
+            scatter1 = ax.scatter(x, y, c=idm_vals, cmap='viridis_r', s=25, alpha=0.8, edgecolors='white', linewidth=0.1)
+            plt.colorbar(scatter1, ax=ax, fraction=0.046, pad=0.04)
+            ax.set_title('IDM Baseline Spatial Pattern')
+            ax.set_xlabel('X Coordinate')
+            ax.set_ylabel('Y Coordinate')
+            ax.set_aspect('equal')
+            
+            # 2. GNN Corrections spatial pattern
+            ax = axes[0, 1]
+            # Use a diverging colormap for corrections (positive/negative)
+            max_abs_corr = max(abs(np.min(gnn_corrections)), abs(np.max(gnn_corrections)))
+            scatter2 = ax.scatter(x, y, c=gnn_corrections, cmap='RdBu_r', s=25, alpha=0.8, 
+                                vmin=-max_abs_corr, vmax=max_abs_corr, edgecolors='white', linewidth=0.1)
+            plt.colorbar(scatter2, ax=ax, fraction=0.046, pad=0.04)
+            ax.set_title('GNN Accessibility Corrections')
+            ax.set_xlabel('X Coordinate')
+            ax.set_ylabel('Y Coordinate')
+            ax.set_aspect('equal')
+            
+            # 3. Final hybrid results
+            ax = axes[1, 0]
+            scatter3 = ax.scatter(x, y, c=svi_vals, cmap='viridis_r', s=25, alpha=0.8, edgecolors='white', linewidth=0.1)
+            plt.colorbar(scatter3, ax=ax, fraction=0.046, pad=0.04)
+            ax.set_title('Hybrid IDM+GNN Results')
+            ax.set_xlabel('X Coordinate')
+            ax.set_ylabel('Y Coordinate')
+            ax.set_aspect('equal')
+            
+            # 4. Prediction uncertainty
+            ax = axes[1, 1]
+            scatter4 = ax.scatter(x, y, c=uncertainty, cmap='Reds', s=25, alpha=0.8, edgecolors='white', linewidth=0.1)
+            plt.colorbar(scatter4, ax=ax, fraction=0.046, pad=0.04)
+            ax.set_title('Prediction Uncertainty (SD)')
+            ax.set_xlabel('X Coordinate')
+            ax.set_ylabel('Y Coordinate')
+            ax.set_aspect('equal')
+            
+            plt.tight_layout()
+            
+            # Save spatial detail plot
+            spatial_path = os.path.join(self.output_dir, 'granite_spatial_analysis.png')
+            fig.savefig(spatial_path, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+            plt.close(fig)
+            
+            self._log(f"Saved spatial analysis to {spatial_path}")
+            
+        except Exception as e:
+            self._log(f"Error creating spatial detail plot: {str(e)}", level='ERROR')

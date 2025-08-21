@@ -5,7 +5,7 @@ This module implements GNN architectures for learning SPDE parameters
 from road network structure.
 """
 # Standard library imports
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 
 # Third-party imports
 import numpy as np
@@ -21,6 +21,342 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data
 
+
+class AccessibilityGNNCorrector(nn.Module):
+    """
+    GNN model that learns accessibility-based corrections to IDM baseline.
+    
+    Key difference from traditional GNN: This outputs CORRECTIONS, not full SPDE parameters.
+    Corrections are bounded to prevent unrealistic adjustments.
+    """
+    
+    def __init__(self, input_dim: int, hidden_dim: int = 64, max_correction: float = 0.15):
+        super().__init__()
+        
+        self.max_correction = max_correction
+        
+        # Feature processing layers
+        self.input_projection = nn.Linear(input_dim, hidden_dim)
+        
+        # Graph convolution layers
+        try:
+            from torch_geometric.nn import GCNConv
+            self.conv1 = GCNConv(hidden_dim, hidden_dim)
+            self.conv2 = GCNConv(hidden_dim, hidden_dim)
+            self.conv3 = GCNConv(hidden_dim, hidden_dim // 2)
+        except ImportError:
+            # Fallback to simple linear layers if PyTorch Geometric not available
+            self.conv1 = nn.Linear(hidden_dim, hidden_dim)
+            self.conv2 = nn.Linear(hidden_dim, hidden_dim)
+            self.conv3 = nn.Linear(hidden_dim, hidden_dim // 2)
+            self._use_pyg = False
+        else:
+            self._use_pyg = True
+            
+        # Accessibility-specific layers
+        self.accessibility_attention = nn.MultiheadAttention(
+            embed_dim=hidden_dim // 2, num_heads=4, batch_first=True
+        )
+        
+        # Output single correction value per node
+        self.correction_head = nn.Sequential(
+            nn.Linear(hidden_dim // 2, hidden_dim // 4),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim // 4, 1)
+        )
+        
+        # Normalization and activation
+        self.batch_norm1 = nn.BatchNorm1d(hidden_dim)
+        self.batch_norm2 = nn.BatchNorm1d(hidden_dim)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.1)
+        
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, 
+                idm_baseline: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Forward pass computing accessibility corrections.
+        
+        Parameters:
+        -----------
+        x : torch.Tensor [num_nodes, input_dim]
+            Node features (network topology + NLCD + optionally IDM baseline)
+        edge_index : torch.Tensor [2, num_edges] 
+            Graph connectivity
+        idm_baseline : torch.Tensor [num_nodes, 1], optional
+            IDM baseline predictions to inform corrections
+            
+        Returns:
+        --------
+        torch.Tensor [num_nodes, 1]
+            Accessibility corrections bounded to [-max_correction, +max_correction]
+        """
+        
+        # Concatenate IDM baseline if provided
+        if idm_baseline is not None:
+            if len(idm_baseline.shape) == 1:
+                idm_baseline = idm_baseline.unsqueeze(1)
+            x = torch.cat([x, idm_baseline], dim=1)
+            
+        # Initial feature projection
+        h = self.input_projection(x)
+        h = self.relu(h)
+        
+        # Graph convolutions with residual connections
+        if self._use_pyg:
+            # PyTorch Geometric path
+            h1 = self.conv1(h, edge_index)
+            h1 = self.batch_norm1(h1)
+            h1 = self.relu(h1)
+            h1 = self.dropout(h1)
+            
+            h2 = self.conv2(h1, edge_index)
+            h2 = self.batch_norm2(h2)
+            h2 = self.relu(h2)
+            h2 = h2 + h1  # Residual connection
+            
+            h3 = self.conv3(h2, edge_index)
+            h3 = self.relu(h3)
+        else:
+            # Fallback for simpler graphs (no edge_index needed)
+            h1 = self.conv1(h)
+            h1 = self.batch_norm1(h1)
+            h1 = self.relu(h1)
+            
+            h2 = self.conv2(h1)
+            h2 = self.batch_norm2(h2)
+            h2 = self.relu(h2) + h1
+            
+            h3 = self.conv3(h2)
+            h3 = self.relu(h3)
+        
+        # Accessibility attention mechanism
+        h3_expanded = h3.unsqueeze(0)  # Add batch dimension
+        attended_features, _ = self.accessibility_attention(
+            h3_expanded, h3_expanded, h3_expanded
+        )
+        h3 = attended_features.squeeze(0)  # Remove batch dimension
+        
+        # Generate corrections (bounded output)
+        corrections = self.correction_head(h3)
+        
+        # Bound corrections to reasonable range using tanh
+        corrections = torch.tanh(corrections) * self.max_correction
+        
+        # Ensure corrections are mean-centered (mass preserving)
+        corrections = corrections - torch.mean(corrections)
+        
+        return corrections
+
+
+class HybridCorrectionTrainer:
+    """
+    Trainer for the accessibility GNN corrector.
+    
+    This implements the improved loss function that prevents trivial solutions.
+    """
+    
+    def __init__(self, model: AccessibilityGNNCorrector, config: dict = None):
+        self.model = model
+        self.config = config or {}
+        
+        # Loss function weights (rebalanced from original)
+        self.loss_weights = {
+            'smoothness_weight': self.config.get('smoothness_weight', 1.0),
+            'diversity_weight': self.config.get('diversity_weight', 0.5),
+            'variation_weight': self.config.get('variation_weight', 0.3),
+            'constraint_weight': self.config.get('constraint_weight', 0.1),
+            'feature_weight': self.config.get('feature_weight', 0.1)
+        }
+        
+        # Initialize optimizer
+        self.optimizer = torch.optim.Adam(
+            model.parameters(), 
+            lr=self.config.get('learning_rate', 0.001),
+            weight_decay=self.config.get('weight_decay', 1e-5)
+        )
+        
+    def train_corrections(self, graph_data: object, idm_baseline: np.ndarray,
+                         tract_svi: float, epochs: int = 100, 
+                         verbose: bool = False) -> dict:
+        """
+        Train the GNN to learn accessibility corrections.
+        
+        Key improvements from original:
+        1. Soft tract constraint instead of hard constraint
+        2. Explicit variation preservation
+        3. Feature utilization without overwhelming other objectives
+        """
+        
+        self.model.train()
+        
+        # Convert inputs to tensors
+        idm_tensor = torch.tensor(idm_baseline, dtype=torch.float32)
+        target_mean = torch.tensor(tract_svi, dtype=torch.float32)
+        
+        loss_history = []
+        correction_history = []
+        
+        for epoch in range(epochs):
+            self.optimizer.zero_grad()
+            
+            # Forward pass
+            corrections = self.model(
+                graph_data.x, graph_data.edge_index, idm_tensor
+            ).squeeze()
+            
+            # Compute enhanced predictions
+            enhanced_predictions = idm_tensor + corrections
+            
+            # Multi-component loss function
+            total_loss = self._compute_balanced_loss(
+                corrections, enhanced_predictions, target_mean, graph_data
+            )
+            
+            # Backward pass
+            total_loss.backward()
+            
+            # Gradient clipping to prevent instability
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            
+            self.optimizer.step()
+            
+            # Logging and monitoring
+            loss_history.append(total_loss.item())
+            correction_history.append(corrections.detach().numpy().copy())
+            
+            if verbose and epoch % 20 == 0:
+                pred_std = torch.std(enhanced_predictions).item()
+                corr_std = torch.std(corrections).item()
+                constraint_error = abs(torch.mean(enhanced_predictions) - target_mean).item()
+                
+                print(f"Epoch {epoch:3d}: Loss={total_loss:.4f}, "
+                      f"Pred_std={pred_std:.4f}, Corr_std={corr_std:.4f}, "
+                      f"Constraint_err={constraint_error:.4f}")
+        
+        # Final evaluation
+        self.model.eval()
+        with torch.no_grad():
+            final_corrections = self.model(
+                graph_data.x, graph_data.edge_index, idm_tensor
+            ).squeeze()
+            final_predictions = idm_tensor + final_corrections
+            
+        return {
+            'success': True,
+            'final_corrections': final_corrections.numpy(),
+            'final_predictions': final_predictions.numpy(),
+            'loss_history': loss_history,
+            'correction_history': correction_history,
+            'final_metrics': {
+                'prediction_std': torch.std(final_predictions).item(),
+                'correction_std': torch.std(final_corrections).item(),
+                'constraint_error': abs(torch.mean(final_predictions) - target_mean).item(),
+                'mean_correction_magnitude': torch.mean(torch.abs(final_corrections)).item()
+            }
+        }
+    
+    def _compute_balanced_loss(self, corrections: torch.Tensor, 
+                              enhanced_predictions: torch.Tensor,
+                              target_mean: torch.Tensor,
+                              graph_data: object) -> torch.Tensor:
+        """
+        Compute balanced loss function that prevents trivial solutions.
+        """
+        
+        # 1. Soft tract constraint (not hard constraint)
+        constraint_loss = F.mse_loss(
+            torch.mean(enhanced_predictions), target_mean
+        ) * self.loss_weights['constraint_weight']
+        
+        # 2. Spatial smoothness (encourages reasonable corrections)
+        smoothness_loss = self._compute_spatial_smoothness_loss(
+            corrections, graph_data.edge_index
+        ) * self.loss_weights['smoothness_weight']
+        
+        # 3. Variation preservation (prevents collapse to constant)
+        variation_loss = self._compute_variation_loss(
+            enhanced_predictions
+        ) * self.loss_weights['variation_weight']
+        
+        # 4. Diversity encouragement (prevents uniform predictions)
+        diversity_loss = self._compute_diversity_loss(
+            enhanced_predictions
+        ) * self.loss_weights['diversity_weight']
+        
+        # 5. Gentle feature utilization (much reduced weight)
+        feature_loss = self._compute_feature_utilization_loss(
+            corrections, graph_data.x
+        ) * self.loss_weights['feature_weight']
+        
+        total_loss = (constraint_loss + smoothness_loss + variation_loss + 
+                     diversity_loss + feature_loss)
+        
+        return total_loss
+    
+    def _compute_spatial_smoothness_loss(self, corrections: torch.Tensor,
+                                       edge_index: torch.Tensor) -> torch.Tensor:
+        """Encourage spatially smooth corrections"""
+        if edge_index.shape[1] == 0:
+            return torch.tensor(0.0)
+            
+        source_corrections = corrections[edge_index[0]]
+        target_corrections = corrections[edge_index[1]]
+        
+        return F.mse_loss(source_corrections, target_corrections)
+    
+    def _compute_variation_loss(self, predictions: torch.Tensor) -> torch.Tensor:
+        """Encourage meaningful spatial variation"""
+        pred_std = torch.std(predictions)
+        target_cv = 0.15  # Target coefficient of variation
+        pred_mean = torch.mean(predictions)
+        
+        if pred_mean > 0:
+            current_cv = pred_std / pred_mean
+            return F.mse_loss(current_cv, torch.tensor(target_cv))
+        else:
+            return torch.tensor(0.0)
+    
+    def _compute_diversity_loss(self, predictions: torch.Tensor) -> torch.Tensor:
+        """Prevent all predictions from being identical"""
+        return -torch.log(torch.std(predictions) + 1e-8)
+    
+    def _compute_feature_utilization_loss(self, corrections: torch.Tensor,
+                                        features: torch.Tensor) -> torch.Tensor:
+        """Gentle encouragement to use available features"""
+        if features.shape[1] == 0:
+            return torch.tensor(0.0)
+            
+        # Compute correlation between corrections and each feature
+        feature_correlations = []
+        for i in range(features.shape[1]):
+            corr = torch.corrcoef(torch.stack([
+                corrections.flatten(), 
+                features[:, i].flatten()
+            ]))[0, 1]
+            if not torch.isnan(corr):
+                feature_correlations.append(torch.abs(corr))
+        
+        if feature_correlations:
+            # Encourage some feature utilization but don't dominate
+            mean_correlation = torch.mean(torch.stack(feature_correlations))
+            return -mean_correlation  # Minimize negative correlation (maximize positive)
+        else:
+            return torch.tensor(0.0)
+
+
+# Convenience function for easy use in pipeline
+def create_accessibility_corrector(input_dim: int, hidden_dim: int = 64, 
+                                 max_correction: float = 0.15) -> AccessibilityGNNCorrector:
+    """
+    Convenience function to create AccessibilityGNNCorrector.
+    Can be used in pipeline.py for easy model creation.
+    """
+    return AccessibilityGNNCorrector(
+        input_dim=input_dim,
+        hidden_dim=hidden_dim,
+        max_correction=max_correction
+    )
 
 class SPDEParameterGNN(nn.Module):
     """GNN with explicit variance preservation"""

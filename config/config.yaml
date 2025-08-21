@@ -48,6 +48,24 @@ metricgraph:
   mesh_resolution: 0.05             # Used in console output
   max_edges: 50000                  # Prevents memory issues
 
+hybrid:
+  # Component weights
+  idm_weight: 0.7           # 70% IDM baseline  
+  gnn_weight: 0.3           # 30% GNN corrections
+  max_correction: 0.15      # ±15% correction limit
+  
+  # Loss function weights (critical rebalancing)
+  smoothness_weight: 1.0    # Spatial smoothness baseline
+  diversity_weight: 0.5     # Prevent uniform predictions
+  variation_weight: 0.3     # Maintain spatial variation  
+  constraint_weight: 0.1    # Soft tract constraint (reduced!)
+  feature_weight: 0.1       # Feature utilization (reduced!)
+  
+  # Training parameters
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  epochs: 100
+
 # Output
 output:
   save_predictions: true

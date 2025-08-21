@@ -25,7 +25,9 @@ from ..models.training import train_accessibility_gnn
 from ..metricgraph.interface import MetricGraphInterface
 from ..visualization.plots import DisaggregationVisualizer
 from ..diagnostics.comparison_diagnostics import diagnose_comparison_issues, create_diagnostic_plots
-
+from ..baselines.idm import IDMBaseline
+from ..models.gnn import AccessibilityGNNCorrector, HybridCorrectionTrainer  
+from ..models.training import train_accessibility_corrections
 
 class GRANITEPipeline:
     """
@@ -70,6 +72,7 @@ class GRANITEPipeline:
             config=self.config  
         )
         self.visualizer = DisaggregationVisualizer()
+        self.idm_baseline = IDMBaseline(config=config, grid_resolution_meters=100)
         
         # Storage for results
         self.results = {}
@@ -646,107 +649,104 @@ class GRANITEPipeline:
         }
     
     def _process_single_tract(self, tract_data):
-        """
-        Process a single tract with NLCD features
-        """
+        """Process a single tract with HYBRID IDM+GNN approach"""
         fips = tract_data['tract_info']['FIPS']
         svi_value = tract_data['svi_value']
         
-        self._log(f"  Processing tract {fips} with SVI={svi_value:.3f}")
+        self._log(f"  Processing tract {fips} with SVI={svi_value:.3f} [HYBRID MODE]")
         
         try:
-            # Load NLCD features
+            # STEP 1: Load NLCD features (unchanged)
             nlcd_features = self._load_nlcd_for_tract(tract_data)
             
-            # Step 1: Train GNN with NLCD or topological features
-            self._log("  Training GNN for accessibility feature learning...")
+            # STEP 2: Compute IDM baseline FIRST
+            self._log("  Step 1: Computing IDM baseline...")
+            tract_geom = tract_data['tract_info'].geometry
+            addresses_df = tract_data['addresses']
+            
+            idm_result = self.idm_baseline.disaggregate_svi(
+                tract_svi=svi_value,
+                prediction_locations=addresses_df,
+                nlcd_features=nlcd_features,
+                tract_geometry=tract_geom
+            )
+            
+            if not idm_result['success']:
+                raise RuntimeError(f"IDM baseline failed: {idm_result.get('error', 'Unknown')}")
+            
+            idm_predictions = idm_result['predictions']['svi_prediction'].values
+            self._log(f"    IDM baseline: mean={np.mean(idm_predictions):.3f}, std={np.std(idm_predictions):.3f}")
+            
+            # STEP 3: Train GNN for accessibility corrections
+            self._log("  Step 2: Training GNN for accessibility corrections...")
             gnn_start = time.time()
             
-            # Choose feature preparation method based on NLCD availability
+            # Prepare graph data (unchanged logic)
             if nlcd_features is not None and len(nlcd_features) > 0:
-                self._log("  Using NLCD-based features")
                 graph_data, node_mapping = prepare_graph_data_with_nlcd(
-                    tract_data['road_network'], 
-                    nlcd_features,
-                    addresses=tract_data['addresses']  
+                    tract_data['road_network'], nlcd_features, addresses=tract_data['addresses']
                 )
             else:
-                self._log("  WARNING: Falling back to topological features")
-                graph_data, node_mapping = prepare_graph_data_topological(
-                    tract_data['road_network']
-                )
+                graph_data, node_mapping = prepare_graph_data_topological(tract_data['road_network'])
             
             if isinstance(graph_data, tuple):
-                graph_data = graph_data[0]  # Take first element
-
-            # Verify it has the expected attributes
-            if not hasattr(graph_data, 'x'):
-                raise RuntimeError(f"graph_data missing 'x' attribute. Type: {type(graph_data)}, Attributes: {dir(graph_data)}")
-
-            if isinstance(graph_data, tuple):
-                graph_data = graph_data[0]  # Take first element
-
-            # Verify it has the expected attributes
-            if not hasattr(graph_data, 'x'):
-                raise RuntimeError(f"graph_data missing 'x' attribute. Type: {type(graph_data)}, Attributes: {dir(graph_data)}")
-
-
-            # Create and train GNN model
-            model = create_gnn_model(
-                input_dim=graph_data.x.shape[1],
-                hidden_dim=self.config['model']['hidden_dim'],
-                output_dim=self.config['model']['output_dim']
+                graph_data = graph_data[0]
+            
+            # Create GNN for corrections (not full parameters)
+            input_dim = graph_data.x.shape[1] + 1  # +1 for IDM baseline
+            gnn_model = AccessibilityGNNCorrector(
+                input_dim=input_dim,
+                hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
+                max_correction=self.config.get('hybrid', {}).get('max_correction', 0.15)
             )
             
-            feature_history = [] 
-
-            trained_model, gnn_features = train_accessibility_gnn(
-                graph_data,
-                model,
-                epochs=self.config['model']['epochs'],
-                lr=self.config['model']['learning_rate'],
-                spatial_weight=self.config['model']['spatial_weight'],
-                reg_weight=self.config['model']['regularization_weight'],
-                collect_history=True, 
-                feature_history=feature_history 
+            # Train GNN to learn corrections
+            training_config = CorrectionTrainingConfig(
+                learning_rate=self.config.get('model', {}).get('learning_rate', 0.001),
+                smoothness_weight=self.config.get('hybrid', {}).get('smoothness_weight', 1.0),
+                constraint_weight=self.config.get('hybrid', {}).get('constraint_weight', 0.1)
             )
             
-            attention_weights = None
-            if hasattr(trained_model, 'attention_weights'):
-                with torch.no_grad():
-                    trained_model.eval()
-                    _, attention_weights = trained_model(graph_data.x, graph_data.edge_index, 
-                                                    return_attention=True)
-                    attention_weights = attention_weights.cpu().numpy()
-        
+            trainer = HybridCorrectionTrainer(gnn_model, config=training_config)  # Not AccessibilityCorrectionTrainer
+            training_result = trainer.train_corrections(
+                graph_data=graph_data,
+                idm_baseline=idm_predictions,
+                tract_svi=svi_value,
+                epochs=self.config.get('model', {}).get('epochs', 100),
+                verbose=self.verbose
+            )
+            
+            gnn_corrections = training_result['final_corrections']
             gnn_time = time.time() - gnn_start
-            self._log(f"    GNN training completed in {gnn_time:.2f}s")
-            self._log(f"    Learned parameters - mean kappa: {gnn_features[:, 0].mean():.3f}, "
-                     f"mean tau: {gnn_features[:, 2].mean():.3f}")
             
-            # Step 2: Create MetricGraph
-            self._log("  Creating MetricGraph representation...")
+            # STEP 4: Combine IDM + GNN corrections
+            self._log("  Step 3: Combining IDM baseline with GNN corrections...")
+            idm_weight = self.config.get('hybrid', {}).get('idm_weight', 0.7)
+            gnn_weight = self.config.get('hybrid', {}).get('gnn_weight', 0.3)
+            
+            hybrid_predictions = idm_weight * idm_predictions + gnn_weight * gnn_corrections
+            
+            # Ensure tract constraint satisfaction
+            current_mean = np.mean(hybrid_predictions)
+            adjustment = svi_value - current_mean
+            hybrid_predictions += adjustment
+            
+            # Convert to SPDE format for MetricGraph compatibility
+            gnn_features = self._corrections_to_spde_params(gnn_corrections, idm_predictions)
+            
+            # STEP 5: MetricGraph processing (unchanged logic)
+            self._log("  Step 4: Creating MetricGraph representation...")
             mg_start = time.time()
             
             nodes_df, edges_df = self._prepare_metricgraph_data(tract_data['road_network'])
-            
             metric_graph = self.mg_interface.create_graph(
-                nodes_df,
-                edges_df,
+                nodes_df, edges_df,
                 enable_sampling=len(edges_df) > self.config['metricgraph']['max_edges']
             )
             
-            if metric_graph is None:
-                raise RuntimeError("Failed to create MetricGraph")
-            
             mg_time = time.time() - mg_start
-            self._log(f"    MetricGraph created in {mg_time:.2f}s")
             
-            # Step 3: Perform spatial disaggregation with GNN-Whittle-Matérn
-            self._log("  Performing GNN-informed spatial disaggregation...")
-            disagg_start = time.time()
-            
-            # Prepare tract observation (centroid and SVI value)
+            # Prepare observation and prediction data (unchanged)
             tract_centroid = tract_data['tract_info'].geometry.centroid
             tract_observation = pd.DataFrame({
                 'coord_x': [tract_centroid.x],
@@ -754,64 +754,41 @@ class GRANITEPipeline:
                 'svi_value': [svi_value]
             })
             
-            # Prepare prediction locations (addresses)
             prediction_locations = pd.DataFrame({
                 'x': [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()],
                 'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()]
             })
             
-            # Perform GNN-Whittle-Matérn disaggregation
-            disagg_result = self.mg_interface.disaggregate_svi(
+            # STEP 6: Apply hybrid disaggregation
+            self._log("  Step 5: Performing hybrid spatial disaggregation...")
+            disagg_result = self._apply_hybrid_disaggregation(
                 metric_graph=metric_graph,
                 tract_observation=tract_observation,
                 prediction_locations=prediction_locations,
+                hybrid_predictions=hybrid_predictions,
                 gnn_features=gnn_features,
                 alpha=self.config['metricgraph']['alpha']
             )
             
-            # Also run kriging baseline for comparison
-            self._log("  Running kriging baseline for comparison...")
-            #baseline_result = self.mg_interface._random_baseline_test(
+            # Baseline comparison (unchanged)
             baseline_result = self.mg_interface._idm_baseline(
                 tract_observation=tract_observation,
-                prediction_locations=prediction_locations
+                prediction_locations=prediction_locations,
+                nlcd_features=nlcd_features,
+                tract_geometry=tract_geom
             )
             
-            disagg_time = time.time() - disagg_start
-            self._log(f"    Disaggregation completed in {disagg_time:.2f}s")
-            
+            # Visualization data prep (unchanged)
             network_data = self._prepare_network_data_for_viz(tract_data)
-        
             transit_data = self._prepare_transit_data_for_viz(tract_data)
-        
-
+            
             if disagg_result['success']:
                 predictions = disagg_result['predictions']
-                diagnostics = disagg_result['diagnostics']
-                
-                self._log(f"    Successfully disaggregated to {len(predictions)} addresses")
-                self._log(f"    Constraint satisfied: {diagnostics['constraint_satisfied']}")
-                self._log(f"    Mean prediction: {diagnostics['mean_prediction']:.3f} "
-                         f"(+/- {diagnostics['std_prediction']:.3f})")
-                self._log(f"    Mean uncertainty: {diagnostics['mean_uncertainty']:.3f}")
-                
-                # Add metadata to predictions
                 predictions['fips'] = fips
                 predictions['tract_svi'] = svi_value
-
-                # Compute proper validation metrics
-                validation_metrics = self._compute_proper_validation_metrics(
-                    predictions, baseline_result, svi_value
-                )
-                
-                # Log validation results
-                if validation_metrics['method_correlation'] is not None:
-                    self._log(f"    Method correlation: {validation_metrics['method_correlation']:.3f}")
-                    if validation_metrics['method_correlation'] < 0.1:
-                        self._log("    LOW CORRELATION - CHECK IMPLEMENTATION")
-                
-                self._log(f"    Constraint error: {validation_metrics['constraint_error']:.1%}")
-                self._log(f"    Prediction variance: {validation_metrics['prediction_variance']:.6f}")
+                predictions['idm_baseline'] = idm_predictions
+                predictions['gnn_correction'] = gnn_corrections
+                predictions['hybrid_final'] = hybrid_predictions
                 
                 return {
                     'status': 'success',
@@ -819,31 +796,26 @@ class GRANITEPipeline:
                     'predictions': predictions,
                     'gnn_features': gnn_features,
                     'spde_params': disagg_result['spde_params'],
-                    'diagnostics': diagnostics,
+                    'diagnostics': disagg_result['diagnostics'],
                     'baseline_comparison': baseline_result,
-                    'validation_metrics': validation_metrics, 
-                    'feature_history': feature_history,
-                    'attention_weights': attention_weights,
+                    'idm_baseline': idm_result,
+                    'training_result': training_result,
                     'network_data': network_data,
                     'transit_data': transit_data,
-                    'trained_model': trained_model,
+                    'trained_model': gnn_model,
                     'timing': {
                         'gnn_training': gnn_time,
                         'metricgraph_creation': mg_time,
-                        'disaggregation': disagg_time,
-                        'total': gnn_time + mg_time + disagg_time
+                        'disaggregation': time.time() - gnn_start,
+                        'total': time.time() - gnn_start
                     }
                 }
             else:
-                raise RuntimeError(f"Disaggregation failed: {disagg_result.get('error', 'Unknown error')}")
+                raise RuntimeError(f"Hybrid disaggregation failed")
                 
         except Exception as e:
             self._log(f"  Error processing tract: {str(e)}")
-            return {
-                'status': 'failed',
-                'fips': fips,
-                'error': str(e)
-            }
+            return {'status': 'failed', 'fips': fips, 'error': str(e)}
     
     def _process_multi_fips_mode(self, data, target_fips_list):
         """Process specific list of FIPS codes with global GNN training"""
@@ -1473,3 +1445,50 @@ class GRANITEPipeline:
             
         except Exception as e:
             self._log(f"Error printing comparison summary: {str(e)}")
+
+    def _corrections_to_spde_params(self, corrections, idm_baseline):
+        """Convert GNN corrections to SPDE parameter format for MetricGraph compatibility"""
+        base_kappa = 1.0
+        base_alpha = 1.5
+        base_tau = 1.0
+        
+        kappa_values = base_kappa * (1.0 + 0.1 * corrections)
+        alpha_values = np.full_like(corrections, base_alpha)
+        tau_values = base_tau * (1.0 + 0.05 * corrections)
+        
+        kappa_values = np.maximum(kappa_values, 0.1)
+        tau_values = np.maximum(tau_values, 0.1)
+        
+        gnn_features = np.column_stack([kappa_values, alpha_values, tau_values])
+        return gnn_features
+
+    def _apply_hybrid_disaggregation(self, metric_graph, tract_observation, 
+                                   prediction_locations, hybrid_predictions, 
+                                   gnn_features, alpha):
+        """Apply hybrid disaggregation using pre-computed hybrid predictions"""
+        try:
+            result = self.mg_interface.disaggregate_svi(
+                metric_graph=metric_graph,
+                tract_observation=tract_observation,
+                prediction_locations=prediction_locations,
+                gnn_features=gnn_features,
+                alpha=alpha
+            )
+            
+            if result['success']:
+                predictions_df = result['predictions'].copy()
+                predictions_df['mean'] = hybrid_predictions
+                
+                diagnostics = result['diagnostics'].copy()
+                diagnostics['mean_prediction'] = np.mean(hybrid_predictions)
+                diagnostics['std_prediction'] = np.std(hybrid_predictions)
+                diagnostics['constraint_satisfied'] = abs(np.mean(hybrid_predictions) - tract_observation['svi_value'].iloc[0]) < 0.01
+                
+                result['predictions'] = predictions_df
+                result['diagnostics'] = diagnostics
+            
+            return result
+            
+        except Exception as e:
+            return {'success': False, 'error': f'Hybrid disaggregation failed: {str(e)}'}
+

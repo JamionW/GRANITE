@@ -675,6 +675,10 @@ class GRANITEPipeline:
         fips = tract_data['tract_info']['FIPS']
         svi_value = tract_data['svi_value']
         
+        print(f"🚨 DEBUG: About to call HybridCorrectionTrainer")
+        print(f"🚨 DEBUG: Config mode: {self.config.get('processing', {}).get('mode', 'unknown')}")
+        
+        
         self._log(f"  Processing tract {fips} with SVI={svi_value:.3f} [HYBRID MODE]")
         
         try:
@@ -715,7 +719,8 @@ class GRANITEPipeline:
                 graph_data = graph_data[0]
             
             # Create GNN for corrections (not full parameters)
-            input_dim = graph_data.x.shape[1] + 1  # +1 for IDM baseline
+            input_dim = graph_data.x.shape[1]  
+            print(f"🚨 DEBUG: Creating AccessibilityGNNCorrector with input_dim={input_dim}")
             gnn_model = AccessibilityGNNCorrector(
                 input_dim=input_dim,
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
@@ -735,7 +740,10 @@ class GRANITEPipeline:
                 }
             }
             
+            #print(f"🚨 DEBUG: Creating HybridCorrectionTrainer")
             trainer = HybridCorrectionTrainer(gnn_model, config=training_config)  # Not AccessibilityCorrectionTrainer
+            
+            #print(f"🚨 DEBUG: About to call trainer.train_corrections")        
             training_result = trainer.train_corrections(
                 graph_data=graph_data,
                 idm_baseline=idm_predictions,
@@ -743,6 +751,9 @@ class GRANITEPipeline:
                 epochs=self.config.get('model', {}).get('epochs', 100),
                 verbose=self.verbose
             )
+
+            print(f"🚨 DEBUG: HybridCorrectionTrainer completed!")
+            print(f"Training result keys: {training_result.keys()}")
             
             gnn_corrections = training_result['final_corrections']
             gnn_time = time.time() - gnn_start
@@ -838,11 +849,15 @@ class GRANITEPipeline:
                         'total': time.time() - gnn_start
                     }
                 }
+        
             else:
                 raise RuntimeError(f"Hybrid disaggregation failed")
-                
+        
+
+        
         except Exception as e:
             self._log(f"  Error processing tract: {str(e)}")
+            print(f"🚨 ERROR in hybrid training: {e}")
             return {'status': 'failed', 'fips': fips, 'error': str(e)}
     
     def _process_multi_fips_mode(self, data, target_fips_list):

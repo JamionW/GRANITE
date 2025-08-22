@@ -605,8 +605,29 @@ class GRANITEPipeline:
         
         self._log(f"Processing {len(single_tract_data['tracts'])} tract (single FIPS mode)")
         
-        # Process single tract
-        return self._process_county_mode(single_tract_data)
+        target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips].iloc[0]
+    
+        self._log(f"✓ Found target tract: {target_fips}")
+        self._log(f"Processing single tract with HYBRID approach")
+        
+        # Use your hybrid method directly
+        tract_data = self._prepare_tract_data(target_tract, data)
+        result = self._process_single_tract(tract_data)  # This calls your hybrid method!
+        
+        if result['status'] == 'success':
+            return {
+                'success': True,
+                'predictions': result['predictions'], 
+                'tract_results': [result],
+                'summary': {
+                    'total_tracts': 1,
+                    'successful_tracts': 1,
+                    'total_addresses': len(result['predictions']),
+                    'processing_time': result['timing']['total']
+                }
+            }
+        else:
+            return {'success': False, 'error': result['error']}
     
     def _prepare_tract_data(self, tract, county_data):
         """
@@ -650,6 +671,7 @@ class GRANITEPipeline:
     
     def _process_single_tract(self, tract_data):
         """Process a single tract with HYBRID IDM+GNN approach"""
+        print("🔍 DEBUG: Using HYBRID _process_single_tract method") 
         fips = tract_data['tract_info']['FIPS']
         svi_value = tract_data['svi_value']
         
@@ -701,11 +723,17 @@ class GRANITEPipeline:
             )
             
             # Train GNN to learn corrections
-            training_config = CorrectionTrainingConfig(
-                learning_rate=self.config.get('model', {}).get('learning_rate', 0.001),
-                smoothness_weight=self.config.get('hybrid', {}).get('smoothness_weight', 1.0),
-                constraint_weight=self.config.get('hybrid', {}).get('constraint_weight', 0.1)
-            )
+            training_config = {
+                'learning_rate': self.config.get('model', {}).get('learning_rate', 0.001),
+                'weight_decay': 1e-5,
+                'loss_config': {
+                    'smoothness_weight': 1.0,
+                    'diversity_weight': 0.5,
+                    'variation_weight': 0.3,
+                    'feature_weight': 0.2,
+                    'constraint_weight': 0.1
+                }
+            }
             
             trainer = HybridCorrectionTrainer(gnn_model, config=training_config)  # Not AccessibilityCorrectionTrainer
             training_result = trainer.train_corrections(

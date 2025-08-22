@@ -92,10 +92,19 @@ class AccessibilityGNNCorrector(nn.Module):
             Accessibility corrections bounded to [-max_correction, +max_correction]
         """
         
-        # Concatenate IDM baseline if provided
         if idm_baseline is not None:
             if len(idm_baseline.shape) == 1:
                 idm_baseline = idm_baseline.unsqueeze(1)
+            
+            # Handle size mismatch: graph has more nodes than addresses
+            if idm_baseline.shape[0] != x.shape[0]:
+                print(f"DEBUG: IDM baseline size mismatch - Graph nodes: {x.shape[0]}, IDM: {idm_baseline.shape[0]}")
+                # Pad IDM baseline with mean value for missing nodes
+                mean_idm = torch.mean(idm_baseline)
+                padding_size = x.shape[0] - idm_baseline.shape[0]
+                padding = mean_idm.expand(padding_size, 1)
+                idm_baseline = torch.cat([idm_baseline, padding], dim=0)
+            
             x = torch.cat([x, idm_baseline], dim=1)
             
         # Initial feature projection
@@ -190,9 +199,17 @@ class HybridCorrectionTrainer:
         
         self.model.train()
         
-        # Convert inputs to tensors
+        # Convert inputs to tensors and handle size mismatch
         idm_tensor = torch.tensor(idm_baseline, dtype=torch.float32)
         target_mean = torch.tensor(tract_svi, dtype=torch.float32)
+
+        # Pad IDM tensor to match graph size (same logic as in forward pass)
+        if idm_tensor.shape[0] != graph_data.x.shape[0]:
+            print(f"DEBUG: Padding IDM tensor from {idm_tensor.shape[0]} to {graph_data.x.shape[0]}")
+            mean_idm = torch.mean(idm_tensor)
+            padding_size = graph_data.x.shape[0] - idm_tensor.shape[0]
+            padding = mean_idm.expand(padding_size)
+            idm_tensor = torch.cat([idm_tensor, padding], dim=0)
         
         loss_history = []
         correction_history = []
@@ -204,7 +221,12 @@ class HybridCorrectionTrainer:
             corrections = self.model(
                 graph_data.x, graph_data.edge_index, idm_tensor
             ).squeeze()
-            
+
+            # Handle size mismatch: corrections are for all nodes, IDM only for addresses
+            if corrections.shape[0] != idm_tensor.shape[0]:
+                # Truncate corrections to match IDM baseline (keep only address-level corrections)
+                corrections = corrections[:idm_tensor.shape[0]]
+
             # Compute enhanced predictions
             enhanced_predictions = idm_tensor + corrections
             
@@ -241,6 +263,11 @@ class HybridCorrectionTrainer:
                 graph_data.x, graph_data.edge_index, idm_tensor
             ).squeeze()
             final_predictions = idm_tensor + final_corrections
+            
+            # Truncate back to address count for output
+            original_address_count = len(idm_baseline)
+            final_corrections = final_corrections[:original_address_count]
+            final_predictions = final_predictions[:original_address_count]
             
         return {
             'success': True,

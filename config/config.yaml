@@ -78,7 +78,7 @@ baselines:
 # Processing 
 processing:
   continue_on_error: true
-  verbose: true  
+  verbose: false  
   random_seed: 42
   mode: "comparison"  # Enable comparative analysis
   methods: ["idm", "hybrid"]

@@ -92,23 +92,10 @@ class AccessibilityGNNCorrector(nn.Module):
             Accessibility corrections bounded to [-max_correction, +max_correction]
         """
 
-        if not self.training:  # In eval mode
-            print(f"🔍 MODEL EVAL MODE DEBUG:")
-            print(f"   Input x shape: {x.shape}")
-            print(f"   Model in training: {self.training}")
-
-        #print(f"🔍 FORWARD DEBUG:")
-        #print(f"   x.shape: {x.shape}")
-        #print(f"   idm_baseline type: {type(idm_baseline)}")
         if idm_baseline is not None:
-        #    print(f"   idm_baseline.shape: {idm_baseline.shape}")
             num_addresses = idm_baseline.shape[0]
-        #    print(f"   num_addresses from IDM: {num_addresses}")
         else:
-            print(f"   ⚠️  idm_baseline is None!")
-            num_addresses = 2394  # HARDCODE for now to debug
-            print(f"   using hardcoded num_addresses: {num_addresses}")
-    
+            num_addresses = 2394  # Debug hardcode for now 
         
         num_addresses = idm_baseline.shape[0] if idm_baseline is not None else x.shape[0]
 
@@ -165,28 +152,18 @@ class AccessibilityGNNCorrector(nn.Module):
 
         # Generate corrections for ALL graph nodes
         all_corrections = self.correction_head(h3)  # [3098, 1]
-        #print(f"   all_corrections.shape: {all_corrections.shape}")
         
         # SAFE BOUNDS CHECKING:
         if num_addresses > all_corrections.shape[0]:
-            print(f"⚠️  WARNING: num_addresses ({num_addresses}) > corrections ({all_corrections.shape[0]})")
             num_addresses = all_corrections.shape[0]
         
-        #print(f"   slicing corrections[:${num_addresses}]")
         address_corrections = all_corrections[:num_addresses]  # SAFE
-        #print(f"   address_corrections.shape: {address_corrections.shape}")
         
         # Bound corrections to reasonable range using tanh
         address_corrections = torch.tanh(address_corrections) * self.max_correction
         
         # Ensure corrections are mean-centered (mass preserving)
         address_corrections = address_corrections - torch.mean(address_corrections)
-        
-        if not self.training:  # In eval mode
-                print(f"   Output corrections shape: {address_corrections.shape}")
-                print(f"   Output corrections std: {address_corrections.std():.6f}")
-                print(f"   Output corrections range: [{address_corrections.min():.6f}, {address_corrections.max():.6f}]")
-            
 
         return address_corrections
 
@@ -233,22 +210,12 @@ class HybridCorrectionTrainer:
         """
         Train the GNN with improved loss function to prevent parameter collapse.
         """
-
-        print(f"🔍 TRAIN_CORRECTIONS DEBUG:")
-        print(f"   idm_baseline type: {type(idm_baseline)}")
-        print(f"   idm_baseline shape: {idm_baseline.shape}")
         
         self.model.train()
         
         # Convert inputs to tensors and handle size mismatch
         idm_tensor = torch.tensor(idm_baseline, dtype=torch.float32)
-        print(f"   idm_tensor shape: {idm_tensor.shape}")
         target_mean = torch.tensor(tract_svi, dtype=torch.float32)
-        
-        # FIXED: No padding! Model handles size mismatch internally
-        print(f"🔧 FIXED TRAINING - No padding needed:")
-        print(f"   Graph nodes: {graph_data.x.shape[0]}")
-        print(f"   Address count: {idm_tensor.shape[0]}")
         
         loss_history = []
         correction_history = []
@@ -258,10 +225,6 @@ class HybridCorrectionTrainer:
         
         for epoch in range(epochs):
             self.optimizer.zero_grad()
-
-            #print(f"🔍 About to call model.forward:")
-            #print(f"   graph_data.x.shape: {graph_data.x.shape}")
-            #print(f"   idm_tensor.shape: {idm_tensor.shape}")
             
             corrections = self.model(
                 graph_data.x, graph_data.edge_index, idm_tensor
@@ -270,12 +233,6 @@ class HybridCorrectionTrainer:
             # SAVE the corrections from the LAST epoch (bypass eval mode issue)
             if epoch == epochs - 1:  # Last epoch
                 last_training_corrections = corrections.detach().clone()
-                print(f"🔍 SAVED LAST TRAINING CORRECTIONS:")
-                print(f"   Shape: {last_training_corrections.shape}")
-                print(f"   Std: {last_training_corrections.std():.6f}")
-                print(f"   Range: [{last_training_corrections.min():.6f}, {last_training_corrections.max():.6f}]")
-                print(f"   Variance: {last_training_corrections.var():.8f}")
-            
 
             # Ensure corrections match IDM size (model should handle this internally now)
             if corrections.shape[0] != idm_tensor.shape[0]:
@@ -296,18 +253,7 @@ class HybridCorrectionTrainer:
                 corr_var = torch.var(corrections).item()
                 constraint_error = abs(pred_mean - target_mean.item())
                 current_cv = pred_std / (pred_mean + 1e-8)
-                
-                print(f"Epoch {epoch:3d}: Loss={total_loss:.4f}")
-                print(f"  Pred: mean={pred_mean:.4f}, std={pred_std:.4f}, CV={current_cv:.3f}")
-                print(f"  Corr: std={corr_std:.4f}, var={corr_var:.8f}")  # Show more precision
-                print(f"  Constraint error={constraint_error:.4f}")
-                print(f"  Loss components: {', '.join([f'{k}={v:.3f}' for k, v in loss_components.items()])}")
-                
-                # Strong warnings about parameter collapse
-                if corr_var < 1e-4:
-                    print("  🚨 CRITICAL: Correction variance extremely low!")
-                    print(f"     Variance preservation loss: {loss_components.get('variance_preservation', 0):.6f}")
-                    
+      
                 # Emergency early stopping
                 if corr_var < 1e-8 and epoch > 10:
                     print(f"🛑 EMERGENCY STOP: Complete parameter collapse at epoch {epoch}!")
@@ -335,48 +281,22 @@ class HybridCorrectionTrainer:
                 corr_std = torch.std(corrections).item()
                 constraint_error = abs(pred_mean - target_mean.item())
                 current_cv = pred_std / (pred_mean + 1e-8)
-                
-                print(f"Epoch {epoch:3d}: Loss={total_loss:.4f}")
-                print(f"  Pred: mean={pred_mean:.4f}, std={pred_std:.4f}, CV={current_cv:.3f}")
-                print(f"  Corr: std={corr_std:.4f}, variance={param_variance:.6f}")
-                print(f"  Constraint error={constraint_error:.4f}")
-                print(f"  Loss components: {', '.join([f'{k}={v:.3f}' for k, v in loss_components.items()])}")
-                
+      
                 # Warn about parameter collapse
                 if param_variance < 1e-6:
                     print("  ⚠️  WARNING: Parameter variance very low - possible collapse!")
         
-        # Final evaluation - DEBUG VERSION
-        print(f"🔍 FINAL EVALUATION DEBUG:")
-        print(f"   Model training mode before eval: {self.model.training}")
-
         self.model.eval()
-        print(f"   Model in eval mode: {self.model.training}")
 
         with torch.no_grad():
-            # Debug the inputs to final evaluation
-            print(f"   Final eval inputs:")
-            print(f"     graph_data.x.shape: {graph_data.x.shape}")
-            print(f"     idm_tensor.shape: {idm_tensor.shape}")
-            print(f"     idm_tensor range: [{idm_tensor.min():.6f}, {idm_tensor.max():.6f}]")
-            
             # Get final corrections
             final_corrections = self.model(
                 graph_data.x, graph_data.edge_index, idm_tensor
             ).squeeze()
             
-            print(f"   Final corrections from model:")
-            print(f"     Shape: {final_corrections.shape}")
-            print(f"     Range: [{final_corrections.min():.6f}, {final_corrections.max():.6f}]")
-            print(f"     Std: {final_corrections.std():.6f}")
-            print(f"     Variance: {final_corrections.var():.8f}")
-
             if last_training_corrections is not None:
                 final_corrections = last_training_corrections
-                print(f"   Using saved corrections: std={final_corrections.std():.6f}")
             else:
-                print(f"   ERROR: No saved corrections, falling back to eval mode")
-                # Fallback to eval mode (your existing code)
                 self.model.eval()
                 with torch.no_grad():
                     final_corrections = self.model(graph_data.x, graph_data.edge_index, idm_tensor).squeeze()
@@ -391,24 +311,13 @@ class HybridCorrectionTrainer:
                 
             final_predictions = idm_tensor + final_corrections
 
-
             if epoch % 3 == 0:  # Every 3 epochs
                 corr_var = torch.var(corrections).item()
                 corr_range = corrections.max().item() - corrections.min().item()
                 pred_cv = torch.std(enhanced_predictions).item() / torch.mean(enhanced_predictions).item()
-                
-                print(f"\n🔍 Epoch {epoch}: Training Progress")
-                print(f"   Correction variance: {corr_var:.10f}")
-                print(f"   Correction range: {corr_range:.6f}")
-                print(f"   Prediction CV: {pred_cv:.4f} (target: {self.target_cv:.2f})")
-                
+
                 if corr_var < 1e-6:
                     print(f"   🚨 SEVERE COLLAPSE! Variance = {corr_var:.2e}")
-                elif corr_var < 1e-4:
-                    print(f"   ⚠️  Mild collapse, need stronger diversity loss")  
-                elif corr_var > 1e-3:
-                    print(f"   ✅ Good variance! Model learning meaningful patterns")
-
             
             # Truncate back to address count for output
             original_address_count = len(idm_baseline)
@@ -506,7 +415,6 @@ class HybridCorrectionTrainer:
         valid_edge_mask = (edge_index[0] < num_addresses) & (edge_index[1] < num_addresses)
         
         if not valid_edge_mask.any():
-            print(f"🔧 No address-to-address edges, skipping spatial loss")
             return torch.tensor(0.0)
         
         # Use only valid edges
@@ -741,7 +649,6 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
                     [geom.x, geom.y] for geom in valid_features.geometry
                 ])
                 feature_tree = cKDTree(feature_coords)
-                print(f"Built spatial index with {len(feature_coords)} address features")
     
     # Extract enhanced node features
     node_features = []
@@ -824,11 +731,6 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
         ]
         
         node_features.append(features)
-    
-    print(f"  Enhanced feature extraction complete:")
-    print(f"   Total nodes: {len(nodes)}")
-    print(f"   Successful NLCD lookups: {successful_lookups}")
-    print(f"   Features per node: {len(features)}")
     
     # Convert to tensor and normalize
     node_features = torch.FloatTensor(node_features)

@@ -525,7 +525,6 @@ class GRANITEPipeline:
                     # else:
                     #     self._log("No major diagnostic issues detected")
                         
-                    print(f"🔧 Generating IDM-only comparison...")
                     idm_comparison_result = self.idm_baseline.disaggregate_svi(
                         tract_svi=svi_value,
                         prediction_locations=tract_data['addresses'],
@@ -533,15 +532,11 @@ class GRANITEPipeline:
                         tract_geometry=tract_data['tract_info'].geometry
                     )
 
-                    print(f"   IDM comparison success: {idm_comparison_result.get('success', False)}")
                     if idm_comparison_result.get('success'):
                         idm_predictions_comparison = idm_comparison_result['predictions']
-                        print(f"   IDM comparison predictions: {len(idm_predictions_comparison)} addresses")
-                        print(f"   IDM comparison range: [{idm_predictions_comparison['svi_prediction'].min():.6f}, {idm_predictions_comparison['svi_prediction'].max():.6f}]")
                     else:
                         print(f"   IDM comparison failed: {idm_comparison_result.get('error', 'Unknown error')}")
 
-                    # MODIFY your return statement to include MULTIPLE comparison fields:
                     return {
                         'status': 'success',
                         'fips': fips,
@@ -699,21 +694,15 @@ class GRANITEPipeline:
     
     def _process_single_tract(self, tract_data):
         """Process a single tract with HYBRID IDM+GNN approach"""
-        print("🔍 DEBUG: Using HYBRID _process_single_tract method") 
         fips = tract_data['tract_info']['FIPS']
         svi_value = tract_data['svi_value']
-        
-        print(f"🚨 DEBUG: About to call HybridCorrectionTrainer")
-        print(f"🚨 DEBUG: Config mode: {self.config.get('processing', {}).get('mode', 'unknown')}")
-        
-        
         self._log(f"  Processing tract {fips} with SVI={svi_value:.3f} [HYBRID MODE]")
         
         try:
-            # STEP 1: Load NLCD features (unchanged)
+            # STEP 1: Load NLCD features 
             nlcd_features = self._load_nlcd_for_tract(tract_data)
             
-            # STEP 2: Compute IDM baseline FIRST
+            # STEP 2: Compute IDM baseline 
             self._log("  Step 1: Computing IDM baseline...")
             tract_geom = tract_data['tract_info'].geometry
             addresses_df = tract_data['addresses']
@@ -746,9 +735,8 @@ class GRANITEPipeline:
             if isinstance(graph_data, tuple):
                 graph_data = graph_data[0]
             
-            # Create GNN for corrections (not full parameters)
+            # Create GNN for corrections
             input_dim = graph_data.x.shape[1]  
-            print(f"🚨 DEBUG: Creating AccessibilityGNNCorrector with input_dim={input_dim}")
             gnn_model = AccessibilityGNNCorrector(
                 input_dim=input_dim,
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
@@ -768,10 +756,8 @@ class GRANITEPipeline:
                 }
             }
             
-            #print(f"🚨 DEBUG: Creating HybridCorrectionTrainer")
             trainer = HybridCorrectionTrainer(gnn_model, config=training_config)  # Not AccessibilityCorrectionTrainer
             
-            #print(f"🚨 DEBUG: About to call trainer.train_corrections")        
             training_result = trainer.train_corrections(
                 graph_data=graph_data,
                 idm_baseline=idm_predictions,
@@ -780,52 +766,23 @@ class GRANITEPipeline:
                 verbose=self.verbose
             )
 
-            print(f"🚨 DEBUG: HybridCorrectionTrainer completed!")
-            print(f"Training result keys: {training_result.keys()}")
-            
             gnn_corrections = training_result['final_corrections']
             gnn_time = time.time() - gnn_start
 
-            print(f"🔍 CORRECTION TRACKING DEBUG:")
-            print(f"   1. FROM TRAINING:")
-            print(f"      - Shape: {gnn_corrections.shape}")
-            print(f"      - Range: [{gnn_corrections.min():.6f}, {gnn_corrections.max():.6f}]")
-            print(f"      - Std: {np.std(gnn_corrections):.6f}")
-            print(f"      - Variance: {np.var(gnn_corrections):.8f}")
-            
             # STEP 4: Combine IDM + GNN corrections
             self._log("  Step 3: Combining IDM baseline with GNN corrections...")
             idm_weight = self.config.get('hybrid', {}).get('idm_weight', 0.7)
             gnn_weight = self.config.get('hybrid', {}).get('gnn_weight', 0.3)
             
             hybrid_predictions = idm_weight * idm_predictions + gnn_weight * gnn_corrections
-            
-            print(f"   2. BEFORE HYBRID COMBINATION:")
-            print(f"      - IDM weight: {idm_weight}, GNN weight: {gnn_weight}")
-            print(f"      - IDM predictions range: [{idm_predictions.min():.6f}, {idm_predictions.max():.6f}]")
-            print(f"      - GNN corrections range: [{gnn_corrections.min():.6f}, {gnn_corrections.max():.6f}]")
-
-            print(f"   3. AFTER HYBRID COMBINATION:")
-            print(f"      - Hybrid predictions range: [{hybrid_predictions.min():.6f}, {hybrid_predictions.max():.6f}]")
-
 
             # Ensure tract constraint satisfaction
             current_mean = np.mean(hybrid_predictions)
             adjustment = svi_value - current_mean
             hybrid_predictions += adjustment
 
-            print(f"   4. AFTER CONSTRAINT ADJUSTMENT:")
-            print(f"      - Adjustment applied: {adjustment:.6f}")
-            print(f"      - Final hybrid range: [{hybrid_predictions.min():.6f}, {hybrid_predictions.max():.6f}]")
-
-            
             # Convert to SPDE format for MetricGraph compatibility
             gnn_features = self._corrections_to_spde_params(gnn_corrections, idm_predictions)
-            
-            print(f"   5. PASSED TO SPDE CONVERSION:")
-            print(f"      - Corrections passed: shape={gnn_corrections.shape}")
-            print(f"      - Corrections passed: range=[{gnn_corrections.min():.6f}, {gnn_corrections.max():.6f}]")
-
 
             # STEP 5: MetricGraph processing (unchanged logic)
             self._log("  Step 4: Creating MetricGraph representation...")
@@ -839,7 +796,7 @@ class GRANITEPipeline:
             
             mg_time = time.time() - mg_start
             
-            # Prepare observation and prediction data (unchanged)
+            # Prepare observation and prediction data
             tract_centroid = tract_data['tract_info'].geometry.centroid
             tract_observation = pd.DataFrame({
                 'coord_x': [tract_centroid.x],
@@ -862,10 +819,7 @@ class GRANITEPipeline:
                 gnn_features=gnn_features,
                 alpha=self.config['metricgraph']['alpha']
             )
-            
-            # Baseline comparison (unchanged)
-            print(f"🔧 EXPLICIT IDM COMPARISON GENERATION:")
-
+          
             # Generate IDM predictions using the direct IDM baseline method
             idm_comparison_result = self.idm_baseline.disaggregate_svi(
                 tract_svi=svi_value,
@@ -880,29 +834,21 @@ class GRANITEPipeline:
                 # Map column names for visualization compatibility
                 if 'svi_prediction' in idm_predictions_df.columns and 'mean' not in idm_predictions_df.columns:
                     idm_predictions_df['mean'] = idm_predictions_df['svi_prediction']
-                    print(f"   ✅ Added 'mean' column mapping for visualization")
                 
                 # Also ensure standard deviation column if needed
                 if 'uncertainty' in idm_predictions_df.columns and 'sd' not in idm_predictions_df.columns:
                     idm_predictions_df['sd'] = idm_predictions_df['uncertainty'] 
-                    print(f"   ✅ Added 'sd' column mapping for visualization")
                 
                 # Update the comparison result
                 idm_comparison_result['predictions'] = idm_predictions_df
-                print(f"   Updated IDM columns: {list(idm_predictions_df.columns)}")
 
-
-            print(f"   IDM comparison success: {idm_comparison_result.get('success', False)}")
             if idm_comparison_result.get('success'):
                 idm_predictions_for_comparison = idm_comparison_result['predictions']
-                print(f"   IDM comparison shape: {idm_predictions_for_comparison.shape}")
-                print(f"   IDM comparison columns: {list(idm_predictions_for_comparison.columns)}")
-                print(f"   IDM comparison range: [{idm_predictions_for_comparison.iloc[:, 0].min():.6f}, {idm_predictions_for_comparison.iloc[:, 0].max():.6f}]")
             else:
                 print(f"   IDM comparison failed: {idm_comparison_result.get('error')}")
                 idm_predictions_for_comparison = None
 
-            # ALSO keep the original baseline for other purposes:
+            # keep the original baseline for backwards compatability:
             baseline_result = self.mg_interface._idm_baseline(
                 tract_observation=tract_observation,
                 prediction_locations=prediction_locations, 
@@ -910,7 +856,7 @@ class GRANITEPipeline:
                 tract_geometry=tract_geom
             )
             
-            # Visualization data prep (unchanged)
+            # Visualization data prep 
             network_data = self._prepare_network_data_for_viz(tract_data)
             transit_data = self._prepare_transit_data_for_viz(tract_data)
             
@@ -930,7 +876,7 @@ class GRANITEPipeline:
                     'spde_params': disagg_result['spde_params'],
                     'diagnostics': disagg_result['diagnostics'],
                     
-                    # ENSURE all comparison fields are properly structured:
+                    # ensure all comparison fields are properly structured:
                     'baseline_comparison': {
                         'success': True,
                         'predictions': idm_predictions_df,  # With mapped columns
@@ -959,7 +905,7 @@ class GRANITEPipeline:
         
         except Exception as e:
             self._log(f"  Error processing tract: {str(e)}")
-            print(f"🚨 ERROR in hybrid training: {e}")
+            print(f"Error in hybrid training: {e}")
             return {'status': 'failed', 'fips': fips, 'error': str(e)}
     
     def _process_multi_fips_mode(self, data, target_fips_list):
@@ -1325,10 +1271,10 @@ class GRANITEPipeline:
                 self._log(f"  IDM/GNN variation ratio: {variation_ratio:.2f}")
                 
                 if variation_ratio > 10:
-                    self._log(f"  🚨 CRITICAL: GNN shows {variation_ratio:.1f}x less spatial variation than IDM")
+                    self._log(f"    CRITICAL: GNN shows {variation_ratio:.1f}x less spatial variation than IDM")
                     self._log(f"     This suggests GNN over-smoothing or feature uniformity issues")
             else:
-                self._log(f"✅ Good correlation with IDM baseline: {correlation:.3f}")
+                self._log(f"Good correlation with IDM baseline: {correlation:.3f}")
                 
         else:
             self._log("No IDM baseline comparison available")
@@ -1404,147 +1350,94 @@ class GRANITEPipeline:
         # Create visualizations with clear GNN vs IDM comparison
         self._log("Creating enhanced visualizations...")
         
-        # Get visualization data from first successful tract
+        # FIXED: Actually set viz_data and extract IDM predictions
         viz_data = None
         gnn_predictions = results['predictions']
         idm_predictions = None
         
         if results.get('tract_results'):
             for i, tract_result in enumerate(results['tract_results'][:1]):  # Check first tract
-                print(f"🔍 VISUALIZATION DEBUG - Tract {i}:")
-                if 'idm_baseline' in tract_result:
-                    idm_data = tract_result['idm_baseline']
-                    print(f"   📊 DETAILED IDM_BASELINE ANALYSIS:")
-                    print(f"      Type: {type(idm_data)}")
-                    if isinstance(idm_data, dict):
-                        print(f"      Keys: {list(idm_data.keys())}")
-                        if 'success' in idm_data:
-                            print(f"      Success: {idm_data['success']}")
-                        if 'predictions' in idm_data:
-                            pred_data = idm_data['predictions']
-                            print(f"      Predictions type: {type(pred_data)}")
-                            if hasattr(pred_data, 'shape'):
-                                print(f"      Predictions shape: {pred_data.shape}")
-                            if hasattr(pred_data, 'columns'):
-                                print(f"      Predictions columns: {list(pred_data.columns)}")
-                                # Check for expected columns
-                                expected_cols = ['mean', 'svi_prediction', 'x', 'y']
-                                for col in expected_cols:
-                                    if col in pred_data.columns:
-                                        print(f"      ✅ Has '{col}' column")
-                                    else:
-                                        print(f"      ❌ Missing '{col}' column")
-                            
-                            # Show sample data
-                            print(f"      Sample predictions:")
-                            try:
-                                if hasattr(pred_data, 'head'):
-                                    print(pred_data.head(2))
-                                else:
-                                    print(pred_data[:2])
-                            except Exception as e:
-                                print(f"      Error showing sample: {e}")
-                print(f"   Tract result keys: {tract_result.keys()}")
-
-                print(f"🔍 DETAILED IDM COMPARISON DEBUG:")
-        
-        # Check the idm_baseline structure
-        if 'idm_baseline' in tract_result:
-            idm_data = tract_result['idm_baseline'] 
-            print(f"   idm_baseline type: {type(idm_data)}")
-            print(f"   idm_baseline keys: {idm_data.keys() if isinstance(idm_data, dict) else 'Not a dict'}")
-            
-            if isinstance(idm_data, dict) and 'success' in idm_data:
-                print(f"   idm_baseline success: {idm_data['success']}")
-                if idm_data['success'] and 'predictions' in idm_data:
-                    predictions = idm_data['predictions']
-                    print(f"   Predictions type: {type(predictions)}")
-                    print(f"   Predictions shape: {predictions.shape if hasattr(predictions, 'shape') else len(predictions)}")
-                    
-                    # This might be the issue - check if predictions is the right format
-                    if hasattr(predictions, 'columns'):
-                        print(f"   Predictions columns: {list(predictions.columns)}")
-                    
-                    # The visualization might expect specific column names
-                    print(f"   First few rows of predictions:")
-                    print(predictions.head() if hasattr(predictions, 'head') else predictions[:3])
                 
-                # Check all possible IDM comparison field names:
+                viz_data = tract_result
+                
+                # Extract IDM predictions from any available field
                 for field_name in ['baseline_comparison', 'idm_comparison', 'idm_baseline', 'comparison_results']:
-                    if field_name in tract_result:
-                        comparison_data = tract_result[field_name]
-                        if comparison_data and comparison_data.get('success'):
-                            print(f"   ✅ Found IDM comparison in '{field_name}': {len(comparison_data.get('predictions', []))} predictions")
-                            break
-                        else:
-                            print(f"   ⚠️  '{field_name}' exists but failed or empty")
-                    else:
-                        print(f"   ❌ '{field_name}' not found")
-        
-        if viz_data:
-            # FORCE extract IDM data - we know it's there and correct
-            idm_predictions = None
-            gnn_predictions = results['predictions']
-            
-            # Extract from any available field
-            for field_name in ['baseline_comparison', 'idm_comparison', 'idm_baseline', 'comparison_results']:
-                if field_name in viz_data and viz_data[field_name]:
-                    idm_source = viz_data[field_name]
-                    if (isinstance(idm_source, dict) and 
-                        idm_source.get('success') and 
-                        'predictions' in idm_source):
-                        
-                        idm_predictions = idm_source['predictions']
-                        print(f"🎯 FORCED VISUALIZATION: Using IDM data from '{field_name}'")
-                        print(f"   IDM predictions shape: {idm_predictions.shape}")
-                        print(f"   IDM columns: {list(idm_predictions.columns)}")
-                        
-                        # Verify required columns exist
-                        required_cols = ['mean', 'x', 'y']
-                        missing_cols = [col for col in required_cols if col not in idm_predictions.columns]
-                        if missing_cols:
-                            print(f"   ❌ Missing required columns: {missing_cols}")
-                            continue
-                        else:
-                            print(f"   ✅ All required columns present")
-                            break
-            
-            if idm_predictions is not None:
-                print(f"🎉 SUCCESS: Creating GNN vs IDM comparison visualization!")
+                    if field_name in tract_result and tract_result[field_name]:
+                        idm_source = tract_result[field_name]
+                        if (isinstance(idm_source, dict) and 
+                            idm_source.get('success') and 
+                            'predictions' in idm_source):
+                            
+                            idm_predictions = idm_source['predictions']
+                            self._log(f"Found IDM data from '{field_name}': {len(idm_predictions)} predictions")
+                            
+                            # Verify required columns exist
+                            required_cols = ['mean', 'x', 'y']
+                            missing_cols = [col for col in required_cols if col not in idm_predictions.columns]
+                            if not missing_cols:
+                                self._log(f"All required columns present: {list(idm_predictions.columns)}")
+                                break
+                            else:
+                                self._log(f"Missing required columns: {missing_cols}")
+                                idm_predictions = None
                 
-                # FORCE create the comparison visualization
-                try:
-                    clear_comparison_path = os.path.join(self.output_dir, 'gnn_vs_idm_comparison.png')
-                    
-                    self.visualizer.create_clear_method_comparison(
-                        gnn_predictions=gnn_predictions,
-                        idm_predictions=idm_predictions,
-                        gnn_results=results,
-                        idm_results={'success': True, 'predictions': idm_predictions},
-                        output_path=clear_comparison_path
-                    )
-                    
-                    self._log(f"✅ BREAKTHROUGH: Saved GNN vs IDM comparison to {clear_comparison_path}")
-                    
-                    # Also create other visualizations
-                    original_viz_path = os.path.join(self.output_dir, 'granite_visualization.png')
-                    self.visualizer.create_disaggregation_plot(
-                        predictions=gnn_predictions,
-                        results=results,
-                        comparison_results={'success': True, 'predictions': idm_predictions},
-                        output_path=original_viz_path
-                    )
-                    self._log(f"✅ Saved comparison visualization to {original_viz_path}")
-                    
-                except Exception as e:
-                    print(f"❌ Visualization creation failed: {e}")
-                    print(f"   But the data processing was successful!")
-                    
-            else:
-                print(f"❌ Could not extract IDM predictions for visualization")
-                print(f"   But this is just a visualization issue - the core research is working!")
-
+                # Break after first tract (we only need one for visualization)
+                if viz_data:
+                    break
         
+        # FIXED: Now this condition should be True
+        if viz_data and idm_predictions is not None:
+            self._log(f"SUCCESS: Creating GNN vs IDM comparison visualization!")
+            
+            try:
+                clear_comparison_path = os.path.join(self.output_dir, 'gnn_vs_idm_comparison.png')
+                
+                self.visualizer.create_clear_method_comparison(
+                    gnn_predictions=gnn_predictions,
+                    idm_predictions=idm_predictions,
+                    gnn_results=results,
+                    idm_results={'success': True, 'predictions': idm_predictions},
+                    output_path=clear_comparison_path
+                )
+                
+                self._log(f"Saved GNN vs IDM comparison to {clear_comparison_path}")
+                
+                # Also create other visualizations
+                original_viz_path = os.path.join(self.output_dir, 'granite_visualization.png')
+                self.visualizer.create_disaggregation_plot(
+                    predictions=gnn_predictions,
+                    results=results,
+                    comparison_results={'success': True, 'predictions': idm_predictions},
+                    output_path=original_viz_path
+                )
+                self._log(f"Saved comparison visualization to {original_viz_path}")
+                
+                # Print comparison summary to console
+                self._print_comparison_summary(gnn_predictions, idm_predictions)
+                
+            except Exception as e:
+                self._log(f"Visualization creation failed: {e}")
+                import traceback
+                self._log(f"Full traceback: {traceback.format_exc()}")
+                
+        else:
+            self._log(f"  Could not extract IDM predictions for visualization")
+            self._log(f"   viz_data exists: {viz_data is not None}")
+            self._log(f"   idm_predictions exists: {idm_predictions is not None}")
+            
+            # Create fallback single-method visualization
+            try:
+                fallback_path = os.path.join(self.output_dir, 'granite_visualization_single.png')
+                self.visualizer.create_disaggregation_plot(
+                    predictions=gnn_predictions,
+                    results=results,
+                    comparison_results=None,  # No comparison
+                    output_path=fallback_path
+                )
+                self._log(f"Created fallback single-method visualization: {fallback_path}")
+            except Exception as e:
+                self._log(f"Even fallback visualization failed: {e}")
+
         # Global validation summary
         if results.get('global_validation'):
             self._log(f"\n=== GLOBAL VALIDATION SUMMARY ===")
@@ -1627,19 +1520,12 @@ class GRANITEPipeline:
         except Exception as e:
             self._log(f"Error printing comparison summary: {str(e)}")
 
-    def _corrections_to_spde_params(self, corrections, idm_baseline):
-        """FIXED: Debug version to track where corrections are lost"""
-        
-        print(f"🔍 INSIDE SPDE CONVERSION:")
-        print(f"   Input corrections shape: {corrections.shape}")
-        print(f"   Input corrections range: [{corrections.min():.6f}, {corrections.max():.6f}]")
-        print(f"   Input corrections std: {np.std(corrections):.6f}")
-        
+    def _corrections_to_spde_params(self, corrections, idm_baseline):        
         base_kappa = 1.0
         base_alpha = 1.5
         base_tau = 1.0
         
-        # Use MUCH stronger multipliers (from my previous suggestion)
+        # Use stronger multipliers 
         kappa_values = base_kappa * (1.0 + 5.0 * corrections)   # 5.0x multiplier
         alpha_values = np.full_like(corrections, base_alpha)
         tau_values = base_tau * (1.0 + 3.0 * corrections)       # 3.0x multiplier
@@ -1649,18 +1535,7 @@ class GRANITEPipeline:
         kappa_values = np.minimum(kappa_values, 5.0)
         tau_values = np.maximum(tau_values, 0.1)
         tau_values = np.minimum(tau_values, 3.0)
-        
-        print(f"🔧 SPDE Conversion Debug:")
-        print(f"   Corrections range: [{corrections.min():.6f}, {corrections.max():.6f}]")
-        print(f"   Kappa range: [{kappa_values.min():.6f}, {kappa_values.max():.6f}]")
-        print(f"   Tau range: [{tau_values.min():.6f}, {tau_values.max():.6f}]")
-        print(f"   Kappa variance: {np.var(kappa_values):.8f}")
-        print(f"   Tau variance: {np.var(tau_values):.8f}")
-        
-        # EXPECTED with std=0.0439:
-        # Kappa should range roughly: 1.0 * (1.0 + 5.0 * ±0.044) = [0.78, 1.22]
-        # If you're still seeing [0.993, 1.007], the corrections being passed are wrong
-        
+    
         gnn_features = np.column_stack([kappa_values, alpha_values, tau_values])
         return gnn_features
 

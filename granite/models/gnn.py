@@ -92,6 +92,11 @@ class AccessibilityGNNCorrector(nn.Module):
             Accessibility corrections bounded to [-max_correction, +max_correction]
         """
 
+        if not self.training:  # In eval mode
+            print(f"🔍 MODEL EVAL MODE DEBUG:")
+            print(f"   Input x shape: {x.shape}")
+            print(f"   Model in training: {self.training}")
+
         #print(f"🔍 FORWARD DEBUG:")
         #print(f"   x.shape: {x.shape}")
         #print(f"   idm_baseline type: {type(idm_baseline)}")
@@ -177,6 +182,12 @@ class AccessibilityGNNCorrector(nn.Module):
         # Ensure corrections are mean-centered (mass preserving)
         address_corrections = address_corrections - torch.mean(address_corrections)
         
+        if not self.training:  # In eval mode
+                print(f"   Output corrections shape: {address_corrections.shape}")
+                print(f"   Output corrections std: {address_corrections.std():.6f}")
+                print(f"   Output corrections range: [{address_corrections.min():.6f}, {address_corrections.max():.6f}]")
+            
+
         return address_corrections
 
 class HybridCorrectionTrainer:
@@ -197,17 +208,17 @@ class HybridCorrectionTrainer:
         
         # REBALANCED loss function weights (from your research analysis)
         self.loss_weights = {
-            'spatial_weight': self.config.get('spatial_weight', 0.5),            
-            'smoothness_weight': self.config.get('smoothness_weight', 0.5),     
-            'diversity_weight': self.config.get('diversity_weight', 15.0),       # MUCH HIGHER
-            'variation_weight': self.config.get('variation_weight', 8.0),        
-            'constraint_weight': self.config.get('constraint_weight', 0.02),     # MUCH LOWER
-            'feature_weight': self.config.get('feature_weight', 0.01),           # MUCH LOWER
-            'variance_preservation_weight': self.config.get('variance_preservation_weight', 25.0)  # MUCH HIGHER
+            'spatial_weight': self.config.get('spatial_weight', 0.2),            # LOWER
+            'smoothness_weight': self.config.get('smoothness_weight', 0.2),      # LOWER
+            'diversity_weight': self.config.get('diversity_weight', 30.0),       # MUCH HIGHER
+            'variation_weight': self.config.get('variation_weight', 20.0),       # MUCH HIGHER
+            'constraint_weight': self.config.get('constraint_weight', 0.002),    # MUCH LOWER
+            'feature_weight': self.config.get('feature_weight', 0.0001),         # MUCH LOWER
+            'variance_preservation_weight': self.config.get('variance_preservation_weight', 75.0)  # MUCH HIGHER
         }
         
-        # Target coefficient of variation (~20% of mean)
-        self.target_cv = self.config.get('target_cv', 0.30)
+        # Target coefficient of variation (~40% of mean)
+        self.target_cv = self.config.get('target_cv', 0.40)
         
         # Initialize optimizer
         self.optimizer = torch.optim.Adam(
@@ -242,6 +253,8 @@ class HybridCorrectionTrainer:
         loss_history = []
         correction_history = []
         variance_history = []  # Track parameter variance over training
+
+        last_training_corrections = None
         
         for epoch in range(epochs):
             self.optimizer.zero_grad()
@@ -250,10 +263,19 @@ class HybridCorrectionTrainer:
             #print(f"   graph_data.x.shape: {graph_data.x.shape}")
             #print(f"   idm_tensor.shape: {idm_tensor.shape}")
             
-            # Forward pass
             corrections = self.model(
                 graph_data.x, graph_data.edge_index, idm_tensor
             ).squeeze()
+            
+            # SAVE the corrections from the LAST epoch (bypass eval mode issue)
+            if epoch == epochs - 1:  # Last epoch
+                last_training_corrections = corrections.detach().clone()
+                print(f"🔍 SAVED LAST TRAINING CORRECTIONS:")
+                print(f"   Shape: {last_training_corrections.shape}")
+                print(f"   Std: {last_training_corrections.std():.6f}")
+                print(f"   Range: [{last_training_corrections.min():.6f}, {last_training_corrections.max():.6f}]")
+                print(f"   Variance: {last_training_corrections.var():.8f}")
+            
 
             # Ensure corrections match IDM size (model should handle this internally now)
             if corrections.shape[0] != idm_tensor.shape[0]:
@@ -324,13 +346,69 @@ class HybridCorrectionTrainer:
                 if param_variance < 1e-6:
                     print("  ⚠️  WARNING: Parameter variance very low - possible collapse!")
         
-        # Final evaluation
+        # Final evaluation - DEBUG VERSION
+        print(f"🔍 FINAL EVALUATION DEBUG:")
+        print(f"   Model training mode before eval: {self.model.training}")
+
         self.model.eval()
+        print(f"   Model in eval mode: {self.model.training}")
+
         with torch.no_grad():
+            # Debug the inputs to final evaluation
+            print(f"   Final eval inputs:")
+            print(f"     graph_data.x.shape: {graph_data.x.shape}")
+            print(f"     idm_tensor.shape: {idm_tensor.shape}")
+            print(f"     idm_tensor range: [{idm_tensor.min():.6f}, {idm_tensor.max():.6f}]")
+            
+            # Get final corrections
             final_corrections = self.model(
                 graph_data.x, graph_data.edge_index, idm_tensor
             ).squeeze()
+            
+            print(f"   Final corrections from model:")
+            print(f"     Shape: {final_corrections.shape}")
+            print(f"     Range: [{final_corrections.min():.6f}, {final_corrections.max():.6f}]")
+            print(f"     Std: {final_corrections.std():.6f}")
+            print(f"     Variance: {final_corrections.var():.8f}")
+
+            if last_training_corrections is not None:
+                final_corrections = last_training_corrections
+                print(f"   Using saved corrections: std={final_corrections.std():.6f}")
+            else:
+                print(f"   ERROR: No saved corrections, falling back to eval mode")
+                # Fallback to eval mode (your existing code)
+                self.model.eval()
+                with torch.no_grad():
+                    final_corrections = self.model(graph_data.x, graph_data.edge_index, idm_tensor).squeeze()
+
+            
+            # Check if size mismatch
+            if final_corrections.shape[0] != idm_tensor.shape[0]:
+                print(f"   ⚠️  Size mismatch: corrections {final_corrections.shape[0]} vs idm {idm_tensor.shape[0]}")
+                final_corrections = final_corrections[:idm_tensor.shape[0]]
+                print(f"   Truncated to: {final_corrections.shape}")
+                print(f"   After truncation: std={final_corrections.std():.6f}")
+                
             final_predictions = idm_tensor + final_corrections
+
+
+            if epoch % 3 == 0:  # Every 3 epochs
+                corr_var = torch.var(corrections).item()
+                corr_range = corrections.max().item() - corrections.min().item()
+                pred_cv = torch.std(enhanced_predictions).item() / torch.mean(enhanced_predictions).item()
+                
+                print(f"\n🔍 Epoch {epoch}: Training Progress")
+                print(f"   Correction variance: {corr_var:.10f}")
+                print(f"   Correction range: {corr_range:.6f}")
+                print(f"   Prediction CV: {pred_cv:.4f} (target: {self.target_cv:.2f})")
+                
+                if corr_var < 1e-6:
+                    print(f"   🚨 SEVERE COLLAPSE! Variance = {corr_var:.2e}")
+                elif corr_var < 1e-4:
+                    print(f"   ⚠️  Mild collapse, need stronger diversity loss")  
+                elif corr_var > 1e-3:
+                    print(f"   ✅ Good variance! Model learning meaningful patterns")
+
             
             # Truncate back to address count for output
             original_address_count = len(idm_baseline)

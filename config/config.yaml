@@ -78,8 +78,11 @@ baselines:
 # Processing 
 processing:
   continue_on_error: true
-  verbose: false  
+  verbose: true  
   random_seed: 42
+  mode: "comparison"  # Enable comparative analysis
+  methods: ["idm", "hybrid"]
+  enable_baseline_comparison: true
 
 # REMOVED SECTIONS:
 # - Complex FIPS batch processing (use command line)

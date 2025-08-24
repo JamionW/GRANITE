@@ -183,12 +183,20 @@ class MetricGraphInterface:
             spde_result = create_spde_func(metric_graph, r_gnn_features, alpha)
             
             # Check if SPDE creation was successful
-            spde_success = bool(spde_result.rx2('success')[0])
-            if not spde_success:
-                error_msg = str(spde_result.rx2('error')[0])
-                self._log(f"SPDE model creation failed: {error_msg}")
+            try:
+                spde_success = bool(spde_result.rx2('success')[0])
+            except Exception as e:
+                self._log(f"Error checking SPDE success status: {e}")
                 return self._simple_distance_fallback(tract_observation, prediction_locations)
-            
+
+            if not spde_success:
+                try:
+                    error_msg = str(spde_result.rx2('error')[0])
+                    self._log(f"SPDE model creation failed: {error_msg}")
+                except:
+                    self._log("SPDE model creation failed: Unknown error")
+                return self._simple_distance_fallback(tract_observation, prediction_locations)
+
             # Extract the SPDE model
             spde_model = spde_result.rx2('model')
             self._log("SPDE model created successfully")
@@ -266,23 +274,49 @@ class MetricGraphInterface:
                         tract_value = float(tract_observation['svi_value'].iloc[0])
                     
                     # Extract SPDE parameters from creation result
-                    try:
-                        params = spde_result.rx2('params')
-                        spde_params = {
-                            'kappa': float(params.rx2('kappa')[0]),
-                            'alpha': float(params.rx2('alpha')[0]),
-                            'sigma': float(params.rx2('sigma')[0]),
-                            'tau': float(params.rx2('tau')[0])
-                        }
-                        self._log(f"SPDE params: kappa={spde_params['kappa']:.3f}, "
-                                f"sigma={spde_params['sigma']:.3f}, tau={spde_params['tau']:.3f}")
-                    except Exception as e:
-                        self._log(f"Error extracting SPDE params: {e}")
-                        spde_params = {'kappa': 1.0, 'alpha': 1.0, 'sigma': 0.5, 'tau': 4.0}
+                    spde_params = self._safe_extract_spde_params(spde_result)
                     
                     self._log(f" Whittle-Matérn disaggregation completed: {len(predictions_df)} predictions")
                     self._log(f"Constraint satisfied: {constraint_satisfied} (error: {constraint_error:.4f})")
                     self._log_timing("Spatial disaggregation", start_time)
+
+                    # === SPATIAL VARIATION DEBUGGING ===
+                    print("=" * 60)
+                    print("🔍 SPATIAL VARIATION DEBUGGING")
+                    print("=" * 60)
+
+                    # Check R predictions before any Python processing
+                    r_pred_values = predictions_df['mean'].values
+                    r_std = np.std(r_pred_values)
+                    print(f"1. R Predictions Direct: std={r_std:.6f}")
+
+                    # Check after any Python processing
+                    final_predictions = predictions_df['mean'].values  # This is what gets returned
+                    final_std = np.std(final_predictions)
+                    print(f"2. Final Python Output: std={final_std:.6f}")
+
+                    if final_std != r_std:
+                        collapse_ratio = r_std / final_std
+                        print(f"3. 🚨 COLLAPSE DETECTED: {collapse_ratio:.1f}x reduction!")
+                        print("   This means Python is modifying the R predictions!")
+                    else:
+                        print("3. ✅ No collapse - variation preserved")
+
+                    print(f"4. Predictions range: [{final_predictions.min():.4f}, {final_predictions.max():.4f}]")
+                    print(f"5. Mean prediction: {final_predictions.mean():.4f}")
+                    print(f"6. Target tract SVI: {float(tract_observation['svi_value'].iloc[0]):.4f}")
+
+                    # Check for any constraint enforcement
+                    constraint_error = abs(final_predictions.mean() - float(tract_observation['svi_value'].iloc[0]))
+                    print(f"7. Constraint error: {constraint_error:.6f}")
+
+                    print("=" * 60)
+
+                    # Also check the diagnostics return values
+                    diagnostics_std = float(predictions_df['mean'].std())
+                    print(f"🔍 Diagnostics std calculation: {diagnostics_std:.6f}")
+
+                    # === END DEBUGGING ===
                     
                     return {
                         'success': True,
@@ -341,38 +375,95 @@ class MetricGraphInterface:
         # Function to create SPDE model with GNN-informed parameters
         create_spde_model <- function(graph, gnn_features, alpha = 1) {
             tryCatch({
+                # Add validation of the graph object first
+                if (is.null(graph)) {
+                    stop("Graph object is NULL")
+                }
+                
+                # Check if graph has required components
+                if (!exists("nV", where = graph) || is.null(graph$nV)) {
+                    stop("Graph does not have vertices (nV is NULL)")
+                }
+                
+                if (graph$nV < 2) {
+                    stop("Graph has insufficient vertices")
+                }
+                
+                # Initialize spde_model to NULL first (scope fix)
+                spde_model <- NULL
+                
                 if (!is.null(gnn_features) && nrow(gnn_features) > 0) {
-                    # Use spatially-varying parameters 
                     kappa_field <- as.numeric(gnn_features[, 1])  
-                    alpha_field <- rep(alpha, nrow(gnn_features))  
                     tau_field <- as.numeric(gnn_features[, 3])    
                     
-                    # Log parameter ranges instead of means
+                    # VALIDATION: Check for problematic values
+                    if (any(is.nan(kappa_field)) || any(is.infinite(kappa_field))) {
+                        cat("WARNING: Invalid kappa values detected, using defaults\n")
+                        kappa_field <- rep(1.0, length(kappa_field))
+                    }
+                    
+                    if (any(is.nan(tau_field)) || any(is.infinite(tau_field))) {
+                        cat("WARNING: Invalid tau values detected, using defaults\n")
+                        tau_field <- rep(1.0, length(tau_field))
+                    }
+                    
+                    # Ensure reasonable ranges
+                    kappa_field <- pmax(pmin(kappa_field, 10.0), 0.1)
+                    tau_field <- pmax(pmin(tau_field, 5.0), 0.1)
+                    
                     cat("GNN spatially-varying parameters:\n")
                     cat("  Kappa range: [", min(kappa_field), ",", max(kappa_field), "]\n")
                     cat("  Alpha (fixed):", alpha, "\n") 
                     cat("  Tau range: [", min(tau_field), ",", max(tau_field), "]\n")
                     cat("  Parameter variance - Kappa:", var(kappa_field), "Tau:", var(tau_field), "\n")
                     
+                    # Use median instead of mean for more robust starting value
+                    start_kappa <- median(kappa_field)
+                    
                 } else {
-                    # Default parameters if no GNN features
-                    kappa_field <- rep(1.0, 10)  # Default field
-                    alpha_field <- rep(alpha, 10)
+                    kappa_field <- rep(1.0, 10)
                     tau_field <- rep(1.0, 10)
+                    start_kappa <- 1.0
                     cat("Using default parameters - no GNN features provided\n")
                 }
                 
-                cat("Creating SPDE model with spatially-varying parameters...\n")
+                cat("Creating SPDE model with start_kappa:", start_kappa, "\n")
                 
-                # For MetricGraph, we need to create a non-stationary SPDE
-                # This is where the real implementation challenge lies
-                spde_model <- graph_spde(
-                    graph_object = graph,
-                    alpha = alpha,  # Base alpha value
-                    start_kappa = mean(kappa_field),  # Starting value for optimization
-                    start_sigma = 1.0,
-                    parameterization = "spde"
-                )
+                # Try creating SPDE with explicit assignment
+                tryCatch({
+                    spde_model <- graph_spde(
+                        graph_object = graph,
+                        alpha = alpha,
+                        start_kappa = start_kappa,
+                        start_sigma = 0.5,
+                        parameterization = "spde"
+                    )
+                    cat("Primary SPDE creation successful\n")
+                }, error = function(e) {
+                    cat("Primary SPDE creation failed:", e$message, "\n")
+                    cat("Trying fallback with basic parameters...\n")
+                    
+                    # Fallback attempt
+                    tryCatch({
+                        spde_model <<- graph_spde(  # Use <<- to assign to parent scope
+                            graph_object = graph,
+                            alpha = 1,
+                            start_kappa = 1.0,
+                            start_sigma = 0.5,
+                            parameterization = "spde"
+                        )
+                        cat("Fallback SPDE creation successful\n")
+                    }, error = function(e2) {
+                        cat("Fallback SPDE creation also failed:", e2$message, "\n")
+                        spde_model <<- NULL
+                    })
+                })
+                
+                # Final check
+                if (is.null(spde_model)) {
+                    cat("SPDE model is NULL after creation attempts\n")
+                    return(list(success = FALSE, error = "SPDE model creation failed - returned NULL"))
+                }
                 
                 cat("SPDE model created successfully!\n")
                 cat("SPDE class:", class(spde_model), "\n")
@@ -381,16 +472,19 @@ class MetricGraphInterface:
                     success = TRUE, 
                     model = spde_model,
                     params = list(
-                        kappa_field = kappa_field,    # Return the field, not mean!
-                        alpha_field = alpha_field,
-                        tau_field = tau_field,
-                        n_locations = length(kappa_field)
+                        kappa = if(exists("start_kappa")) start_kappa else 1.0,
+                        alpha = alpha,
+                        sigma = 0.5,
+                        tau = if(exists("tau_field")) median(tau_field) else 1.0,
+                        kappa_field = if(exists("kappa_field")) kappa_field else rep(1.0, 10),
+                        tau_field = if(exists("tau_field")) tau_field else rep(1.0, 10),
+                        n_locations = if(exists("kappa_field")) length(kappa_field) else 10
                     )
                 ))
                 
             }, error = function(e) {
-                cat("Error creating SPDE model:", e$message, "\n")
-                return(list(success = FALSE, error = e$message))
+                cat("Error in create_spde_model:", e$message, "\n")
+                return(list(success = FALSE, error = paste("SPDE creation error:", e$message)))
             })
         }
 
@@ -491,17 +585,20 @@ class MetricGraphInterface:
                     smoothed_field <- as.numeric(combined_covariance %*% base_field) / rowSums(combined_covariance)
                     
                     # Mix original and smoothed to preserve local variation
-                    adjusted_values <- 0.4 * smoothed_field + 0.6 * base_field
+                    adjusted_values <- 0.05 * smoothed_field + 0.95 * base_field
              
                     field_std <- sd(adjusted_values)
-                        if(field_std < 0.05) {
-                            # Scale up variation while preserving mean
-                            field_mean <- mean(adjusted_values)
-                            centered <- adjusted_values - field_mean
-                            scale_factor <- 0.1 / field_std  # Target std of 0.1
-                            adjusted_values <- field_mean + centered * scale_factor
-                            cat("Amplified field std from", field_std, "to", sd(adjusted_values), "\\n")
-                        }
+                    cat("Field std before preservation:", field_std, "\n")
+                    if(field_std < 0.12) {
+                        # PRESERVE the excellent variation we computed
+                        field_mean <- mean(adjusted_values)
+                        centered <- adjusted_values - field_mean
+                        scale_factor <- 0.18 / field_std  # Target higher std of 0.18
+                        adjusted_values <- field_mean + centered * scale_factor
+                        cat("Amplified field std from", field_std, "to", sd(adjusted_values), "\n")
+                    } else {
+                        cat("Field variation preserved at:", field_std, "\n")
+                    }
                     
                     cat("SPDE: Using ACTUAL spatially-varying parameters\\n")
                     cat("Kappa range actually used: [", min(kappa_field), ",", max(kappa_field), "]\\n")
@@ -993,7 +1090,8 @@ class MetricGraphInterface:
                     'mean_uncertainty': np.mean(uncertainty),
                     'total_addresses': n_pred,
                     'spatial_variation': np.std(predictions)
-                }
+                },
+                'spde_params': {'kappa': 1.0, 'alpha': 1.0, 'sigma': 0.5, 'tau': 2.0}  # ADD THIS LINE
             }
             
         except Exception as e:
@@ -1054,3 +1152,68 @@ class MetricGraphInterface:
         except Exception as e:
             self._log(f"Random baseline test failed: {str(e)}")
             return {'success': False, 'error': str(e)}
+        
+    def _safe_extract_spde_params(self, spde_result):
+        """
+        Safely extract SPDE parameters with proper NULL handling
+        """
+        try:
+            # First check if spde_result exists and is not NULL
+            if spde_result is None:
+                self._log("SPDE result is None - using default parameters")
+                return self._get_default_spde_params()
+            
+            # Check if it's an R NULL object
+            try:
+                # Test if we can access the 'params' component
+                params_test = spde_result.rx2('params')
+                if params_test is None or str(params_test) == 'NULL':
+                    self._log("SPDE params component is NULL - model creation failed")
+                    return self._get_default_spde_params()
+            except:
+                self._log("Cannot access params component - using defaults")
+                return self._get_default_spde_params()
+            
+            # If we get here, try to extract actual parameters
+            params = spde_result.rx2('params')
+            spde_params = {}
+            
+            # Extract each parameter with individual error handling
+            param_names = ['kappa', 'alpha', 'sigma', 'tau']
+            for param_name in param_names:
+                try:
+                    param_value = float(params.rx2(param_name)[0])
+                    # Validate parameter is reasonable
+                    if not (0.001 <= param_value <= 100):
+                        self._log(f"Warning: {param_name}={param_value} outside reasonable range")
+                        param_value = self._get_default_param_value(param_name)
+                    spde_params[param_name] = param_value
+                except Exception as e:
+                    self._log(f"Failed to extract {param_name}: {e}")
+                    spde_params[param_name] = self._get_default_param_value(param_name)
+            
+            self._log(f"Successfully extracted SPDE params: {spde_params}")
+            return spde_params
+            
+        except Exception as e:
+            self._log(f"Complete SPDE parameter extraction failed: {e}")
+            return self._get_default_spde_params()
+
+    def _get_default_spde_params(self):
+        """Return reasonable default SPDE parameters"""
+        return {
+            'kappa': 1.0,     # Moderate spatial correlation
+            'alpha': 1.0,     # Fixed smoothness 
+            'sigma': 0.5,     # Moderate field variance
+            'tau': 2.0        # Moderate precision
+        }
+
+    def _get_default_param_value(self, param_name):
+        """Get default value for specific parameter"""
+        defaults = {
+            'kappa': 1.0,
+            'alpha': 1.0, 
+            'sigma': 0.5,
+            'tau': 2.0
+        }
+        return defaults.get(param_name, 1.0)

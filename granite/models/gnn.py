@@ -323,7 +323,66 @@ class HybridCorrectionTrainer:
             original_address_count = len(idm_baseline)
             final_corrections = final_corrections[:original_address_count]
             final_predictions = final_predictions[:original_address_count]
-            
+
+            if epoch % 10 == 0:  
+                with torch.no_grad():
+                    # Detailed diagnostics
+                    corrections_np = corrections.detach().cpu().numpy()
+                    predictions_np = enhanced_predictions.detach().cpu().numpy()
+                    
+                    print(f"  Epoch {epoch:3d} Detailed Diagnostics:")
+                    print(f"    Loss Components:")
+                    for component, value in loss_components.items():
+                        print(f"      {component}: {value:.6f}")
+                    
+                    print(f"    Correction Statistics:")
+                    print(f"      Mean: {corrections_np.mean():.6f}")
+                    print(f"      Std:  {corrections_np.std():.6f}")  
+                    print(f"      Min:  {corrections_np.min():.6f}")
+                    print(f"      Max:  {corrections_np.max():.6f}")
+                    print(f"      Range: {corrections_np.max() - corrections_np.min():.6f}")
+                    
+                    print(f"    Prediction Statistics:")
+                    print(f"      Mean: {predictions_np.mean():.6f} (target: {target_mean.item():.6f})")
+                    print(f"      Std:  {predictions_np.std():.6f}")
+                    print(f"      CV:   {predictions_np.std() / predictions_np.mean() * 100:.1f}%")
+                    
+                    # Parameter collapse detection
+                    if corrections_np.std() < 1e-5:
+                        print(f"    🚨 PARAMETER COLLAPSE DETECTED!")
+                        print(f"       Correction variance: {corrections_np.var():.2e}")
+                        
+                    # Loss component analysis
+                    if 'constraint' in loss_components and loss_components['constraint'] > 0.1:
+                        print(f"    ⚠️  High constraint loss - may be over-constraining")
+                        
+                    if 'diversity' in loss_components and loss_components['diversity'] < 0.001:
+                        print(f"    ⚠️  Low diversity loss - predictions may be too uniform")
+                    
+                    print()
+
+        print(f"\n🔍 FINAL TRAINING ANALYSIS:")
+        print(f"Final correction std: {final_corrections.std():.6f}")
+        print(f"Target spatial variation: ~0.15 (from literature)")
+        print(f"Achievement ratio: {final_corrections.std() / 0.15 * 100:.1f}%")
+
+        if final_corrections.std() < 0.05:
+            print("❌ TRAINING RESULT: Severe spatial collapse")
+        elif final_corrections.std() < 0.10:
+            print("⚠️  TRAINING RESULT: Insufficient spatial variation")  
+        else:
+            print("✅ TRAINING RESULT: Adequate spatial variation")
+
+        # Loss component summary
+        print(f"\n📊 LOSS COMPONENT ANALYSIS:")
+        final_losses = loss_history[-10:]  # Last 10 epochs
+        avg_loss = np.mean(final_losses)
+        loss_trend = "decreasing" if final_losses[-1] < final_losses[0] else "increasing"
+        print(f"Average final loss: {avg_loss:.6f} ({loss_trend})")
+
+        if avg_loss < 0.001:
+            print("⚠️  Very low loss - may indicate over-fitting to constraints")
+
         return {
             'success': True,
             'final_corrections': final_corrections.numpy(),

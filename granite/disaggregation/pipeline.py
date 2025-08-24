@@ -1453,6 +1453,32 @@ class GRANITEPipeline:
         Print a clear summary of GNN vs IDM comparison to console
         """
         try:
+            # === DEBUGGING THE DATA SOURCE ===
+            print("\n🔍 COMPARISON SUMMARY DEBUG:")
+            print(f"   gnn_predictions type: {type(gnn_predictions)}")
+            print(f"   gnn_predictions columns: {list(gnn_predictions.columns)}")
+            print(f"   gnn_predictions shape: {gnn_predictions.shape}")
+            
+            # Check if this is the same data as the interface
+            if 'mean' in gnn_predictions.columns:
+                gnn_values = gnn_predictions['mean'].values
+                interface_std = np.std(gnn_values)
+                print(f"   Interface std in comparison: {interface_std:.6f}")
+                
+                # Check where this data came from
+                if hasattr(gnn_predictions, 'source'):
+                    print(f"   Data source: {gnn_predictions.source}")
+                
+                # Check for constraint enforcement indicators
+                print(f"   Mean value: {np.mean(gnn_values):.6f}")
+                print(f"   Min/Max: [{gnn_values.min():.4f}, {gnn_values.max():.4f}]")
+                
+            else:
+                print(f"   ERROR: No 'mean' column found!")
+                print(f"   Available columns: {list(gnn_predictions.columns)}")
+            
+            print("   === END DEBUG ===\n")
+            
             gnn_values = gnn_predictions['mean'].values
             idm_values = idm_predictions['mean'].values
             

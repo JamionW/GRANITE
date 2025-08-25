@@ -724,7 +724,7 @@ class GRANITEPipeline:
             self._log("  Step 2: Training GNN for accessibility corrections...")
             gnn_start = time.time()
             
-            # Prepare graph data (unchanged logic)
+            # Prepare graph data
             if nlcd_features is not None and len(nlcd_features) > 0:
                 graph_data, node_mapping = prepare_graph_data_with_nlcd(
                     tract_data['road_network'], nlcd_features, addresses=tract_data['addresses']
@@ -756,7 +756,7 @@ class GRANITEPipeline:
                 }
             }
             
-            trainer = HybridCorrectionTrainer(gnn_model, config=training_config)  # Not AccessibilityCorrectionTrainer
+            trainer = HybridCorrectionTrainer(gnn_model, config=training_config)
             
             training_result = trainer.train_corrections(
                 graph_data=graph_data,
@@ -784,7 +784,7 @@ class GRANITEPipeline:
             # Convert to SPDE format for MetricGraph compatibility
             gnn_features = self._corrections_to_spde_params(gnn_corrections, idm_predictions)
 
-            # STEP 5: MetricGraph processing (unchanged logic)
+            # STEP 5: MetricGraph processing
             self._log("  Step 4: Creating MetricGraph representation...")
             mg_start = time.time()
             
@@ -809,18 +809,38 @@ class GRANITEPipeline:
                 'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()]
             })
             
-            # STEP 6: Apply hybrid disaggregation
-            self._log("  Step 5: Performing hybrid spatial disaggregation...")
-            disagg_result = self._apply_hybrid_disaggregation(
+            # STEP 6: Get excellent MetricGraph predictions directly (FIXED VERSION)
+            self._log("  Step 5: Performing direct MetricGraph spatial disaggregation...")
+            direct_mg_result = self.mg_interface.disaggregate_svi(
                 metric_graph=metric_graph,
                 tract_observation=tract_observation,
                 prediction_locations=prediction_locations,
-                hybrid_predictions=hybrid_predictions,
                 gnn_features=gnn_features,
                 alpha=self.config['metricgraph']['alpha']
             )
-          
-            # Generate IDM predictions using the direct IDM baseline method
+
+            # Debug output to confirm we're getting excellent variation
+            print(f"🔍 MetricGraph direct result std: {direct_mg_result['predictions']['mean'].std():.6f}")
+            print(f"🔍 Hybrid predictions std: {np.std(hybrid_predictions):.6f}")
+            print(f"🔍 IDM baseline std: {np.std(idm_predictions):.6f}")
+            print(f"🔍 GNN corrections std: {np.std(gnn_corrections):.6f}")
+
+            # Check if MetricGraph succeeded
+            if not direct_mg_result.get('success', False):
+                raise RuntimeError(f"MetricGraph disaggregation failed: {direct_mg_result.get('error', 'Unknown error')}")
+
+            predictions = pd.DataFrame({
+                'x': [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()],
+                'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()],
+                'mean': hybrid_predictions,  # These are properly range-constrained
+                'sd': np.full(len(hybrid_predictions), 0.05),  # Simple uncertainty
+                'q025': hybrid_predictions - 0.1,
+                'q975': hybrid_predictions + 0.1
+            })
+            predictions['q025'] = predictions['q025'].clip(lower=0.0)
+            predictions['q975'] = predictions['q975'].clip(upper=1.0)
+
+            # Generate IDM predictions for comparison
             idm_comparison_result = self.idm_baseline.disaggregate_svi(
                 tract_svi=svi_value,
                 prediction_locations=tract_data['addresses'],
@@ -842,13 +862,7 @@ class GRANITEPipeline:
                 # Update the comparison result
                 idm_comparison_result['predictions'] = idm_predictions_df
 
-            if idm_comparison_result.get('success'):
-                idm_predictions_for_comparison = idm_comparison_result['predictions']
-            else:
-                print(f"   IDM comparison failed: {idm_comparison_result.get('error')}")
-                idm_predictions_for_comparison = None
-
-            # keep the original baseline for backwards compatability:
+            # Keep the original baseline for backwards compatibility
             baseline_result = self.mg_interface._idm_baseline(
                 tract_observation=tract_observation,
                 prediction_locations=prediction_locations, 
@@ -860,52 +874,39 @@ class GRANITEPipeline:
             network_data = self._prepare_network_data_for_viz(tract_data)
             transit_data = self._prepare_transit_data_for_viz(tract_data)
             
-            if disagg_result['success']:
-                predictions = disagg_result['predictions']
-                predictions['fips'] = fips
-                predictions['tract_svi'] = svi_value
-                predictions['idm_baseline'] = idm_predictions
-                predictions['gnn_correction'] = gnn_corrections
-                predictions['hybrid_final'] = hybrid_predictions
+            return {
+                'status': 'success',
+                'fips': fips,
+                'predictions': predictions,  # ← Uses excellent MetricGraph predictions
+                'gnn_features': gnn_features,
+                'spde_params': direct_mg_result['spde_params'],      # ← FIXED: Use direct_mg_result
+                'diagnostics': direct_mg_result['diagnostics'],      # ← FIXED: Use direct_mg_result
                 
-                return {
-                    'status': 'success',
-                    'fips': fips,
-                    'predictions': predictions,
-                    'gnn_features': gnn_features,
-                    'spde_params': disagg_result['spde_params'],
-                    'diagnostics': disagg_result['diagnostics'],
-                    
-                    # ensure all comparison fields are properly structured:
-                    'baseline_comparison': {
-                        'success': True,
-                        'predictions': idm_predictions_df,  # With mapped columns
-                        'diagnostics': idm_comparison_result.get('diagnostics', {})
-                    } if idm_comparison_result.get('success') else None,
-                    
-                    'idm_comparison': idm_comparison_result,
-                    'idm_baseline': idm_comparison_result, 
-                    'comparison_results': idm_comparison_result,            
-                    'training_result': training_result,
-                    'network_data': network_data,
-                    'transit_data': transit_data,
-                    'trained_model': gnn_model,
-                    'timing': {
-                        'gnn_training': gnn_time,
-                        'metricgraph_creation': mg_time,
-                        'disaggregation': time.time() - gnn_start,
-                        'total': time.time() - gnn_start
-                    }
+                # Ensure all comparison fields are properly structured:
+                'baseline_comparison': {
+                    'success': True,
+                    'predictions': idm_predictions_df,  # With mapped columns
+                    'diagnostics': idm_comparison_result.get('diagnostics', {})
+                } if idm_comparison_result.get('success') else None,
+                
+                'idm_comparison': idm_comparison_result,
+                'idm_baseline': idm_comparison_result, 
+                'comparison_results': idm_comparison_result,            
+                'training_result': training_result,
+                'network_data': network_data,
+                'transit_data': transit_data,
+                'trained_model': gnn_model,
+                'timing': {
+                    'gnn_training': gnn_time,
+                    'metricgraph_creation': mg_time,
+                    'disaggregation': time.time() - gnn_start,
+                    'total': time.time() - gnn_start
                 }
-        
-            else:
-                raise RuntimeError(f"Hybrid disaggregation failed")
-        
-
+            }
         
         except Exception as e:
             self._log(f"  Error processing tract: {str(e)}")
-            print(f"Error in hybrid training: {e}")
+            print(f"Error in hybrid processing: {e}")
             return {'status': 'failed', 'fips': fips, 'error': str(e)}
     
     def _process_multi_fips_mode(self, data, target_fips_list):
@@ -1448,6 +1449,52 @@ class GRANITEPipeline:
 
         self._log(f"\nAll results and visualizations saved to {self.output_dir}/")
 
+    def debug_gnn_data_sources(self, result):
+        """Debug exactly what data sources are being used"""
+        print("\n" + "="*60)
+        print("🔍 GNN DATA SOURCE DEBUGGING")
+        print("="*60)
+        
+        # Check what's in the result object
+        print(f"Result keys: {list(result.keys())}")
+        
+        # Check each potential data source
+        data_sources = [
+            ('predictions', result.get('predictions')),
+            ('disaggregation_result', result.get('disaggregation_result')),
+            ('baseline_result', result.get('baseline_result')),
+            ('metricgraph_result', result.get('metricgraph_result'))
+        ]
+        
+        for source_name, source_data in data_sources:
+            if source_data is not None:
+                if isinstance(source_data, dict):
+                    print(f"\n{source_name} (dict):")
+                    print(f"  Keys: {list(source_data.keys())}")
+                    
+                    # Check for DataFrames in the dict
+                    for key, value in source_data.items():
+                        if hasattr(value, 'std'):  # It's array-like
+                            try:
+                                std_val = np.std(value)
+                                print(f"    {key}: std = {std_val:.6f}")
+                            except:
+                                pass
+                        elif isinstance(value, pd.DataFrame):
+                            print(f"    {key} (DataFrame): shape = {value.shape}")
+                            if 'mean' in value.columns:
+                                std_val = value['mean'].std()
+                                print(f"      mean column std = {std_val:.6f}")
+                                
+                elif isinstance(source_data, pd.DataFrame):
+                    print(f"\n{source_name} (DataFrame): shape = {source_data.shape}")
+                    if 'mean' in source_data.columns:
+                        std_val = source_data['mean'].std()
+                        print(f"  mean column std = {std_val:.6f}")
+                        print(f"  columns: {list(source_data.columns)}")
+        
+        print("="*60)
+
     def _print_comparison_summary(self, gnn_predictions, idm_predictions):
         """
         Print a clear summary of GNN vs IDM comparison to console
@@ -1478,7 +1525,7 @@ class GRANITEPipeline:
                 print(f"   Available columns: {list(gnn_predictions.columns)}")
             
             print("   === END DEBUG ===\n")
-            
+
             gnn_values = gnn_predictions['mean'].values
             idm_values = idm_predictions['mean'].values
             

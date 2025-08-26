@@ -319,16 +319,89 @@ class GRANITEPipeline:
         self._log(f"  Features: {feature_type}")
         self._log(f"  Input dimensions: {graph_data.x.shape[1]}")
         
-        trained_model, _, training_metrics = train_accessibility_gnn(
-            graph_data,
-            model,
-            epochs=self.config['model']['epochs'],
-            lr=self.config['model']['learning_rate'],
-            spatial_weight=self.config['model']['spatial_weight'],
-            reg_weight=self.config['model']['regularization_weight']
+        # NEW CODE (same path as single-tract):
+        from ..models.training import train_accessibility_corrections  
+        from ..models.gnn import AccessibilityGNNCorrector, HybridCorrectionTrainer
+
+        # Create correction model (same architecture as single-tract)
+        input_dim = graph_data.x.shape[1]
+        correction_model = AccessibilityGNNCorrector(
+            input_dim=input_dim,
+            hidden_dim=64
         )
+
+        # Create combined IDM baseline for all addresses
+        self._log("Computing combined IDM baseline for global training...")
+        all_idm_predictions = []
+        weighted_svi = 0.0
+        total_addresses = 0
+
+        # Compute IDM predictions for each tract's addresses
+        for idx, tract in data['tracts'].iterrows():
+            if pd.isna(tract['RPL_THEMES']):
+                continue
+                
+            tract_data = self._prepare_tract_data(tract, data)
+            if tract_data['addresses'].empty:
+                continue
+            
+            # Get NLCD features for this tract
+            tract_nlcd = self._load_nlcd_for_tract(tract_data)
+            
+            # Compute IDM baseline for this tract
+            idm_result = self.idm_baseline.disaggregate_svi(
+                tract_svi=tract['RPL_THEMES'],
+                prediction_locations=tract_data['addresses'],
+                nlcd_features=tract_nlcd,
+                tract_geometry=tract_data['tract_info'].geometry
+            )
+            
+            if idm_result['success']:
+                tract_predictions = idm_result['predictions']['svi_prediction'].values
+                all_idm_predictions.extend(tract_predictions)
+                
+                # Weight SVI by number of addresses
+                num_addresses = len(tract_predictions)
+                weighted_svi += tract['RPL_THEMES'] * num_addresses
+                total_addresses += num_addresses
+
+        # Create combined baseline
+        combined_idm_baseline = np.array(all_idm_predictions)
+        combined_svi = weighted_svi / total_addresses if total_addresses > 0 else 0.4
+
+        self._log(f"Combined baseline: {len(combined_idm_baseline)} predictions, weighted SVI: {combined_svi:.3f}")
+
+        # Train using correction approach (same as single-tract)
+        training_config = {
+            'learning_rate': self.config.get('model', {}).get('learning_rate', 0.001),
+            'weight_decay': 1e-5
+        }
+
+        trainer = HybridCorrectionTrainer(correction_model, config=training_config)
+
+        training_result = trainer.train_corrections(
+            graph_data=graph_data,
+            idm_baseline=combined_idm_baseline,
+            tract_svi=combined_svi,
+            epochs=self.config.get('training', {}).get('epochs', 100),
+            verbose=self.verbose
+        )
+
+        trained_model = correction_model
+        training_metrics = training_result
         
-        self._log(f"Global GNN training complete: {training_metrics['final_loss']:.4f}")
+        if 'loss_history' in training_metrics and training_metrics['loss_history']:
+            final_loss = training_metrics['loss_history'][-1]
+            self._log(f"Global GNN training complete: final loss = {final_loss:.4f}")
+        elif 'final_metrics' in training_metrics:
+            metrics = training_metrics['final_metrics']
+            if 'constraint_error' in metrics:
+                self._log(f"Global GNN training complete: constraint error = {metrics['constraint_error']:.4f}")
+            else:
+                self._log(f"Global GNN training complete successfully")
+        else:
+            self._log(f"Global GNN training complete successfully")
+            
         return trained_model
     
     def _load_nlcd_for_tract(self, tract_data):

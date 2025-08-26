@@ -294,75 +294,47 @@ def list_available_fips(data_dir: str, state_fips: str, county_fips: str):
         print(f"Error loading FIPS codes: {str(e)}")
         sys.exit(1)
 
-
 def main():
-    """Main entry point for GRANITE pipeline"""
+    parser = argparse.ArgumentParser(description='GRANITE SVI Disaggregation')
     
-    # Parse arguments FIRST
-    parser = argparse.ArgumentParser(description='GRANITE Pipeline')
-    parser.add_argument('--fips', type=str, help='Target FIPS code(s) - single or comma-separated')
-    parser.add_argument('--epochs', type=int, help='Number of epochs')
+    # Core arguments (keep these)
+    parser.add_argument('--fips', type=str, help='Target FIPS code for single tract processing')
+    parser.add_argument('--epochs', type=int, help='Training epochs (overrides config)')
+    parser.add_argument('--output', type=str, default='./output', help='Output directory')
+    parser.add_argument('--verbose', action='store_true', help='Verbose logging')
+    
+    # REMOVE unused arguments like:
+    # --multi-fips, --county-mode, --sampling-strategy, etc.
+    
     args = parser.parse_args()
     
-    print(f"GRANITE Framework - Starting analysis at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print()
+    # Load and update config
+    config = load_config('config.yaml')
     
-    try:
-        # Load config
-        config = load_config('config/config.yaml')
+    # Override config with CLI arguments
+    if args.fips:
+        config['data']['target_fips'] = args.fips
+        config['data']['processing_mode'] = 'fips'
+    
+    if args.epochs:
+        config['model']['epochs'] = args.epochs
         
-        # FIXED: Handle comma-separated FIPS codes
-        if args.fips:
-            if ',' in args.fips:
-                # Multiple FIPS codes
-                fips_list = [fips.strip() for fips in args.fips.split(',')]
-                config['data']['processing_mode'] = 'multi_fips'
-                config['data']['target_fips_list'] = fips_list
-                print(f"Configuration:")
-                print(f"  Processing mode: multi_fips")
-                print(f"  Target FIPS list: {fips_list}")
-            else:
-                # Single FIPS code
-                config['data']['target_fips'] = args.fips.strip()
-                config['data']['processing_mode'] = 'fips'
-                print(f"Configuration:")
-                print(f"  Processing mode: fips")
-                print(f"  Target FIPS: {args.fips}")
-        else:
-            # No FIPS specified - process all
-            config['data']['processing_mode'] = 'county'
-            print(f"Configuration:")
-            print(f"  Processing mode: county")
-        
-        if args.epochs:
-            config['model']['epochs'] = args.epochs
-            print(f"  Model epochs: {args.epochs}")
-        
-        print(f"  Output directory: ./output")
-        
-        # Create pipeline
-        from granite.disaggregation.pipeline import GRANITEPipeline
-        
-        pipeline = GRANITEPipeline(
-            config=config,
-            data_dir='./data',
-            output_dir='./output',
-            verbose=True
-        )
-        
-        results = pipeline.run()
-        if results.get('success', False):
-            print("Analysis completed successfully")
-            return {'success': True, 'message': 'Analysis completed'}
-        else:
-            print(f"Analysis failed: {results.get('error', 'Unknown error')}")
-            return {'success': False}
-        
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return {'success': False, 'error': str(e)}
+    if args.verbose:
+        config['processing']['verbose'] = True
+    
+    # Initialize and run pipeline
+    pipeline = GRANITEPipeline(config, output_dir=args.output)
+    results = pipeline.run()
+    
+    if results.get('success', False):
+        print(f"Analysis completed successfully!")
+        print(f"Results saved to: {args.output}")
+        print(f"Processed {results['summary']['total_addresses']} addresses")
+    else:
+        print(f"Analysis failed: {results.get('error', 'Unknown error')}")
+        return 1
+    
+    return 0
 
 if __name__ == "__main__":
     main()

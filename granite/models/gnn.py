@@ -546,81 +546,6 @@ def create_accessibility_corrector(input_dim: int, hidden_dim: int = 64,
         max_correction=max_correction
     )
 
-class SPDEParameterGNN(nn.Module):
-    """GNN with explicit variance preservation"""
-    
-    def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 3):
-        super(SPDEParameterGNN, self).__init__()
-        
-        # Residual connections to preserve input variance
-        self.input_projection = nn.Linear(input_dim, hidden_dim)
-        
-        # Use BatchNorm to maintain variance
-        self.conv1 = GCNConv(hidden_dim, hidden_dim)
-        self.bn1 = nn.BatchNorm1d(hidden_dim)
-        
-        self.conv2 = GCNConv(hidden_dim, hidden_dim)
-        self.bn2 = nn.BatchNorm1d(hidden_dim)
-        
-        self.conv3 = GCNConv(hidden_dim, hidden_dim)
-        self.bn3 = nn.BatchNorm1d(hidden_dim)
-        
-        # Direct feature bypass to preserve input signal
-        self.feature_bypass = nn.Linear(input_dim, output_dim)
-        
-        # Output heads
-        self.param_head = nn.Linear(hidden_dim + output_dim, output_dim)
-        
-        # Minimal dropout
-        self.dropout = nn.Dropout(0.05)
-    
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
-        # Save original features for bypass
-        original_features = x
-        
-        # Project input
-        x = self.input_projection(x)
-        identity = x  # For residual
-        
-        # Conv block 1 with residual
-        x = self.conv1(x, edge_index)
-        x = self.bn1(x)
-        x = F.relu(x)
-        x = self.dropout(x)
-        x = x + identity  # Residual connection
-        
-        # Conv block 2 with residual
-        identity = x
-        x = self.conv2(x, edge_index)
-        x = self.bn2(x)
-        x = F.relu(x)
-        x = self.dropout(x)
-        x = x + identity
-        
-        # Conv block 3
-        x = self.conv3(x, edge_index)
-        x = self.bn3(x)
-        x = F.relu(x)
-        
-        # Combine with bypassed features
-        bypass_params = self.feature_bypass(original_features)
-        combined = torch.cat([x, bypass_params], dim=1)
-        
-        # Final parameters with no compression
-        params = self.param_head(combined)
-
-        kappa = params[:, 0] * 5.0 + 2.5    # Kappa in [2.5-5, 2.5+5] = [-2.5, 7.5]
-        alpha = params[:, 1] * 1.0           
-        tau = params[:, 2] * 1.0 + 0.5       # Tau in [0.5-1, 0.5+1] = [-0.5, 1.5]
-
-        # But clamp to valid ranges
-        kappa = torch.clamp(kappa, min=0.2, max=10.0)  
-        tau = torch.clamp(tau, min=0.05, max=2.0) 
-        
-        params = torch.stack([kappa, alpha, tau], dim=1)
-        
-        return params
-
 def safe_feature_normalization_vectorized(node_features):
     """
     Fully vectorized normalization
@@ -846,27 +771,6 @@ def prepare_graph_data_topological(road_network: nx.Graph) -> Tuple[Data, Dict]:
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     
     return data, node_to_idx
-
-def create_gnn_model(input_dim: int = 5, hidden_dim: int = 128, 
-                    output_dim: int = 3) -> nn.Module:
-    """
-    Create GNN model for SPDE parameter learning
-    
-    Parameters:
-    -----------
-    input_dim : int
-        Number of input features
-    hidden_dim : int
-        Hidden layer dimension
-    output_dim : int
-        Output dimension (3 for SPDE parameters)
-        
-    Returns:
-    --------
-    nn.Module
-        GNN model
-    """
-    return SPDEParameterGNN(input_dim, hidden_dim, output_dim)
 
 def calculate_land_cover_diversity(node_x, node_y, feature_tree, feature_coords, 
                                   nlcd_features, radius=500):

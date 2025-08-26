@@ -1,0 +1,86 @@
+# GRANITE Framework Configuration - Cleaned for Single-Tract Hybrid Mode
+
+data:
+  # Geographic scope 
+  state_fips: "47"
+  county_fips: "065"
+  census_year: 2020
+  address_file: "chattanooga.geojson"
+  use_real_addresses: true
+  
+  # Processing mode - simplified to only support single FIPS
+  processing_mode: "fips"  # Changed from "county"
+  
+  # File paths
+  svi_file: "data/raw/SVI2020_US_tract.csv"
+  roads_file: "data/raw/tl_2023_47065_roads.shp"
+  census_tracts_file: "data/raw/tl_2020_47_tract.shp"
+
+# Transit configuration
+transit:
+  preferred_source: 'gtfs'
+  local_file: 'carta_gtfs.zip'
+  download_real_data: true  # Added missing field
+
+# GNN model configuration - FIXED for correction approach
+model:
+  # Core architecture for AccessibilityGNNCorrector
+  input_dim: 5      # Number of input features from NLCD
+  hidden_dim: 64    # REDUCED from 128 (your working config)
+  output_dim: 1     # Single correction value (not 3 SPDE parameters)
+  
+  # Training parameters
+  epochs: 100       # Default (overridden by --epochs)
+  learning_rate: 0.001
+  weight_decay: 1e-5
+  
+  # Features
+  features:
+    type: "nlcd" 
+    nlcd_path: "./data/nlcd_hamilton_county.tif"
+
+# MetricGraph configuration 
+metricgraph:
+  alpha: 1                    # Smoothness parameter
+  mesh_resolution: 0.05       # Mesh building parameter
+  max_edges: 50000           # Memory management
+
+# Hybrid approach configuration - REBALANCED weights
+hybrid:
+  # Component mixing
+  idm_weight: 0.7           # 70% IDM baseline  
+  gnn_weight: 0.3           # 30% GNN corrections
+  max_correction: 0.15      # ±15% correction limit
+  target_cv: 0.20           # Target coefficient of variation
+  
+  # Loss function weights - WORKING configuration
+  constraint_weight: 5.0      # HIGH - enforce tract constraint
+  spatial_weight: 1.0         # Moderate spatial smoothness  
+  diversity_weight: 0.5       # LOW - gentle diversity
+  variation_weight: 0.3       # LOW - gentle variation
+  variance_preservation_weight: 0.1  # LOW - prevent collapse
+  feature_weight: 0.05        # MINIMAL - feature utilization
+  
+  # Training parameters
+  learning_rate: 0.001
+  weight_decay: 1e-5
+
+# Output settings
+output:
+  save_predictions: true
+  save_plots: true
+  
+# Baselines 
+baselines:
+  enable_idm: true
+
+# Processing settings
+processing:
+  continue_on_error: true
+  verbose: true
+  random_seed: 42
+
+# REMOVED unused sections:
+# - Multi-tract processing configs
+# - Complex sampling strategies  
+# - Unimplemented validation settings

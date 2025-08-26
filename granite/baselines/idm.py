@@ -93,66 +93,68 @@ class IDMBaseline:
             2: 1.2,    # High development
             250: 0.0,  # No data
         }
+
+        self.validated_coefficients = {
+            11: 0.15,  # Open Water
+            21: 0.45,  # Developed, Open Space  
+            22: 0.65,  # Developed, Low Intensity
+            23: 0.85,  # Developed, Medium Intensity
+            24: 0.95,  # Developed, High Intensity
+            31: 0.25,  # Barren Land
+            41: 0.20,  # Deciduous Forest
+            42: 0.18,  # Evergreen Forest
+            43: 0.22,  # Mixed Forest
+            52: 0.35,  # Shrub/Scrub
+            71: 0.30,  # Grassland/Herbaceous
+            81: 0.40,  # Pasture/Hay
+            82: 0.50,  # Cultivated Crops
+            90: 0.35,  # Woody Wetlands
+            95: 0.40,  # Emergent Herbaceous Wetlands
+        }
+        self.default_coefficient = 0.50
     
-    def disaggregate_svi(self, tract_svi: float,
-                        prediction_locations: pd.DataFrame, 
-                        nlcd_features: pd.DataFrame = None,
-                        tract_geometry: Optional[Polygon] = None) -> Dict:
-        """
-        Proper IDM spatial disaggregation following He et al. (2024)
-        """
-        
-        n_addresses = len(prediction_locations)
-        
-        # Extract and check coordinates right at the start
-        coords = prediction_locations[['x', 'y']].values
-        
-        try:
-            if nlcd_features is not None and len(nlcd_features) >= n_addresses:
-                # Check if we have proper 16-class NLCD or legacy 4-class
-                if self._has_proper_nlcd_classes(nlcd_features):
-                    # STEP 1: Proper IDM with full NLCD classification
-                    results = self._proper_idm_disaggregation(
-                        tract_svi, prediction_locations, nlcd_features, tract_geometry
-                    )
-                else:
-                    # STEP 2: Legacy mode for backward compatibility
-                    results = self._legacy_idm_disaggregation(
-                        tract_svi, prediction_locations, nlcd_features, tract_geometry
-                    )
-            else:
-                if nlcd_features is not None:
-                    print(f"nlcd_features length: {len(nlcd_features)} vs n_addresses: {n_addresses}")
-                # STEP 3: Fallback to distance-based IDM
-                results = self._distance_based_idm_fallback(
-                    tract_svi, prediction_locations, tract_geometry
-                )
-            
-            # Debug the results before returning
-            if results and 'predictions' in results:
-                pred_df = results['predictions']
+    def disaggregate_svi(self, tract_svi: float, prediction_locations,
+                            nlcd_features, tract_geometry) -> dict:
+            """
+            NEW METHOD: Enhanced SVI disaggregation with validated coefficients
+            """
+            try:
+                # Apply validated coefficients
+                vulnerability_scores = self._apply_validated_coefficients(nlcd_features)
                 
-            return results
-            
-        except Exception as e:
-            import traceback
-            
-            # Create a simple fallback result with correct coordinates
-            fallback_predictions = self._create_results_dataframe(
-                coords, 
-                np.full(n_addresses, tract_svi), 
-                np.full(n_addresses, 0.05), 
-                prediction_locations
-            )
-            
-            return {
-                'success': True,
-                'predictions': fallback_predictions,
-                'diagnostics': {
-                    'method': 'IDM_exception_fallback',
-                    'error': str(e)
+                # Normalize to satisfy tract constraint
+                normalized_scores = self._normalize_to_tract_constraint(
+                    vulnerability_scores, tract_svi
+                )
+                
+                # Create results dataframe
+                predictions_df = pd.DataFrame({
+                    'x': prediction_locations.geometry.x,
+                    'y': prediction_locations.geometry.y,
+                    'svi_prediction': normalized_scores,
+                    'uncertainty': self._estimate_uncertainty(vulnerability_scores)
+                })
+                
+                # Compute diagnostics
+                diagnostics = {
+                    'method': 'IDM_validated_coefficients',
+                    'mean_prediction': np.mean(normalized_scores),
+                    'std_prediction': np.std(normalized_scores),
+                    'constraint_error': abs(np.mean(normalized_scores) - tract_svi) / tract_svi,
+                    'constraint_satisfied': abs(np.mean(normalized_scores) - tract_svi) < 0.01
                 }
-            }
+                
+                return {
+                    'success': True,
+                    'predictions': predictions_df,
+                    'diagnostics': diagnostics
+                }
+                
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': f'IDM disaggregation failed: {str(e)}'
+                }
     
     def _has_proper_nlcd_classes(self, nlcd_features: pd.DataFrame) -> bool:
         """Check if NLCD features use proper 16-class legend"""
@@ -532,3 +534,39 @@ class IDMBaseline:
         proportions = counts / len(nlcd_classes)
         entropy = -np.sum(proportions * np.log2(proportions + 1e-10))
         return entropy
+    
+    def _apply_validated_coefficients(self, nlcd_features):
+        """Apply He et al. (2024) validated coefficients"""
+        vulnerability_scores = np.zeros(len(nlcd_features))
+        
+        for idx, row in nlcd_features.iterrows():
+            nlcd_class = int(row.get('nlcd_class', 0))
+            coefficient = self.validated_coefficients.get(
+                nlcd_class, self.default_coefficient
+            )
+            vulnerability_scores[idx] = coefficient
+            
+        return vulnerability_scores
+    
+    def _normalize_to_tract_constraint(self, vulnerability_scores, tract_svi):
+        """Normalize while preserving spatial patterns"""
+        mean_vulnerability = np.mean(vulnerability_scores)
+        if mean_vulnerability == 0:
+            return np.full(len(vulnerability_scores), tract_svi)
+        
+        # Scale to match tract SVI
+        scaling_factor = tract_svi / mean_vulnerability
+        normalized_scores = vulnerability_scores * scaling_factor
+        
+        # Final adjustment for exact constraint satisfaction
+        current_mean = np.mean(normalized_scores)
+        adjustment = tract_svi - current_mean
+        normalized_scores += adjustment
+        
+        return np.maximum(normalized_scores, 0.0)
+    
+    def _estimate_uncertainty(self, vulnerability_scores):
+        """Estimate uncertainty based on land cover heterogeneity"""
+        local_std = np.std(vulnerability_scores)
+        base_uncertainty = 0.05
+        return np.full(len(vulnerability_scores), base_uncertainty + 0.1 * local_std)

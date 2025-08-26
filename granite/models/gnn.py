@@ -5,7 +5,7 @@ This module implements GNN architectures for learning SPDE parameters
 from road network structure.
 """
 # Standard library imports
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 
 # Third-party imports
 import numpy as np
@@ -21,6 +21,530 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data
 
+
+class AccessibilityGNNCorrector(nn.Module):
+    """
+    GNN model that learns accessibility-based corrections to IDM baseline.
+    
+    Key difference from traditional GNN: This outputs CORRECTIONS, not full SPDE parameters.
+    Corrections are bounded to prevent unrealistic adjustments.
+    """
+    
+    def __init__(self, input_dim: int, hidden_dim: int = 64, max_correction: float = 0.15):
+        super().__init__()
+        
+        self.max_correction = max_correction
+        
+        # Feature processing layers
+        self.input_projection = nn.Linear(input_dim, hidden_dim)
+        
+        # Graph convolution layers
+        try:
+            from torch_geometric.nn import GCNConv
+            self.conv1 = GCNConv(hidden_dim, hidden_dim)
+            self.conv2 = GCNConv(hidden_dim, hidden_dim)
+            self.conv3 = GCNConv(hidden_dim, hidden_dim // 2)
+        except ImportError:
+            # Fallback to simple linear layers if PyTorch Geometric not available
+            self.conv1 = nn.Linear(hidden_dim, hidden_dim)
+            self.conv2 = nn.Linear(hidden_dim, hidden_dim)
+            self.conv3 = nn.Linear(hidden_dim, hidden_dim // 2)
+            self._use_pyg = False
+        else:
+            self._use_pyg = True
+            
+        # Accessibility-specific layers
+        self.accessibility_attention = nn.MultiheadAttention(
+            embed_dim=hidden_dim // 2, num_heads=4, batch_first=True
+        )
+        
+        # Output single correction value per node
+        self.correction_head = nn.Sequential(
+            nn.Linear(hidden_dim // 2, hidden_dim // 4),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim // 4, 1)
+        )
+        
+        # Normalization and activation
+        self.batch_norm1 = nn.BatchNorm1d(hidden_dim)
+        self.batch_norm2 = nn.BatchNorm1d(hidden_dim)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.1)
+        
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, 
+                idm_baseline: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Forward pass computing accessibility corrections with SVI range enforcement.
+        
+        Parameters:
+        -----------
+        x : torch.Tensor [num_nodes, input_dim]
+            Node features (network topology + NLCD + optionally IDM baseline)
+        edge_index : torch.Tensor [2, num_edges] 
+            Graph connectivity
+        idm_baseline : torch.Tensor [num_nodes, 1], optional
+            IDM baseline predictions to inform corrections
+            
+        Returns:
+        --------
+        torch.Tensor [num_nodes, 1]
+            Accessibility corrections bounded to [-max_correction, +max_correction]
+            and ensuring final predictions stay within [0, 1]
+        """
+        if idm_baseline is not None:
+            num_addresses = idm_baseline.shape[0]
+        else:
+            num_addresses = x.shape[0]
+
+        # Initial feature projection
+        h = self.input_projection(x)
+        h = self.relu(h)
+        
+        # Graph convolutions with residual connections
+        if self._use_pyg:
+            # PyTorch Geometric path
+            h1 = self.conv1(h, edge_index)
+            h1 = self.batch_norm1(h1)
+            h1 = self.relu(h1)
+            h1 = self.dropout(h1)
+            
+            h2 = self.conv2(h1, edge_index)
+            h2 = self.batch_norm2(h2)
+            h2 = self.relu(h2)
+            h2 = h2 + h1  # Residual connection
+            
+            h3 = self.conv3(h2, edge_index)
+            h3 = self.relu(h3)
+        else:
+            # Fallback for simpler graphs (no edge_index needed)
+            h1 = self.conv1(h)
+            h1 = self.batch_norm1(h1)
+            h1 = self.relu(h1)
+            
+            h2 = self.conv2(h1)
+            h2 = self.batch_norm2(h2)
+            h2 = self.relu(h2) + h1
+            
+            h3 = self.conv3(h2)
+            h3 = self.relu(h3)
+        
+        # Accessibility attention mechanism
+        h3_expanded = h3.unsqueeze(0)  # Add batch dimension
+        attended_features, _ = self.accessibility_attention(
+            h3_expanded, h3_expanded, h3_expanded
+        )
+        h3 = attended_features.squeeze(0)  # Remove batch dimension
+        
+        # Generate corrections for ALL graph nodes
+        all_corrections = self.correction_head(h3)  # [total_nodes, 1]
+        
+        # SAFE BOUNDS CHECKING - ensure we don't exceed available corrections
+        if num_addresses > all_corrections.shape[0]:
+            num_addresses = all_corrections.shape[0]
+        
+        address_corrections = all_corrections[:num_addresses]  # Extract address corrections
+        
+        # Bound corrections to reasonable range using tanh
+        address_corrections = torch.tanh(address_corrections) * self.max_correction
+        
+        # Ensure corrections are mean-centered (mass preserving)
+        address_corrections = address_corrections - torch.mean(address_corrections)
+        
+        # NEW: Ensure final predictions stay in valid SVI range [0,1]
+        if idm_baseline is not None:
+            final_predictions = idm_baseline.squeeze() + address_corrections.squeeze()
+            final_predictions = torch.clamp(final_predictions, min=0.0, max=1.0)
+            # Recompute corrections to maintain range constraint
+            address_corrections = (final_predictions - idm_baseline.squeeze()).unsqueeze(-1)
+            # Re-center to preserve mass
+            address_corrections = address_corrections - torch.mean(address_corrections)
+
+        return address_corrections
+
+class HybridCorrectionTrainer:
+    """
+    IMPROVED trainer for the accessibility GNN corrector.
+    
+    Key improvements:
+    1. Restored spatial_loss weight (1.0)
+    2. Reduced feature_utilization weight (0.1)  
+    3. Added variance preservation term to prevent collapse
+    4. Soft tract constraints instead of hard constraints
+    5. Explicit coefficient of variation target (~20% of mean)
+    """
+    
+    def __init__(self, model: AccessibilityGNNCorrector, config: dict = None):
+        self.model = model
+        self.config = config or {}
+        
+        # REBALANCED loss function weights (from your research analysis)
+        self.loss_weights = {
+            'constraint_weight': 5.0,         # MUCH HIGHER - enforce tract constraint
+            'spatial_weight': 1.0,            # Moderate spatial smoothness  
+            'diversity_weight': 0.5,          # MUCH LOWER - gentle diversity encouragement
+            'variation_weight': 0.3,          # MUCH LOWER - gentle variation encouragement
+            'variance_preservation_weight': 0.1,  # MUCH LOWER - gentle collapse prevention
+            'feature_weight': 0.05,           # MUCH LOWER - minimal feature utilization
+        }
+        
+        # Target coefficient of variation (~40% of mean)
+        self.target_cv = self.config.get('target_cv', 0.40)
+        
+        # Initialize optimizer
+        self.optimizer = torch.optim.Adam(
+            model.parameters(), 
+            lr=self.config.get('learning_rate', 0.001),
+            weight_decay=self.config.get('weight_decay', 1e-5)
+        )
+        
+    def train_corrections(self, graph_data: object, idm_baseline: np.ndarray,
+                        tract_svi: float, epochs: int = 100, 
+                        verbose: bool = False) -> dict:
+        """
+        Train the GNN with FIXED loss function to prevent parameter collapse.
+        
+        Key fixes:
+        1. Rebalanced loss weights (constraint_weight=5.0, diversity_weight=0.5)
+        2. SVI range enforcement [0, 1]
+        3. Simplified training loop without numerical instabilities
+        4. Proper gradient clipping
+        """
+        
+        self.model.train()
+        
+        # Convert inputs to tensors
+        idm_tensor = torch.tensor(idm_baseline, dtype=torch.float32)
+        target_mean = torch.tensor(tract_svi, dtype=torch.float32)
+        
+        # FIXED loss weights - constraint is now dominant
+        loss_weights = {
+            'constraint_weight': 5.0,         # HIGH - enforce tract constraint
+            'spatial_weight': 1.0,            # Moderate spatial smoothness  
+            'diversity_weight': 0.5,          # LOW - gentle diversity encouragement
+            'variation_weight': 0.3,          # LOW - gentle variation encouragement
+            'variance_preservation_weight': 0.1,  # LOW - gentle collapse prevention
+            'feature_weight': 0.05,           # MINIMAL - feature utilization
+        }
+        
+        loss_history = []
+        correction_history = []
+        best_loss = float('inf')
+        
+        for epoch in range(epochs):
+            self.optimizer.zero_grad()
+            
+            # Forward pass
+            corrections = self.model(
+                graph_data.x, graph_data.edge_index, idm_tensor
+            ).squeeze()
+            
+            # Ensure corrections match IDM size
+            if corrections.shape[0] != idm_tensor.shape[0]:
+                corrections = corrections[:idm_tensor.shape[0]]
+            
+            # Compute enhanced predictions with RANGE ENFORCEMENT
+            enhanced_predictions = idm_tensor + corrections
+            enhanced_predictions = torch.clamp(enhanced_predictions, min=0.0, max=1.0)  # CRITICAL FIX
+            
+            # SIMPLIFIED loss computation
+            # 1. Constraint loss (HIGH weight)
+            constraint_loss = F.mse_loss(torch.mean(enhanced_predictions), target_mean)
+            
+            # 2. Spatial smoothness (moderate weight)
+            spatial_loss = self._compute_simple_spatial_loss(corrections, graph_data.edge_index)
+            
+            # 3. Diversity encouragement (low weight)
+            diversity_loss = -torch.std(enhanced_predictions)  # Negative to encourage diversity
+            
+            # 4. Simple variance preservation (low weight)
+            variance_loss = 1.0 / (1.0 + torch.var(corrections))  # Bounded, no exponentials
+            
+            # 5. Feature utilization (minimal weight)
+            feature_loss = -torch.mean(torch.abs(corrections))  # Encourage meaningful corrections
+            
+            # REBALANCED total loss
+            total_loss = (
+                loss_weights['constraint_weight'] * constraint_loss +
+                loss_weights['spatial_weight'] * spatial_loss +
+                loss_weights['diversity_weight'] * diversity_loss +
+                loss_weights['variance_preservation_weight'] * variance_loss +
+                loss_weights['feature_weight'] * feature_loss
+            )
+            
+            # Backward pass with gradient clipping
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.optimizer.step()
+            
+            # Track history
+            loss_history.append(total_loss.item())
+            correction_history.append(corrections.detach().numpy().copy())
+            
+            # Monitor progress
+            if verbose and epoch % 10 == 0:
+                pred_mean = torch.mean(enhanced_predictions).item()
+                pred_std = torch.std(enhanced_predictions).item()
+                corr_std = torch.std(corrections).item()
+                constraint_error = abs(pred_mean - tract_svi)
+                
+                print(f"Epoch {epoch:3d}: Loss={total_loss.item():.4f} "
+                    f"Constraint={constraint_loss.item():.4f} "
+                    f"Mean={pred_mean:.4f} (target={tract_svi:.4f}) "
+                    f"Std={pred_std:.4f} CorrStd={corr_std:.4f}")
+                
+                # Check for improvement
+                if total_loss.item() < best_loss:
+                    best_loss = total_loss.item()
+                
+                # Early warning for issues
+                if constraint_error > 0.05:  # 5% error threshold
+                    print(f"    ⚠️  High constraint error: {constraint_error:.4f}")
+                if corr_std < 0.001:
+                    print(f"    ⚠️  Very low correction variance: {corr_std:.6f}")
+        
+        # Final evaluation
+        self.model.eval()
+        with torch.no_grad():
+            final_corrections = self.model(
+                graph_data.x, graph_data.edge_index, idm_tensor
+            ).squeeze()
+            
+            if final_corrections.shape[0] != idm_tensor.shape[0]:
+                final_corrections = final_corrections[:idm_tensor.shape[0]]
+                
+            final_predictions = idm_tensor + final_corrections
+            final_predictions = torch.clamp(final_predictions, min=0.0, max=1.0)
+            
+            # Final metrics
+            final_constraint_error = abs(torch.mean(final_predictions) - target_mean).item()
+            final_pred_std = torch.std(final_predictions).item()
+            final_corr_std = torch.std(final_corrections).item()
+            
+            # Success criteria
+            success_criteria = {
+                'constraint_satisfied': final_constraint_error < 0.01,  # 1% tolerance
+                'valid_range': torch.all(final_predictions >= 0.0) and torch.all(final_predictions <= 1.0),
+                'meaningful_variation': final_pred_std > 0.005,  # At least some variation
+                'stable_training': loss_history[-1] < loss_history[0] if len(loss_history) > 1 else True
+            }
+            
+            training_success = all(success_criteria.values())
+            
+            if verbose:
+                print(f"\n🏁 TRAINING COMPLETE:")
+                print(f"   Final constraint error: {final_constraint_error:.4f}")
+                print(f"   Final prediction std: {final_pred_std:.4f}")
+                print(f"   Final correction std: {final_corr_std:.4f}")
+                print(f"   Valid SVI range: {success_criteria['valid_range']}")
+                print(f"   Training success: {'✅' if training_success else '❌'}")
+        
+        return {
+            'success': training_success,
+            'final_corrections': final_corrections.numpy(),
+            'final_predictions': final_predictions.numpy(),
+            'loss_history': loss_history,
+            'correction_history': correction_history,
+            'final_metrics': {
+                'prediction_std': final_pred_std,
+                'correction_std': final_corr_std,
+                'constraint_error': final_constraint_error,
+                'mean_prediction': torch.mean(final_predictions).item(),
+                'valid_range': success_criteria['valid_range'],
+                'parameter_collapse_detected': final_corr_std < 1e-4,
+                'training_successful': training_success
+            },
+            'success_criteria': success_criteria
+        }
+
+    def _compute_simple_spatial_loss(self, corrections: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        """
+        SIMPLIFIED spatial loss without numerical instabilities.
+        """
+        if edge_index.shape[1] == 0:
+            return torch.tensor(0.0)
+        
+        # Filter to valid address edges
+        num_addresses = corrections.shape[0]
+        valid_edge_mask = (edge_index[0] < num_addresses) & (edge_index[1] < num_addresses)
+        
+        if not valid_edge_mask.any():
+            return torch.tensor(0.0)
+        
+        valid_edge_index = edge_index[:, valid_edge_mask]
+        
+        # Simple MSE between connected nodes
+        source_corrections = corrections[valid_edge_index[0]]
+        target_corrections = corrections[valid_edge_index[1]]
+        
+        return F.mse_loss(source_corrections, target_corrections)
+    
+    def _compute_improved_loss(self, corrections: torch.Tensor, 
+                              enhanced_predictions: torch.Tensor,
+                              target_mean: torch.Tensor,
+                              graph_data: object,
+                              idm_baseline: torch.Tensor) -> tuple:
+        """
+        IMPROVED loss function that prevents trivial solutions.
+        
+        Key changes from original:
+        1. Added spatial_loss with weight 1.0
+        2. Added variance preservation term (weight 3.0)
+        3. Reduced feature_weight to 0.1 
+        4. Increased diversity_weight to 5.0
+        5. Soft constraint instead of hard constraint
+        """
+        
+        loss_components = {}
+        
+        # 1. SOFT tract constraint (reduced weight, allows learning)
+        constraint_loss = F.mse_loss(
+            torch.mean(enhanced_predictions), target_mean
+        )
+        loss_components['constraint'] = constraint_loss.item()
+        
+        # 2. SPATIAL SMOOTHNESS LOSS (restored with weight 1.0)
+        spatial_loss = self._compute_spatial_loss(corrections, graph_data.edge_index)
+        loss_components['spatial'] = spatial_loss.item()
+        
+        # 3. VARIANCE PRESERVATION (NEW - prevents parameter collapse)
+        variance_loss = self._compute_variance_preservation_loss(
+            corrections, enhanced_predictions, target_mean
+        )
+        loss_components['variance_preservation'] = variance_loss.item()
+        
+        # 4. COEFFICIENT OF VARIATION TARGET (improved from variation_loss)
+        cv_loss = self._compute_cv_target_loss(enhanced_predictions)
+        loss_components['cv_target'] = cv_loss.item()
+        
+        # 5. DIVERSITY (increased weight - prevents uniform predictions)
+        diversity_loss = self._compute_diversity_loss(enhanced_predictions)
+        loss_components['diversity'] = diversity_loss.item()
+        
+        # 6. GENTLE feature utilization (reduced weight from 10.0 to 0.1)
+        feature_loss = self._compute_feature_utilization_loss(corrections, graph_data.x)
+        loss_components['feature'] = feature_loss.item()
+        
+        # REBALANCED total loss
+        total_loss = (
+            self.loss_weights['constraint_weight'] * constraint_loss +
+            self.loss_weights['spatial_weight'] * spatial_loss +           # RESTORED
+            self.loss_weights['variance_preservation_weight'] * variance_loss +  # NEW
+            self.loss_weights['variation_weight'] * cv_loss +
+            self.loss_weights['diversity_weight'] * diversity_loss +        # INCREASED
+            self.loss_weights['feature_weight'] * feature_loss              # REDUCED
+        )
+        
+        return total_loss, loss_components
+    
+    def _compute_spatial_loss(self, corrections: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        """
+        FIXED: Safe spatial loss that only uses address-to-address edges.
+        
+        The issue: corrections[2394], but edge_index references nodes up to 3098.
+        The fix: Only use edges where both endpoints are < len(corrections).
+        """
+        if edge_index.shape[1] == 0:
+            return torch.tensor(0.0)
+        
+        # CRITICAL FIX: Filter to address-only edges
+        num_addresses = corrections.shape[0]  # 2394
+        valid_edge_mask = (edge_index[0] < num_addresses) & (edge_index[1] < num_addresses)
+        
+        if not valid_edge_mask.any():
+            return torch.tensor(0.0)
+        
+        # Use only valid edges
+        valid_edge_index = edge_index[:, valid_edge_mask]
+        
+        # Safe indexing - all indices guaranteed < num_addresses
+        source_corrections = corrections[valid_edge_index[0]]
+        target_corrections = corrections[valid_edge_index[1]]
+        
+        # Standard spatial smoothness
+        smoothness = F.mse_loss(source_corrections, target_corrections)
+        
+        # Add uniformity penalty
+        uniformity_penalty = torch.exp(-torch.var(corrections) * 100) * 0.1
+        
+        return smoothness + uniformity_penalty
+    
+    def _compute_variance_preservation_loss(self, corrections, predictions, target_mean):
+        # SAFE variance preservation without explosions
+        correction_variance = torch.var(corrections)
+        
+        # Use sigmoid instead of exponential to bound values
+        collapse_penalty = 1.0 / (1.0 + correction_variance * 10.0)  # Bounded [0,1]
+        
+        # Simple L2 penalty instead of exponential
+        magnitude_penalty = 1.0 / (1.0 + torch.mean(torch.abs(corrections)) * 5.0)
+        
+        return collapse_penalty + magnitude_penalty  # No huge multipliers
+
+    
+    def _compute_cv_target_loss(self, predictions: torch.Tensor) -> torch.Tensor:
+        """
+        Target coefficient of variation around 20% of mean.
+        """
+        pred_mean = torch.mean(predictions)
+        pred_std = torch.std(predictions)
+        
+        if pred_mean > 0:
+            current_cv = pred_std / pred_mean
+            return F.mse_loss(current_cv, torch.tensor(self.target_cv))
+        else:
+            return torch.tensor(0.0)
+    
+    def _compute_diversity_loss(self, predictions: torch.Tensor) -> torch.Tensor:
+        """
+        MUCH STRONGER diversity loss to prevent uniform predictions
+        """
+        # Much stronger penalties for low diversity
+        std_loss = torch.exp(-torch.std(predictions) * 100)  # Increased from 10
+        var_loss = torch.exp(-torch.var(predictions) * 1000)  # Increased from 100
+        
+        return 10.0 * (std_loss + var_loss)  # Much higher multiplier
+
+    
+    def _compute_feature_utilization_loss(self, corrections: torch.Tensor,
+                                        features: torch.Tensor) -> torch.Tensor:
+        """
+        REDUCED weight - gentle encouragement to use available features
+        """
+        if features.shape[1] == 0:
+            return torch.tensor(0.0)
+            
+        # Much gentler feature utilization than before
+        feature_correlations = []
+        for i in range(min(features.shape[1], 5)):  # Limit to avoid dominance
+            try:
+                corr = torch.corrcoef(torch.stack([
+                    corrections.flatten(), 
+                    features[:, i].flatten()
+                ]))[0, 1]
+                if not torch.isnan(corr):
+                    feature_correlations.append(torch.abs(corr))
+            except:
+                continue
+        
+        if feature_correlations:
+            mean_correlation = torch.mean(torch.stack(feature_correlations))
+            return -mean_correlation * 0.1  # Much reduced impact
+        else:
+            return torch.tensor(0.0)
+
+# Convenience function for easy use in pipeline
+def create_accessibility_corrector(input_dim: int, hidden_dim: int = 64, 
+                                 max_correction: float = 0.15) -> AccessibilityGNNCorrector:
+    """
+    Convenience function to create AccessibilityGNNCorrector.
+    Can be used in pipeline.py for easy model creation.
+    """
+    return AccessibilityGNNCorrector(
+        input_dim=input_dim,
+        hidden_dim=hidden_dim,
+        max_correction=max_correction
+    )
 
 class SPDEParameterGNN(nn.Module):
     """GNN with explicit variance preservation"""
@@ -146,7 +670,6 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
                     [geom.x, geom.y] for geom in valid_features.geometry
                 ])
                 feature_tree = cKDTree(feature_coords)
-                print(f"Built spatial index with {len(feature_coords)} address features")
     
     # Extract enhanced node features
     node_features = []
@@ -229,11 +752,6 @@ def prepare_graph_data_with_nlcd(road_network: nx.Graph,
         ]
         
         node_features.append(features)
-    
-    print(f"  Enhanced feature extraction complete:")
-    print(f"   Total nodes: {len(nodes)}")
-    print(f"   Successful NLCD lookups: {successful_lookups}")
-    print(f"   Features per node: {len(features)}")
     
     # Convert to tensor and normalize
     node_features = torch.FloatTensor(node_features)

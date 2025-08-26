@@ -576,3 +576,31 @@ def train_accessibility_gnn(graph_data, model: Optional[nn.Module] = None,
     features = trainer.extract_features(graph_data)
     
     return model, features, metrics
+
+def train_accessibility_corrections(graph_data, idm_baseline: np.ndarray,
+                                    tract_svi: float, **kwargs):
+        """
+        NEW FUNCTION: Train GNN for accessibility corrections (hybrid approach).
+        This doesn't modify the existing train_accessibility_gnn function.
+        """
+        from .gnn import AccessibilityGNNCorrector, HybridCorrectionTrainer
+        
+        # Create correction model
+        input_dim = graph_data.x.shape[1] + 1  # +1 for IDM baseline
+        model = AccessibilityGNNCorrector(
+            input_dim=input_dim,
+            hidden_dim=kwargs.get('hidden_dim', 64)
+        )
+        
+        # Add IDM baseline as feature
+        idm_tensor = torch.tensor(idm_baseline, dtype=torch.float32).unsqueeze(1)
+        graph_data.x = torch.cat([graph_data.x, idm_tensor], dim=1)
+        
+        # Train corrections
+        trainer = HybridCorrectionTrainer(model, config=kwargs)
+        result = trainer.train_corrections(
+            graph_data, idm_baseline, tract_svi, 
+            epochs=kwargs.get('epochs', 100)
+        )
+        
+        return model, result

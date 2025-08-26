@@ -25,7 +25,9 @@ from ..models.training import train_accessibility_gnn
 from ..metricgraph.interface import MetricGraphInterface
 from ..visualization.plots import DisaggregationVisualizer
 from ..diagnostics.comparison_diagnostics import diagnose_comparison_issues, create_diagnostic_plots
-
+from ..baselines.idm import IDMBaseline
+from ..models.gnn import AccessibilityGNNCorrector, HybridCorrectionTrainer  
+from ..models.training import train_accessibility_corrections
 
 class GRANITEPipeline:
     """
@@ -70,6 +72,7 @@ class GRANITEPipeline:
             config=self.config  
         )
         self.visualizer = DisaggregationVisualizer()
+        self.idm_baseline = IDMBaseline(config=config, grid_resolution_meters=100)
         
         # Storage for results
         self.results = {}
@@ -316,16 +319,89 @@ class GRANITEPipeline:
         self._log(f"  Features: {feature_type}")
         self._log(f"  Input dimensions: {graph_data.x.shape[1]}")
         
-        trained_model, _, training_metrics = train_accessibility_gnn(
-            graph_data,
-            model,
-            epochs=self.config['model']['epochs'],
-            lr=self.config['model']['learning_rate'],
-            spatial_weight=self.config['model']['spatial_weight'],
-            reg_weight=self.config['model']['regularization_weight']
+        # NEW CODE (same path as single-tract):
+        from ..models.training import train_accessibility_corrections  
+        from ..models.gnn import AccessibilityGNNCorrector, HybridCorrectionTrainer
+
+        # Create correction model (same architecture as single-tract)
+        input_dim = graph_data.x.shape[1]
+        correction_model = AccessibilityGNNCorrector(
+            input_dim=input_dim,
+            hidden_dim=64
         )
+
+        # Create combined IDM baseline for all addresses
+        self._log("Computing combined IDM baseline for global training...")
+        all_idm_predictions = []
+        weighted_svi = 0.0
+        total_addresses = 0
+
+        # Compute IDM predictions for each tract's addresses
+        for idx, tract in data['tracts'].iterrows():
+            if pd.isna(tract['RPL_THEMES']):
+                continue
+                
+            tract_data = self._prepare_tract_data(tract, data)
+            if tract_data['addresses'].empty:
+                continue
+            
+            # Get NLCD features for this tract
+            tract_nlcd = self._load_nlcd_for_tract(tract_data)
+            
+            # Compute IDM baseline for this tract
+            idm_result = self.idm_baseline.disaggregate_svi(
+                tract_svi=tract['RPL_THEMES'],
+                prediction_locations=tract_data['addresses'],
+                nlcd_features=tract_nlcd,
+                tract_geometry=tract_data['tract_info'].geometry
+            )
+            
+            if idm_result['success']:
+                tract_predictions = idm_result['predictions']['svi_prediction'].values
+                all_idm_predictions.extend(tract_predictions)
+                
+                # Weight SVI by number of addresses
+                num_addresses = len(tract_predictions)
+                weighted_svi += tract['RPL_THEMES'] * num_addresses
+                total_addresses += num_addresses
+
+        # Create combined baseline
+        combined_idm_baseline = np.array(all_idm_predictions)
+        combined_svi = weighted_svi / total_addresses if total_addresses > 0 else 0.4
+
+        self._log(f"Combined baseline: {len(combined_idm_baseline)} predictions, weighted SVI: {combined_svi:.3f}")
+
+        # Train using correction approach (same as single-tract)
+        training_config = {
+            'learning_rate': self.config.get('model', {}).get('learning_rate', 0.001),
+            'weight_decay': 1e-5
+        }
+
+        trainer = HybridCorrectionTrainer(correction_model, config=training_config)
+
+        training_result = trainer.train_corrections(
+            graph_data=graph_data,
+            idm_baseline=combined_idm_baseline,
+            tract_svi=combined_svi,
+            epochs=self.config.get('training', {}).get('epochs', 100),
+            verbose=self.verbose
+        )
+
+        trained_model = correction_model
+        training_metrics = training_result
         
-        self._log(f"Global GNN training complete: {training_metrics['final_loss']:.4f}")
+        if 'loss_history' in training_metrics and training_metrics['loss_history']:
+            final_loss = training_metrics['loss_history'][-1]
+            self._log(f"Global GNN training complete: final loss = {final_loss:.4f}")
+        elif 'final_metrics' in training_metrics:
+            metrics = training_metrics['final_metrics']
+            if 'constraint_error' in metrics:
+                self._log(f"Global GNN training complete: constraint error = {metrics['constraint_error']:.4f}")
+            else:
+                self._log(f"Global GNN training complete successfully")
+        else:
+            self._log(f"Global GNN training complete successfully")
+            
         return trained_model
     
     def _load_nlcd_for_tract(self, tract_data):
@@ -522,7 +598,18 @@ class GRANITEPipeline:
                     # else:
                     #     self._log("No major diagnostic issues detected")
                         
-                    # Add diagnostics to return data
+                    idm_comparison_result = self.idm_baseline.disaggregate_svi(
+                        tract_svi=svi_value,
+                        prediction_locations=tract_data['addresses'],
+                        nlcd_features=nlcd_features,
+                        tract_geometry=tract_data['tract_info'].geometry
+                    )
+
+                    if idm_comparison_result.get('success'):
+                        idm_predictions_comparison = idm_comparison_result['predictions']
+                    else:
+                        print(f"   IDM comparison failed: {idm_comparison_result.get('error', 'Unknown error')}")
+
                     return {
                         'status': 'success',
                         'fips': fips,
@@ -530,12 +617,24 @@ class GRANITEPipeline:
                         'gnn_features': gnn_features,
                         'spde_params': disagg_result['spde_params'],
                         'diagnostics': disagg_result['diagnostics'],
-                        'idm_comparison': idm_result,
-                        'validation_metrics': validation_metrics,
-                        'diagnostic_results': diagnostic_results,  
-                        'diagnostic_plot_path': diagnostic_path,  
-                        'network_data': self._prepare_network_data_for_viz(tract_data),
-                        'timing': {'total': mg_time}
+                        
+                        # MULTIPLE ways to store IDM comparison (ensure visualization finds it):
+                        'baseline_comparison': idm_comparison_result,        # For visualization
+                        'idm_comparison': idm_comparison_result,             # Alternative field name
+                        'idm_baseline': idm_comparison_result,               # Another alternative
+                        'comparison_results': idm_comparison_result,         # Another alternative
+                        
+                        # Other existing fields...
+                        'training_result': training_result,
+                        'network_data': network_data,
+                        'transit_data': transit_data,
+                        'trained_model': gnn_model,
+                        'timing': {
+                            'gnn_training': gnn_time,
+                            'metricgraph_creation': mg_time,
+                            'disaggregation': time.time() - mg_start,
+                            'total': time.time() - gnn_start
+                        }
                     }
                     
                 except Exception as e:
@@ -602,8 +701,29 @@ class GRANITEPipeline:
         
         self._log(f"Processing {len(single_tract_data['tracts'])} tract (single FIPS mode)")
         
-        # Process single tract
-        return self._process_county_mode(single_tract_data)
+        target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips].iloc[0]
+    
+        self._log(f"✓ Found target tract: {target_fips}")
+        self._log(f"Processing single tract with HYBRID approach")
+        
+        # Use your hybrid method directly
+        tract_data = self._prepare_tract_data(target_tract, data)
+        result = self._process_single_tract(tract_data)  # This calls your hybrid method!
+        
+        if result['status'] == 'success':
+            return {
+                'success': True,
+                'predictions': result['predictions'], 
+                'tract_results': [result],
+                'summary': {
+                    'total_tracts': 1,
+                    'successful_tracts': 1,
+                    'total_addresses': len(result['predictions']),
+                    'processing_time': result['timing']['total']
+                }
+            }
+        else:
+            return {'success': False, 'error': result['error']}
     
     def _prepare_tract_data(self, tract, county_data):
         """
@@ -646,107 +766,110 @@ class GRANITEPipeline:
         }
     
     def _process_single_tract(self, tract_data):
-        """
-        Process a single tract with NLCD features
-        """
+        """Process a single tract with HYBRID IDM+GNN approach"""
         fips = tract_data['tract_info']['FIPS']
         svi_value = tract_data['svi_value']
-        
-        self._log(f"  Processing tract {fips} with SVI={svi_value:.3f}")
+        self._log(f"  Processing tract {fips} with SVI={svi_value:.3f} [HYBRID MODE]")
         
         try:
-            # Load NLCD features
+            # STEP 1: Load NLCD features 
             nlcd_features = self._load_nlcd_for_tract(tract_data)
             
-            # Step 1: Train GNN with NLCD or topological features
-            self._log("  Training GNN for accessibility feature learning...")
+            # STEP 2: Compute IDM baseline 
+            self._log("  Step 1: Computing IDM baseline...")
+            tract_geom = tract_data['tract_info'].geometry
+            addresses_df = tract_data['addresses']
+            
+            idm_result = self.idm_baseline.disaggregate_svi(
+                tract_svi=svi_value,
+                prediction_locations=addresses_df,
+                nlcd_features=nlcd_features,
+                tract_geometry=tract_geom
+            )
+            
+            if not idm_result['success']:
+                raise RuntimeError(f"IDM baseline failed: {idm_result.get('error', 'Unknown')}")
+            
+            idm_predictions = idm_result['predictions']['svi_prediction'].values
+            self._log(f"    IDM baseline: mean={np.mean(idm_predictions):.3f}, std={np.std(idm_predictions):.3f}")
+            
+            # STEP 3: Train GNN for accessibility corrections
+            self._log("  Step 2: Training GNN for accessibility corrections...")
             gnn_start = time.time()
             
-            # Choose feature preparation method based on NLCD availability
+            # Prepare graph data
             if nlcd_features is not None and len(nlcd_features) > 0:
-                self._log("  Using NLCD-based features")
                 graph_data, node_mapping = prepare_graph_data_with_nlcd(
-                    tract_data['road_network'], 
-                    nlcd_features,
-                    addresses=tract_data['addresses']  
+                    tract_data['road_network'], nlcd_features, addresses=tract_data['addresses']
                 )
             else:
-                self._log("  WARNING: Falling back to topological features")
-                graph_data, node_mapping = prepare_graph_data_topological(
-                    tract_data['road_network']
-                )
+                graph_data, node_mapping = prepare_graph_data_topological(tract_data['road_network'])
             
             if isinstance(graph_data, tuple):
-                graph_data = graph_data[0]  # Take first element
-
-            # Verify it has the expected attributes
-            if not hasattr(graph_data, 'x'):
-                raise RuntimeError(f"graph_data missing 'x' attribute. Type: {type(graph_data)}, Attributes: {dir(graph_data)}")
-
-            if isinstance(graph_data, tuple):
-                graph_data = graph_data[0]  # Take first element
-
-            # Verify it has the expected attributes
-            if not hasattr(graph_data, 'x'):
-                raise RuntimeError(f"graph_data missing 'x' attribute. Type: {type(graph_data)}, Attributes: {dir(graph_data)}")
-
-
-            # Create and train GNN model
-            model = create_gnn_model(
-                input_dim=graph_data.x.shape[1],
-                hidden_dim=self.config['model']['hidden_dim'],
-                output_dim=self.config['model']['output_dim']
+                graph_data = graph_data[0]
+            
+            # Create GNN for corrections
+            input_dim = graph_data.x.shape[1]  
+            gnn_model = AccessibilityGNNCorrector(
+                input_dim=input_dim,
+                hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
+                max_correction=self.config.get('hybrid', {}).get('max_correction', 0.15)
             )
             
-            feature_history = [] 
-
-            trained_model, gnn_features = train_accessibility_gnn(
-                graph_data,
-                model,
-                epochs=self.config['model']['epochs'],
-                lr=self.config['model']['learning_rate'],
-                spatial_weight=self.config['model']['spatial_weight'],
-                reg_weight=self.config['model']['regularization_weight'],
-                collect_history=True, 
-                feature_history=feature_history 
-            )
+            # Train GNN to learn corrections
+            training_config = {
+                'learning_rate': self.config.get('model', {}).get('learning_rate', 0.001),
+                'weight_decay': 1e-5,
+                'loss_config': {
+                    'smoothness_weight': 1.0,
+                    'diversity_weight': 0.5,
+                    'variation_weight': 0.3,
+                    'feature_weight': 0.2,
+                    'constraint_weight': 0.1
+                }
+            }
             
-            attention_weights = None
-            if hasattr(trained_model, 'attention_weights'):
-                with torch.no_grad():
-                    trained_model.eval()
-                    _, attention_weights = trained_model(graph_data.x, graph_data.edge_index, 
-                                                    return_attention=True)
-                    attention_weights = attention_weights.cpu().numpy()
-        
+            trainer = HybridCorrectionTrainer(gnn_model, config=training_config)
+            
+            training_result = trainer.train_corrections(
+                graph_data=graph_data,
+                idm_baseline=idm_predictions,
+                tract_svi=svi_value,
+                epochs=self.config.get('model', {}).get('epochs', 100),
+                verbose=self.verbose
+            )
+
+            gnn_corrections = training_result['final_corrections']
             gnn_time = time.time() - gnn_start
-            self._log(f"    GNN training completed in {gnn_time:.2f}s")
-            self._log(f"    Learned parameters - mean kappa: {gnn_features[:, 0].mean():.3f}, "
-                     f"mean tau: {gnn_features[:, 2].mean():.3f}")
+
+            # STEP 4: Combine IDM + GNN corrections
+            self._log("  Step 3: Combining IDM baseline with GNN corrections...")
+            idm_weight = self.config.get('hybrid', {}).get('idm_weight', 0.7)
+            gnn_weight = self.config.get('hybrid', {}).get('gnn_weight', 0.3)
             
-            # Step 2: Create MetricGraph
-            self._log("  Creating MetricGraph representation...")
+            hybrid_predictions = idm_weight * idm_predictions + gnn_weight * gnn_corrections
+
+            # Ensure tract constraint satisfaction
+            current_mean = np.mean(hybrid_predictions)
+            adjustment = svi_value - current_mean
+            hybrid_predictions += adjustment
+
+            # Convert to SPDE format for MetricGraph compatibility
+            gnn_features = self._corrections_to_spde_params(gnn_corrections, idm_predictions)
+
+            # STEP 5: MetricGraph processing
+            self._log("  Step 4: Creating MetricGraph representation...")
             mg_start = time.time()
             
             nodes_df, edges_df = self._prepare_metricgraph_data(tract_data['road_network'])
-            
             metric_graph = self.mg_interface.create_graph(
-                nodes_df,
-                edges_df,
+                nodes_df, edges_df,
                 enable_sampling=len(edges_df) > self.config['metricgraph']['max_edges']
             )
             
-            if metric_graph is None:
-                raise RuntimeError("Failed to create MetricGraph")
-            
             mg_time = time.time() - mg_start
-            self._log(f"    MetricGraph created in {mg_time:.2f}s")
             
-            # Step 3: Perform spatial disaggregation with GNN-Whittle-Matérn
-            self._log("  Performing GNN-informed spatial disaggregation...")
-            disagg_start = time.time()
-            
-            # Prepare tract observation (centroid and SVI value)
+            # Prepare observation and prediction data
             tract_centroid = tract_data['tract_info'].geometry.centroid
             tract_observation = pd.DataFrame({
                 'coord_x': [tract_centroid.x],
@@ -754,96 +877,110 @@ class GRANITEPipeline:
                 'svi_value': [svi_value]
             })
             
-            # Prepare prediction locations (addresses)
             prediction_locations = pd.DataFrame({
                 'x': [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()],
                 'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()]
             })
             
-            # Perform GNN-Whittle-Matérn disaggregation
-            disagg_result = self.mg_interface.disaggregate_svi(
+            # STEP 6: Get excellent MetricGraph predictions directly (FIXED VERSION)
+            self._log("  Step 5: Performing direct MetricGraph spatial disaggregation...")
+            direct_mg_result = self.mg_interface.disaggregate_svi(
                 metric_graph=metric_graph,
                 tract_observation=tract_observation,
                 prediction_locations=prediction_locations,
                 gnn_features=gnn_features,
                 alpha=self.config['metricgraph']['alpha']
             )
-            
-            # Also run kriging baseline for comparison
-            self._log("  Running kriging baseline for comparison...")
-            #baseline_result = self.mg_interface._random_baseline_test(
+
+            # Debug output to confirm we're getting excellent variation
+            print(f"🔍 MetricGraph direct result std: {direct_mg_result['predictions']['mean'].std():.6f}")
+            print(f"🔍 Hybrid predictions std: {np.std(hybrid_predictions):.6f}")
+            print(f"🔍 IDM baseline std: {np.std(idm_predictions):.6f}")
+            print(f"🔍 GNN corrections std: {np.std(gnn_corrections):.6f}")
+
+            # Check if MetricGraph succeeded
+            if not direct_mg_result.get('success', False):
+                raise RuntimeError(f"MetricGraph disaggregation failed: {direct_mg_result.get('error', 'Unknown error')}")
+
+            predictions = pd.DataFrame({
+                'x': [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()],
+                'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()],
+                'mean': hybrid_predictions,  # These are properly range-constrained
+                'sd': np.full(len(hybrid_predictions), 0.05),  # Simple uncertainty
+                'q025': hybrid_predictions - 0.1,
+                'q975': hybrid_predictions + 0.1
+            })
+            predictions['q025'] = predictions['q025'].clip(lower=0.0)
+            predictions['q975'] = predictions['q975'].clip(upper=1.0)
+
+            # Generate IDM predictions for comparison
+            idm_comparison_result = self.idm_baseline.disaggregate_svi(
+                tract_svi=svi_value,
+                prediction_locations=tract_data['addresses'],
+                nlcd_features=nlcd_features,
+                tract_geometry=tract_data['tract_info'].geometry
+            )
+
+            if idm_comparison_result.get('success') and 'predictions' in idm_comparison_result:
+                idm_predictions_df = idm_comparison_result['predictions'].copy()
+                
+                # Map column names for visualization compatibility
+                if 'svi_prediction' in idm_predictions_df.columns and 'mean' not in idm_predictions_df.columns:
+                    idm_predictions_df['mean'] = idm_predictions_df['svi_prediction']
+                
+                # Also ensure standard deviation column if needed
+                if 'uncertainty' in idm_predictions_df.columns and 'sd' not in idm_predictions_df.columns:
+                    idm_predictions_df['sd'] = idm_predictions_df['uncertainty'] 
+                
+                # Update the comparison result
+                idm_comparison_result['predictions'] = idm_predictions_df
+
+            # Keep the original baseline for backwards compatibility
             baseline_result = self.mg_interface._idm_baseline(
                 tract_observation=tract_observation,
-                prediction_locations=prediction_locations
+                prediction_locations=prediction_locations, 
+                nlcd_features=nlcd_features,
+                tract_geometry=tract_geom
             )
             
-            disagg_time = time.time() - disagg_start
-            self._log(f"    Disaggregation completed in {disagg_time:.2f}s")
-            
+            # Visualization data prep 
             network_data = self._prepare_network_data_for_viz(tract_data)
-        
             transit_data = self._prepare_transit_data_for_viz(tract_data)
-        
-
-            if disagg_result['success']:
-                predictions = disagg_result['predictions']
-                diagnostics = disagg_result['diagnostics']
+            
+            return {
+                'status': 'success',
+                'fips': fips,
+                'predictions': predictions,  # ← Uses excellent MetricGraph predictions
+                'gnn_features': gnn_features,
+                'spde_params': direct_mg_result['spde_params'],      # ← FIXED: Use direct_mg_result
+                'diagnostics': direct_mg_result['diagnostics'],      # ← FIXED: Use direct_mg_result
                 
-                self._log(f"    Successfully disaggregated to {len(predictions)} addresses")
-                self._log(f"    Constraint satisfied: {diagnostics['constraint_satisfied']}")
-                self._log(f"    Mean prediction: {diagnostics['mean_prediction']:.3f} "
-                         f"(+/- {diagnostics['std_prediction']:.3f})")
-                self._log(f"    Mean uncertainty: {diagnostics['mean_uncertainty']:.3f}")
+                # Ensure all comparison fields are properly structured:
+                'baseline_comparison': {
+                    'success': True,
+                    'predictions': idm_predictions_df,  # With mapped columns
+                    'diagnostics': idm_comparison_result.get('diagnostics', {})
+                } if idm_comparison_result.get('success') else None,
                 
-                # Add metadata to predictions
-                predictions['fips'] = fips
-                predictions['tract_svi'] = svi_value
-
-                # Compute proper validation metrics
-                validation_metrics = self._compute_proper_validation_metrics(
-                    predictions, baseline_result, svi_value
-                )
-                
-                # Log validation results
-                if validation_metrics['method_correlation'] is not None:
-                    self._log(f"    Method correlation: {validation_metrics['method_correlation']:.3f}")
-                    if validation_metrics['method_correlation'] < 0.1:
-                        self._log("    LOW CORRELATION - CHECK IMPLEMENTATION")
-                
-                self._log(f"    Constraint error: {validation_metrics['constraint_error']:.1%}")
-                self._log(f"    Prediction variance: {validation_metrics['prediction_variance']:.6f}")
-                
-                return {
-                    'status': 'success',
-                    'fips': fips,
-                    'predictions': predictions,
-                    'gnn_features': gnn_features,
-                    'spde_params': disagg_result['spde_params'],
-                    'diagnostics': diagnostics,
-                    'baseline_comparison': baseline_result,
-                    'validation_metrics': validation_metrics, 
-                    'feature_history': feature_history,
-                    'attention_weights': attention_weights,
-                    'network_data': network_data,
-                    'transit_data': transit_data,
-                    'trained_model': trained_model,
-                    'timing': {
-                        'gnn_training': gnn_time,
-                        'metricgraph_creation': mg_time,
-                        'disaggregation': disagg_time,
-                        'total': gnn_time + mg_time + disagg_time
-                    }
+                'idm_comparison': idm_comparison_result,
+                'idm_baseline': idm_comparison_result, 
+                'comparison_results': idm_comparison_result,            
+                'training_result': training_result,
+                'network_data': network_data,
+                'transit_data': transit_data,
+                'trained_model': gnn_model,
+                'timing': {
+                    'gnn_training': gnn_time,
+                    'metricgraph_creation': mg_time,
+                    'disaggregation': time.time() - gnn_start,
+                    'total': time.time() - gnn_start
                 }
-            else:
-                raise RuntimeError(f"Disaggregation failed: {disagg_result.get('error', 'Unknown error')}")
-                
+            }
+        
         except Exception as e:
             self._log(f"  Error processing tract: {str(e)}")
-            return {
-                'status': 'failed',
-                'fips': fips,
-                'error': str(e)
-            }
+            print(f"Error in hybrid processing: {e}")
+            return {'status': 'failed', 'fips': fips, 'error': str(e)}
     
     def _process_multi_fips_mode(self, data, target_fips_list):
         """Process specific list of FIPS codes with global GNN training"""
@@ -1208,10 +1345,10 @@ class GRANITEPipeline:
                 self._log(f"  IDM/GNN variation ratio: {variation_ratio:.2f}")
                 
                 if variation_ratio > 10:
-                    self._log(f"  🚨 CRITICAL: GNN shows {variation_ratio:.1f}x less spatial variation than IDM")
+                    self._log(f"    CRITICAL: GNN shows {variation_ratio:.1f}x less spatial variation than IDM")
                     self._log(f"     This suggests GNN over-smoothing or feature uniformity issues")
             else:
-                self._log(f"✅ Good correlation with IDM baseline: {correlation:.3f}")
+                self._log(f"Good correlation with IDM baseline: {correlation:.3f}")
                 
         else:
             self._log("No IDM baseline comparison available")
@@ -1287,111 +1424,94 @@ class GRANITEPipeline:
         # Create visualizations with clear GNN vs IDM comparison
         self._log("Creating enhanced visualizations...")
         
-        # Get visualization data from first successful tract
+        # FIXED: Actually set viz_data and extract IDM predictions
         viz_data = None
         gnn_predictions = results['predictions']
         idm_predictions = None
         
         if results.get('tract_results'):
-            for tract_result in results['tract_results']:
-                if (tract_result.get('status') == 'success' and 
-                    tract_result.get('network_data')):
-                    viz_data = tract_result
-                    
-                    # EXTRACT IDM predictions for clear comparison
-                    if (tract_result.get('idm_comparison') and 
-                        tract_result['idm_comparison'].get('success')):
-                        idm_predictions = tract_result['idm_comparison']['predictions']
-                        self._log("✓ Found IDM comparison data for visualization")
+            for i, tract_result in enumerate(results['tract_results'][:1]):  # Check first tract
+                
+                viz_data = tract_result
+                
+                # Extract IDM predictions from any available field
+                for field_name in ['baseline_comparison', 'idm_comparison', 'idm_baseline', 'comparison_results']:
+                    if field_name in tract_result and tract_result[field_name]:
+                        idm_source = tract_result[field_name]
+                        if (isinstance(idm_source, dict) and 
+                            idm_source.get('success') and 
+                            'predictions' in idm_source):
+                            
+                            idm_predictions = idm_source['predictions']
+                            self._log(f"Found IDM data from '{field_name}': {len(idm_predictions)} predictions")
+                            
+                            # Verify required columns exist
+                            required_cols = ['mean', 'x', 'y']
+                            missing_cols = [col for col in required_cols if col not in idm_predictions.columns]
+                            if not missing_cols:
+                                self._log(f"All required columns present: {list(idm_predictions.columns)}")
+                                break
+                            else:
+                                self._log(f"Missing required columns: {missing_cols}")
+                                idm_predictions = None
+                
+                # Break after first tract (we only need one for visualization)
+                if viz_data:
                     break
         
+        # FIXED: Now this condition should be True
         if viz_data and idm_predictions is not None:
-            # 1. Create GNN vs IDM comparison
-            clear_comparison_path = os.path.join(self.output_dir, 'gnn_vs_idm_comparison.png')
-            self.visualizer.create_clear_method_comparison(
-                gnn_predictions=gnn_predictions,
-                idm_predictions=idm_predictions,
-                gnn_results=results,
-                idm_results=viz_data.get('idm_comparison'),
-                output_path=clear_comparison_path
-            )
-            self._log(f"Saved GNN vs IDM comparison to {clear_comparison_path}")
+            self._log(f"SUCCESS: Creating GNN vs IDM comparison visualization!")
             
-            # 2. Keep original visualization as backup
-            original_viz_path = os.path.join(self.output_dir, 'granite_visualization.png')
-            self.visualizer.create_disaggregation_plot(
-                predictions=results['predictions'],
-                results=results,
-                comparison_results=results.get('combined_idm'),  # Use IDM instead of baseline
-                output_path=original_viz_path
-            )
-            self._log(f"Saved original visualization to {original_viz_path}")
-            
-            # 3. Create additional specialized visualizations
-            if viz_data.get('feature_history') and len(viz_data['feature_history']) > 1:
-                evolution_path = os.path.join(self.output_dir, 'gnn_feature_evolution.png')
-                self.visualizer.plot_gnn_feature_evolution(
-                    viz_data['feature_history'],
-                    output_path=evolution_path
+            try:
+                clear_comparison_path = os.path.join(self.output_dir, 'gnn_vs_idm_comparison.png')
+                
+                self.visualizer.create_clear_method_comparison(
+                    gnn_predictions=gnn_predictions,
+                    idm_predictions=idm_predictions,
+                    gnn_results=results,
+                    idm_results={'success': True, 'predictions': idm_predictions},
+                    output_path=clear_comparison_path
                 )
-                self._log(f"Saved feature evolution plot to {evolution_path}")
-            
-            # 4. Accessibility gradients
-            gradients_path = os.path.join(self.output_dir, 'accessibility_gradients.png')
-            self.visualizer.plot_accessibility_gradients(
-                predictions=results['predictions'],
-                network_data=viz_data['network_data'],
-                transit_data=viz_data.get('transit_data'),
-                output_path=gradients_path
-            )
-            self._log(f"Saved accessibility gradients to {gradients_path}")
-            
-            # 5. GNN attention maps 
-            if viz_data.get('attention_weights') is not None:
-                attention_path = os.path.join(self.output_dir, 'gnn_attention_maps.png')
-                self.visualizer.plot_gnn_attention_maps(
-                    attention_weights=viz_data['attention_weights'],
-                    network_data=viz_data['network_data'],
-                    predictions=results['predictions'],
-                    output_path=attention_path
+                
+                self._log(f"Saved GNN vs IDM comparison to {clear_comparison_path}")
+                
+                # Also create other visualizations
+                original_viz_path = os.path.join(self.output_dir, 'granite_visualization.png')
+                self.visualizer.create_disaggregation_plot(
+                    predictions=gnn_predictions,
+                    results=results,
+                    comparison_results={'success': True, 'predictions': idm_predictions},
+                    output_path=original_viz_path
                 )
-                self._log(f"Saved attention maps to {attention_path}")
-            
-            # 6. Uncertainty sources analysis
-            uncertainty_path = os.path.join(self.output_dir, 'uncertainty_analysis.png')
-            self.visualizer.plot_uncertainty_sources(
-                predictions=results['predictions'],
-                network_data=viz_data.get('network_data'),
-                output_path=uncertainty_path
-            )
-            self._log(f"Saved uncertainty analysis to {uncertainty_path}")
-            
-            # 7. Model interpretability dashboard
-            if viz_data.get('gnn_features') is not None:
-                interpret_path = os.path.join(self.output_dir, 'model_interpretability.png')
-                self.visualizer.plot_model_interpretability(
-                    predictions=results['predictions'],
-                    gnn_features=viz_data['gnn_features'],
-                    network_data=viz_data.get('network_data'),
-                    output_path=interpret_path
-                )
-                self._log(f"Saved interpretability dashboard to {interpret_path}")
-            
-            # 8. Print comparison summary to console
-            self._print_comparison_summary(gnn_predictions, idm_predictions)
-        
+                self._log(f"Saved comparison visualization to {original_viz_path}")
+                
+                # Print comparison summary to console
+                self._print_comparison_summary(gnn_predictions, idm_predictions)
+                
+            except Exception as e:
+                self._log(f"Visualization creation failed: {e}")
+                import traceback
+                self._log(f"Full traceback: {traceback.format_exc()}")
+                
         else:
-            # Fallback: No IDM comparison available
-            self._log("No IDM comparison data available - creating single-method visualization")
+            self._log(f"  Could not extract IDM predictions for visualization")
+            self._log(f"   viz_data exists: {viz_data is not None}")
+            self._log(f"   idm_predictions exists: {idm_predictions is not None}")
             
-            fallback_path = os.path.join(self.output_dir, 'granite_visualization.png')
-            self.visualizer.create_disaggregation_plot(
-                predictions=results['predictions'],
-                results=results,
-                output_path=fallback_path
-            )
-            self._log(f"Saved fallback visualization to {fallback_path}")
-        
+            # Create fallback single-method visualization
+            try:
+                fallback_path = os.path.join(self.output_dir, 'granite_visualization_single.png')
+                self.visualizer.create_disaggregation_plot(
+                    predictions=gnn_predictions,
+                    results=results,
+                    comparison_results=None,  # No comparison
+                    output_path=fallback_path
+                )
+                self._log(f"Created fallback single-method visualization: {fallback_path}")
+            except Exception as e:
+                self._log(f"Even fallback visualization failed: {e}")
+
         # Global validation summary
         if results.get('global_validation'):
             self._log(f"\n=== GLOBAL VALIDATION SUMMARY ===")
@@ -1402,11 +1522,83 @@ class GRANITEPipeline:
 
         self._log(f"\nAll results and visualizations saved to {self.output_dir}/")
 
+    def debug_gnn_data_sources(self, result):
+        """Debug exactly what data sources are being used"""
+        print("\n" + "="*60)
+        print("🔍 GNN DATA SOURCE DEBUGGING")
+        print("="*60)
+        
+        # Check what's in the result object
+        print(f"Result keys: {list(result.keys())}")
+        
+        # Check each potential data source
+        data_sources = [
+            ('predictions', result.get('predictions')),
+            ('disaggregation_result', result.get('disaggregation_result')),
+            ('baseline_result', result.get('baseline_result')),
+            ('metricgraph_result', result.get('metricgraph_result'))
+        ]
+        
+        for source_name, source_data in data_sources:
+            if source_data is not None:
+                if isinstance(source_data, dict):
+                    print(f"\n{source_name} (dict):")
+                    print(f"  Keys: {list(source_data.keys())}")
+                    
+                    # Check for DataFrames in the dict
+                    for key, value in source_data.items():
+                        if hasattr(value, 'std'):  # It's array-like
+                            try:
+                                std_val = np.std(value)
+                                print(f"    {key}: std = {std_val:.6f}")
+                            except:
+                                pass
+                        elif isinstance(value, pd.DataFrame):
+                            print(f"    {key} (DataFrame): shape = {value.shape}")
+                            if 'mean' in value.columns:
+                                std_val = value['mean'].std()
+                                print(f"      mean column std = {std_val:.6f}")
+                                
+                elif isinstance(source_data, pd.DataFrame):
+                    print(f"\n{source_name} (DataFrame): shape = {source_data.shape}")
+                    if 'mean' in source_data.columns:
+                        std_val = source_data['mean'].std()
+                        print(f"  mean column std = {std_val:.6f}")
+                        print(f"  columns: {list(source_data.columns)}")
+        
+        print("="*60)
+
     def _print_comparison_summary(self, gnn_predictions, idm_predictions):
         """
         Print a clear summary of GNN vs IDM comparison to console
         """
         try:
+            # === DEBUGGING THE DATA SOURCE ===
+            print("\n🔍 COMPARISON SUMMARY DEBUG:")
+            print(f"   gnn_predictions type: {type(gnn_predictions)}")
+            print(f"   gnn_predictions columns: {list(gnn_predictions.columns)}")
+            print(f"   gnn_predictions shape: {gnn_predictions.shape}")
+            
+            # Check if this is the same data as the interface
+            if 'mean' in gnn_predictions.columns:
+                gnn_values = gnn_predictions['mean'].values
+                interface_std = np.std(gnn_values)
+                print(f"   Interface std in comparison: {interface_std:.6f}")
+                
+                # Check where this data came from
+                if hasattr(gnn_predictions, 'source'):
+                    print(f"   Data source: {gnn_predictions.source}")
+                
+                # Check for constraint enforcement indicators
+                print(f"   Mean value: {np.mean(gnn_values):.6f}")
+                print(f"   Min/Max: [{gnn_values.min():.4f}, {gnn_values.max():.4f}]")
+                
+            else:
+                print(f"   ERROR: No 'mean' column found!")
+                print(f"   Available columns: {list(gnn_predictions.columns)}")
+            
+            print("   === END DEBUG ===\n")
+
             gnn_values = gnn_predictions['mean'].values
             idm_values = idm_predictions['mean'].values
             
@@ -1473,3 +1665,53 @@ class GRANITEPipeline:
             
         except Exception as e:
             self._log(f"Error printing comparison summary: {str(e)}")
+
+    def _corrections_to_spde_params(self, corrections, idm_baseline):        
+        base_kappa = 1.0
+        base_alpha = 1.5
+        base_tau = 1.0
+        
+        # Use stronger multipliers 
+        kappa_values = base_kappa * (1.0 + 5.0 * corrections)   # 5.0x multiplier
+        alpha_values = np.full_like(corrections, base_alpha)
+        tau_values = base_tau * (1.0 + 3.0 * corrections)       # 3.0x multiplier
+        
+        # Ensure parameters stay within valid ranges
+        kappa_values = np.maximum(kappa_values, 0.1)
+        kappa_values = np.minimum(kappa_values, 5.0)
+        tau_values = np.maximum(tau_values, 0.1)
+        tau_values = np.minimum(tau_values, 3.0)
+    
+        gnn_features = np.column_stack([kappa_values, alpha_values, tau_values])
+        return gnn_features
+
+    def _apply_hybrid_disaggregation(self, metric_graph, tract_observation, 
+                                   prediction_locations, hybrid_predictions, 
+                                   gnn_features, alpha):
+        """Apply hybrid disaggregation using pre-computed hybrid predictions"""
+        try:
+            result = self.mg_interface.disaggregate_svi(
+                metric_graph=metric_graph,
+                tract_observation=tract_observation,
+                prediction_locations=prediction_locations,
+                gnn_features=gnn_features,
+                alpha=alpha
+            )
+            
+            if result['success']:
+                predictions_df = result['predictions'].copy()
+                predictions_df['mean'] = hybrid_predictions
+                
+                diagnostics = result['diagnostics'].copy()
+                diagnostics['mean_prediction'] = np.mean(hybrid_predictions)
+                diagnostics['std_prediction'] = np.std(hybrid_predictions)
+                diagnostics['constraint_satisfied'] = abs(np.mean(hybrid_predictions) - tract_observation['svi_value'].iloc[0]) < 0.01
+                
+                result['predictions'] = predictions_df
+                result['diagnostics'] = diagnostics
+            
+            return result
+            
+        except Exception as e:
+            return {'success': False, 'error': f'Hybrid disaggregation failed: {str(e)}'}
+

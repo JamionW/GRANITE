@@ -20,14 +20,11 @@ warnings.filterwarnings('ignore')
 
 # Local imports
 from ..data.loaders import DataLoader
-from ..models.gnn import create_gnn_model, prepare_graph_data_with_nlcd, prepare_graph_data_topological
-from ..models.training import train_accessibility_gnn
+from ..models.gnn import prepare_graph_data_with_nlcd, prepare_graph_data_topological
 from ..metricgraph.interface import MetricGraphInterface
 from ..visualization.plots import DisaggregationVisualizer
-from ..diagnostics.comparison_diagnostics import diagnose_comparison_issues, create_diagnostic_plots
 from ..baselines.idm import IDMBaseline
 from ..models.gnn import AccessibilityGNNCorrector, HybridCorrectionTrainer  
-from ..models.training import train_accessibility_corrections
 
 class GRANITEPipeline:
     """
@@ -84,7 +81,7 @@ class GRANITEPipeline:
             print(f"[{timestamp}] {level}: {message}")
     
     def run(self):
-        """Run the complete GRANITE pipeline"""
+        """Run the simplified GRANITE pipeline for single-tract processing"""
         
         start_time = time.time()
         
@@ -92,22 +89,16 @@ class GRANITEPipeline:
         self._log("Loading data...")
         data = self._load_data()
         
-        # Check processing mode
-        processing_mode = self.config.get('data', {}).get('processing_mode', 'county')
+        # Check processing mode - only support single FIPS now
+        processing_mode = self.config.get('data', {}).get('processing_mode', 'fips')
         target_fips = self.config.get('data', {}).get('target_fips')
-        target_fips_list = self.config.get('data', {}).get('target_fips_list', [])
-        
-        self._log(f"Processing mode: {processing_mode}")
         
         if processing_mode == 'fips' and target_fips:
             self._log(f"Processing single FIPS: {target_fips}")
             results = self._process_fips_mode(data)
-        elif processing_mode == 'multi_fips' and target_fips_list:
-            self._log(f"Processing multiple FIPS: {target_fips_list}")
-            results = self._process_multi_fips_mode(data, target_fips_list)
         else:
-            self._log("Processing all tracts")
-            results = self._process_county_mode(data)
+            self._log("ERROR: Only single FIPS mode supported. Use --fips command line argument.")
+            return {'success': False, 'error': 'Multi-tract processing removed. Use --fips mode.'}
         
         # Save results
         self._save_results(results)
@@ -207,456 +198,6 @@ class GRANITEPipeline:
         self._log(f"Merged data for {len(data['tracts_with_svi'])} tracts with SVI")
         
         return data
-    
-    def _process_county_mode(self, data):
-        self._log("Processing in county mode with SHARED GNN training")
-        
-        # Step 1: Global GNN training on all tracts
-        self._log("\n=== PHASE 1: Global GNN Training on All Tracts ===")
-        global_gnn_model = self._train_global_gnn(data)
-        
-        # Step 2: Apply trained model to each tract
-        self._log("\n=== PHASE 2: Applying Trained GNN to Individual Tracts ===")
-        all_results = []
-        
-        for idx, tract in data['tracts'].iterrows():
-            fips = tract['FIPS']
-            self._log(f"\nApplying trained GNN to tract {fips}")
-            
-            try:
-                tract_data = self._prepare_tract_data(tract, data)
-                if tract_data['addresses'].empty:
-                    continue
-                    
-                result = self._apply_trained_gnn_to_tract(tract_data, global_gnn_model)
-                
-                if result['status'] == 'success':
-                    all_results.append(result)
-                    
-            except Exception as e:
-                self._log(f"Error processing {fips}: {str(e)}")
-        
-        return self._combine_results(all_results)
-    
-    def _train_global_gnn(self, data):
-        """Train one GNN on all tract networks combined with NLCD features"""
-        self._log("Building combined network from all tracts...")
-        
-        # Combine networks and NLCD features from all tracts
-        combined_networks = []
-        combined_svi_values = []
-        combined_nlcd_features = []
-        combined_addresses = []
-        
-        for idx, tract in data['tracts'].iterrows():
-            if pd.isna(tract['RPL_THEMES']):
-                continue
-                
-            tract_data = self._prepare_tract_data(tract, data)
-            if not tract_data['addresses'].empty:
-                combined_networks.append(tract_data['road_network'])
-                combined_svi_values.append(tract['RPL_THEMES'])
-                
-                # Collect NLCD features for this tract
-                try:
-                    tract_nlcd_features = self._load_nlcd_for_tract(tract_data)
-                    if tract_nlcd_features is not None and len(tract_nlcd_features) > 0:
-                        # Add tract identifier to avoid address_id conflicts
-                        tract_nlcd_features = tract_nlcd_features.copy()
-                        tract_nlcd_features['tract_id'] = tract['FIPS']
-                        tract_nlcd_features['address_id'] = (
-                            tract_nlcd_features['address_id'].astype(str) + 
-                            '_' + tract['FIPS']
-                        )
-                        combined_nlcd_features.append(tract_nlcd_features)
-                        
-                        # Also combine addresses with tract identifier
-                        tract_addresses = tract_data['addresses'].copy()
-                        tract_addresses['address_id'] = (
-                            tract_addresses.get('address_id', range(len(tract_addresses))).astype(str) + 
-                            '_' + tract['FIPS']
-                        )
-                        combined_addresses.append(tract_addresses)
-                        
-                except Exception as e:
-                    self._log(f"Warning: Could not load NLCD for tract {tract['FIPS']}: {e}")
-        
-        # Create single graph from all tracts
-        mega_graph = self._combine_networks(combined_networks)
-        
-        # Combine all NLCD features if available
-        if combined_nlcd_features:
-            mega_nlcd_features = pd.concat(combined_nlcd_features, ignore_index=True)
-            mega_addresses = pd.concat(combined_addresses, ignore_index=True)
-            
-            self._log(f"Combined NLCD features from {len(combined_nlcd_features)} tracts:")
-            self._log(f"  Total features: {len(mega_nlcd_features)}")
-            self._log(f"  Total addresses: {len(mega_addresses)}")
-            
-            # Prepare graph data with NLCD features
-            graph_data, node_mapping = prepare_graph_data_with_nlcd(
-                mega_graph, 
-                mega_nlcd_features,
-                addresses=mega_addresses
-            )
-            feature_type = "NLCD-based"
-            
-        else:
-            self._log("No NLCD features available, falling back to topological features")
-            # Fall back to topological features
-            graph_data, node_mapping = prepare_graph_data_topological(mega_graph)
-            feature_type = "topological"
-        
-        # Train GNN on full spatial diversity
-        model = create_gnn_model(
-            input_dim=graph_data.x.shape[1],
-            hidden_dim=self.config['model']['hidden_dim'],
-            output_dim=self.config['model']['output_dim']
-        )
-        
-        self._log(f"Training GNN on combined network:")
-        self._log(f"  Nodes: {mega_graph.number_of_nodes()}")
-        self._log(f"  Features: {feature_type}")
-        self._log(f"  Input dimensions: {graph_data.x.shape[1]}")
-        
-        # NEW CODE (same path as single-tract):
-        from ..models.training import train_accessibility_corrections  
-        from ..models.gnn import AccessibilityGNNCorrector, HybridCorrectionTrainer
-
-        # Create correction model (same architecture as single-tract)
-        input_dim = graph_data.x.shape[1]
-        correction_model = AccessibilityGNNCorrector(
-            input_dim=input_dim,
-            hidden_dim=64
-        )
-
-        # Create combined IDM baseline for all addresses
-        self._log("Computing combined IDM baseline for global training...")
-        all_idm_predictions = []
-        weighted_svi = 0.0
-        total_addresses = 0
-
-        # Compute IDM predictions for each tract's addresses
-        for idx, tract in data['tracts'].iterrows():
-            if pd.isna(tract['RPL_THEMES']):
-                continue
-                
-            tract_data = self._prepare_tract_data(tract, data)
-            if tract_data['addresses'].empty:
-                continue
-            
-            # Get NLCD features for this tract
-            tract_nlcd = self._load_nlcd_for_tract(tract_data)
-            
-            # Compute IDM baseline for this tract
-            idm_result = self.idm_baseline.disaggregate_svi(
-                tract_svi=tract['RPL_THEMES'],
-                prediction_locations=tract_data['addresses'],
-                nlcd_features=tract_nlcd,
-                tract_geometry=tract_data['tract_info'].geometry
-            )
-            
-            if idm_result['success']:
-                tract_predictions = idm_result['predictions']['svi_prediction'].values
-                all_idm_predictions.extend(tract_predictions)
-                
-                # Weight SVI by number of addresses
-                num_addresses = len(tract_predictions)
-                weighted_svi += tract['RPL_THEMES'] * num_addresses
-                total_addresses += num_addresses
-
-        # Create combined baseline
-        combined_idm_baseline = np.array(all_idm_predictions)
-        combined_svi = weighted_svi / total_addresses if total_addresses > 0 else 0.4
-
-        self._log(f"Combined baseline: {len(combined_idm_baseline)} predictions, weighted SVI: {combined_svi:.3f}")
-
-        # Train using correction approach (same as single-tract)
-        training_config = {
-            'learning_rate': self.config.get('model', {}).get('learning_rate', 0.001),
-            'weight_decay': 1e-5
-        }
-
-        trainer = HybridCorrectionTrainer(correction_model, config=training_config)
-
-        training_result = trainer.train_corrections(
-            graph_data=graph_data,
-            idm_baseline=combined_idm_baseline,
-            tract_svi=combined_svi,
-            epochs=self.config.get('training', {}).get('epochs', 100),
-            verbose=self.verbose
-        )
-
-        trained_model = correction_model
-        training_metrics = training_result
-        
-        if 'loss_history' in training_metrics and training_metrics['loss_history']:
-            final_loss = training_metrics['loss_history'][-1]
-            self._log(f"Global GNN training complete: final loss = {final_loss:.4f}")
-        elif 'final_metrics' in training_metrics:
-            metrics = training_metrics['final_metrics']
-            if 'constraint_error' in metrics:
-                self._log(f"Global GNN training complete: constraint error = {metrics['constraint_error']:.4f}")
-            else:
-                self._log(f"Global GNN training complete successfully")
-        else:
-            self._log(f"Global GNN training complete successfully")
-            
-        return trained_model
-    
-    def _load_nlcd_for_tract(self, tract_data):
-        """
-        Load NLCD data for tract area
-        """
-        try:
-            # Get tract boundary for NLCD cropping
-            tract_boundary = gpd.GeoDataFrame([tract_data['tract_info']], crs='EPSG:4326')
-            
-            # Load NLCD data
-            nlcd_data = self.data_loader.load_nlcd_data(
-                county_bounds=tract_boundary,
-                nlcd_path="./data/nlcd_hamilton_county.tif"
-            )
-            
-            if nlcd_data is None:
-                self._log("  WARNING: NLCD data not available, falling back to topological features")
-                return None
-            
-            # Extract NLCD features at address locations
-            nlcd_features = self.data_loader.extract_nlcd_features_at_addresses(
-                tract_data['addresses'], 
-                nlcd_data
-            )
-            
-            self._log(f"  Extracted NLCD features for {len(nlcd_features)} addresses")
-            return nlcd_features
-            
-        except Exception as e:
-            self._log(f"  Error loading NLCD: {str(e)}")
-            return None
-
-    def _combine_networks(self, networks):
-        """Combine multiple NetworkX graphs into one mega-graph"""
-        import networkx as nx
-        
-        mega_graph = nx.Graph()
-        node_offset = 0
-        
-        for net in networks:
-            # Add nodes with offset to avoid conflicts
-            for node, data in net.nodes(data=True):
-                new_node = (node[0] + node_offset * 0.001, node[1])  # Slight offset
-                mega_graph.add_node(new_node, **data)
-            
-            # Add edges
-            for u, v, data in net.edges(data=True):
-                new_u = (u[0] + node_offset * 0.001, u[1])
-                new_v = (v[0] + node_offset * 0.001, v[1])
-                mega_graph.add_edge(new_u, new_v, **data)
-            
-            node_offset += 1
-        
-        return mega_graph
-    
-    def _apply_trained_gnn_to_tract(self, tract_data, trained_model):
-        """Apply pre-trained GNN to individual tract with IDM comparison"""
-        """Note this only works in multi-tract mode"""
-        fips = tract_data['tract_info']['FIPS']
-        svi_value = tract_data['svi_value']
-        
-        self._log(f"  Applying trained GNN to tract {fips} with SVI={svi_value:.3f}")
-            
-        try:
-            # Step 1: Prepare graph data
-            # Load NLCD features for this tract
-            nlcd_features = self._load_nlcd_for_tract(tract_data)
-
-            if nlcd_features is not None and len(nlcd_features) > 0:
-                graph_data, _ = prepare_graph_data_with_nlcd(
-                    tract_data['road_network'], 
-                    nlcd_features,
-                    addresses=tract_data['addresses']
-                )
-            else:
-                graph_data, _ = prepare_graph_data_topological(tract_data['road_network'])
-            
-            # Step 2: Extract features using pre-trained model
-            trained_model.eval()
-            with torch.no_grad():
-                gnn_features = trained_model(graph_data.x, graph_data.edge_index).cpu().numpy()
-            
-            self._log(f"  Applied trained GNN: κ range [{gnn_features[:, 0].min():.3f}, {gnn_features[:, 0].max():.3f}]")
-            
-            # Step 3: Create MetricGraph
-            self._log("  Creating MetricGraph representation...")
-            mg_start = time.time()
-            
-            nodes_df, edges_df = self._prepare_metricgraph_data(tract_data['road_network'])
-            
-            metric_graph = self.mg_interface.create_graph(
-                nodes_df, edges_df,
-                enable_sampling=len(edges_df) > self.config['metricgraph']['max_edges']
-            )
-            
-            if metric_graph is None:
-                raise RuntimeError("Failed to create MetricGraph")
-            
-            mg_time = time.time() - mg_start
-            self._log(f"  MetricGraph created in {mg_time:.2f}s")
-            
-            # Step 4: Prepare observation and prediction data
-            tract_centroid = tract_data['tract_info'].geometry.centroid
-            tract_observation = pd.DataFrame({
-                'coord_x': [tract_centroid.x],
-                'coord_y': [tract_centroid.y],
-                'svi_value': [svi_value]
-            })
-            
-            prediction_locations = pd.DataFrame({
-                'x': [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()],
-                'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()]
-            })
-            
-            # Step 5: Perform disaggregation with error checking
-            self._log("  Performing GNN-informed spatial disaggregation...")
-            disagg_result = self.mg_interface.disaggregate_svi(
-                metric_graph=metric_graph,
-                tract_observation=tract_observation,
-                prediction_locations=prediction_locations,
-                gnn_features=gnn_features,
-                alpha=self.config['metricgraph']['alpha']
-            )
-            
-            if disagg_result is None:
-                raise RuntimeError("Disaggregation returned None")
-            
-            if not disagg_result.get('success', False):
-                raise RuntimeError(f"Disaggregation failed: {disagg_result.get('error', 'Unknown error')}")
-            
-            # Step 6: Run IDM baseline 
-            self._log("  Running IDM baseline for comparison...")
-            
-            # Load NLCD features 
-            nlcd_features = self._load_nlcd_for_tract(tract_data)
-            
-            idm_result = self.mg_interface._idm_baseline(
-                tract_observation=tract_observation,
-                prediction_locations=prediction_locations,
-                nlcd_features=nlcd_features,  
-                tract_geometry=tract_data['tract_info'].geometry  
-            )
-            
-            if idm_result is None:
-                self._log("  WARNING: IDM baseline failed, continuing without it")
-                idm_result = {'success': False, 'error': 'IDM baseline failed'}
-        
-            # Step 7: Process results with IDM comparison
-            predictions = disagg_result['predictions']
-            predictions['fips'] = fips
-            predictions['tract_svi'] = svi_value
-            
-            # Compute validation metrics (GNN vs IDM)
-            validation_metrics = self._compute_idm_validation_metrics(
-                predictions, idm_result, svi_value
-            )
-            
-            self._log(f"  Successfully disaggregated to {len(predictions)} addresses")
-            self._log(f"  Constraint satisfied: {disagg_result['diagnostics']['constraint_satisfied']}")
-            
-            if validation_metrics.get('gnn_vs_idm_correlation') is not None:
-                self._log(f"  GNN vs IDM correlation: {validation_metrics['gnn_vs_idm_correlation']:.3f}")
-            
-            if disagg_result['success'] and idm_result.get('success'):
-                self._log("🔍 Running diagnostic analysis...")
-                
-                try:
-                    gnn_predictions = disagg_result['predictions']
-                    idm_predictions = idm_result['predictions']
-                    
-                    # Run diagnostics
-                    # diagnostic_results = diagnose_comparison_issues(
-                    #     gnn_predictions, idm_predictions, svi_value
-                    # )
-                    
-                    # Create diagnostic plots
-                    diagnostic_fig = create_diagnostic_plots(
-                        gnn_predictions, idm_predictions, svi_value
-                    )
-                    
-                    # Save diagnostic plot
-                    diagnostic_path = os.path.join(self.output_dir, f'diagnostics_tract_{fips}.png')
-                    diagnostic_fig.savefig(diagnostic_path, dpi=300, bbox_inches='tight')
-                    plt.close(diagnostic_fig)
-                    
-                    self._log(f"Diagnostic plots saved to {diagnostic_path}")
-                    
-                    # Log key findings
-                    # if diagnostic_results['issues_found']:
-                    #     self._log("DIAGNOSTIC ISSUES FOUND:")
-                    #     for issue in diagnostic_results['issues_found']:
-                    #         self._log(f"  - {issue}")
-                    # else:
-                    #     self._log("No major diagnostic issues detected")
-                        
-                    idm_comparison_result = self.idm_baseline.disaggregate_svi(
-                        tract_svi=svi_value,
-                        prediction_locations=tract_data['addresses'],
-                        nlcd_features=nlcd_features,
-                        tract_geometry=tract_data['tract_info'].geometry
-                    )
-
-                    if idm_comparison_result.get('success'):
-                        idm_predictions_comparison = idm_comparison_result['predictions']
-                    else:
-                        print(f"   IDM comparison failed: {idm_comparison_result.get('error', 'Unknown error')}")
-
-                    return {
-                        'status': 'success',
-                        'fips': fips,
-                        'predictions': predictions,
-                        'gnn_features': gnn_features,
-                        'spde_params': disagg_result['spde_params'],
-                        'diagnostics': disagg_result['diagnostics'],
-                        
-                        # MULTIPLE ways to store IDM comparison (ensure visualization finds it):
-                        'baseline_comparison': idm_comparison_result,        # For visualization
-                        'idm_comparison': idm_comparison_result,             # Alternative field name
-                        'idm_baseline': idm_comparison_result,               # Another alternative
-                        'comparison_results': idm_comparison_result,         # Another alternative
-                        
-                        # Other existing fields...
-                        'training_result': training_result,
-                        'network_data': network_data,
-                        'transit_data': transit_data,
-                        'trained_model': gnn_model,
-                        'timing': {
-                            'gnn_training': gnn_time,
-                            'metricgraph_creation': mg_time,
-                            'disaggregation': time.time() - mg_start,
-                            'total': time.time() - gnn_start
-                        }
-                    }
-                    
-                except Exception as e:
-                    self._log(f"Diagnostic analysis failed: {str(e)}")
-                    # Continue without diagnostics
-
-            return {
-                'status': 'success',
-                'fips': fips,
-                'predictions': predictions,
-                'gnn_features': gnn_features,
-                'spde_params': disagg_result['spde_params'],
-                'diagnostics': disagg_result['diagnostics'],
-                'idm_comparison': idm_result, 
-                'validation_metrics': validation_metrics,
-                'network_data': self._prepare_network_data_for_viz(tract_data),
-                'timing': {'total': mg_time}
-            }
-            
-        except Exception as e:
-            self._log(f"  Error applying GNN to tract: {str(e)}")
-            return {'status': 'failed', 'fips': fips, 'error': str(e)}
 
     def _process_fips_mode(self, data):
         """
@@ -982,36 +523,6 @@ class GRANITEPipeline:
             print(f"Error in hybrid processing: {e}")
             return {'status': 'failed', 'fips': fips, 'error': str(e)}
     
-    def _process_multi_fips_mode(self, data, target_fips_list):
-        """Process specific list of FIPS codes with global GNN training"""
-        self._log(f"Processing {len(target_fips_list)} specific FIPS codes with shared GNN training")
-        
-        # Convert target_fips_list to strings for consistent matching
-        target_fips_list = [str(fips).strip() for fips in target_fips_list]
-        data['tracts']['FIPS'] = data['tracts']['FIPS'].astype(str).str.strip()
-        
-        self._log(f"Looking for FIPS codes: {target_fips_list}")
-        
-        # Filter to target tracts only
-        target_tracts = data['tracts'][data['tracts']['FIPS'].isin(target_fips_list)]
-        
-        if len(target_tracts) == 0:
-            self._log("No target tracts found in data")
-            available_fips = data['tracts']['FIPS'].tolist()[:10]
-            self._log(f"Available FIPS (first 10): {available_fips}")
-            return {'success': False, 'error': 'No target FIPS found'}
-        
-        self._log(f"✓ Found {len(target_tracts)} target tracts out of {len(target_fips_list)} requested:")
-        for _, tract in target_tracts.iterrows():
-            self._log(f"  - {tract['FIPS']}: SVI = {tract.get('RPL_THEMES', 'N/A')}")
-        
-        # Create filtered dataset
-        filtered_data = data.copy()
-        filtered_data['tracts'] = target_tracts
-        
-        # Use the county mode processing (which does global training)
-        return self._process_county_mode(filtered_data)
-
     def _prepare_metricgraph_data(self, road_network):
         """Prepare node and edge dataframes for MetricGraph"""
         # Extract nodes
@@ -1039,188 +550,6 @@ class GRANITEPipeline:
         
         return nodes_df, edges_df
     
-    def _prepare_network_data_for_viz(self, tract_data):
-        """Prepare network data in format expected by visualizations"""
-        road_network = tract_data['road_network']
-        
-        # Convert NetworkX graph to GeoDataFrame for edge visualization
-        edges_list = []
-        for u, v, data in road_network.edges(data=True):
-            if 'x' in road_network.nodes[u] and 'x' in road_network.nodes[v]:
-                from shapely.geometry import LineString
-                line = LineString([
-                    (road_network.nodes[u]['x'], road_network.nodes[u]['y']),
-                    (road_network.nodes[v]['x'], road_network.nodes[v]['y'])
-                ])
-                edges_list.append({
-                    'geometry': line,
-                    'from': u,
-                    'to': v,
-                    'weight': data.get('length', 1.0)
-                })
-        
-        edges_gdf = gpd.GeoDataFrame(edges_list, crs='EPSG:4326')
-        
-        return {
-            'graph': road_network,
-            'edges_gdf': edges_gdf
-        }
-
-    def _prepare_transit_data_for_viz(self, tract_data):
-        """Prepare transit data for visualization"""
-        
-        # Load transit stops from data loader if not already in tract_data
-        if 'transit_stops' not in tract_data:
-            transit_stops = self.data_loader.load_transit_stops()
-        else:
-            transit_stops = tract_data['transit_stops']
-        
-        # Filter stops to tract area if needed
-        tract_geom = tract_data['tract_info'].geometry
-        local_stops = transit_stops[transit_stops.intersects(tract_geom.buffer(0.01))]
-        
-        return {
-            'stops': local_stops
-        }
-
-    def _combine_results(self, tract_results):
-        """
-        Combine results with proper IDM baseline aggregation
-        """
-        if not tract_results:
-            return {
-                'success': False,
-                'message': 'No tracts successfully processed'
-            }
-        
-        # Combine all predictions
-        all_predictions = []
-        all_idm_predictions = [] 
-        
-        for result in tract_results:
-            if result['status'] == 'success':
-                # Add GNN predictions
-                all_predictions.append(result['predictions'])
-                
-                # Add IDM predictions if available
-                if (result.get('idm_comparison') and 
-                    result['idm_comparison'].get('success') and
-                    'predictions' in result['idm_comparison']):
-                    
-                    idm_pred = result['idm_comparison']['predictions'].copy()
-                    # Add tract metadata to IDM predictions
-                    idm_pred['fips'] = result['fips']
-                    idm_pred['tract_svi'] = result['predictions']['tract_svi'].iloc[0]
-                    all_idm_predictions.append(idm_pred)
-        
-        if all_predictions:
-            combined_predictions = pd.concat(all_predictions, ignore_index=True)
-            
-            # Create combined IDM comparison with proper naming
-            combined_idm = None
-            if all_idm_predictions:  
-                combined_idm_predictions = pd.concat(all_idm_predictions, ignore_index=True)
-                
-                if len(combined_predictions) == len(combined_idm_predictions):
-                    combined_idm = {
-                        'success': True,
-                        'predictions': combined_idm_predictions,
-                        'diagnostics': {
-                            'constraint_satisfied': True,
-                            'constraint_error': 0.0,
-                            'mean_prediction': combined_idm_predictions['mean'].mean(),
-                            'std_prediction': combined_idm_predictions['mean'].std(),
-                            'mean_uncertainty': combined_idm_predictions['sd'].mean(),
-                            'method': 'combined_IDM'
-                        }
-                    }
-                    
-                    self._log(f"Combined IDM baseline: {len(combined_idm_predictions)} predictions")
-            
-            # Compute global validation
-            global_validation = self._compute_global_idm_validation_metrics(
-                combined_predictions, combined_idm
-            )
-
-            summary_stats = {
-                'total_tracts': len(tract_results),
-                'successful_tracts': sum(1 for r in tract_results if r['status'] == 'success'),
-                'total_addresses': len(combined_predictions),
-                'mean_svi': combined_predictions['mean'].mean(),
-                'std_svi': combined_predictions['mean'].std(),
-                'mean_uncertainty': combined_predictions['sd'].mean(),
-                'processing_time': sum(r.get('timing', {}).get('total', 0) for r in tract_results),
-                'global_correlation': global_validation.get('method_correlation')
-            }
-            
-            return {
-                'success': True,
-                'predictions': combined_predictions,
-                'combined_idm': combined_idm,  
-                'tract_results': tract_results,
-                'summary': summary_stats,
-                'global_validation': global_validation
-            }
-    
-    def _compute_global_idm_validation_metrics(self, combined_predictions, combined_idm):
-        """
-        Compute validation metrics across all tracts (GNN vs IDM)
-        """
-        if not combined_idm or not combined_idm.get('success'):
-            return {'method_correlation': None, 'error': 'No IDM baseline available'}
-        
-        gnn_predictions = combined_predictions['mean'].values
-        idm_predictions = combined_idm['predictions']['mean'].values
-        
-        # Verify same length
-        if len(gnn_predictions) != len(idm_predictions):
-            self._log(f"GLOBAL WARNING: Prediction length mismatch - "
-                    f"GNN: {len(gnn_predictions)}, IDM: {len(idm_predictions)}")
-            return {'method_correlation': None, 'error': 'Length mismatch'}
-        
-        # Compute global correlation
-        try:
-            correlation = np.corrcoef(gnn_predictions, idm_predictions)[0, 1]
-            if np.isnan(correlation):
-                correlation = 0.0
-        except Exception as e:
-            self._log(f"Error computing global correlation: {str(e)}")
-            correlation = None
-        
-        # Additional global metrics
-        gnn_uncertainty = combined_predictions['sd'].values
-        idm_uncertainty = combined_idm['predictions']['sd'].values
-        
-        # Effectiveness Calculations
-        gnn_variance = np.var(gnn_predictions)
-        idm_variance = np.var(idm_predictions)
-        
-        # Spatial differentiation score (higher variance often better)
-        spatial_score = gnn_variance / idm_variance if idm_variance > 0 else 1.0
-        
-        # Overall effectiveness
-        effectiveness = spatial_score * abs(correlation) if correlation is not None else spatial_score
-        
-        global_metrics = {
-            'method_correlation': correlation,
-            'gnn_prediction_range': [gnn_predictions.min(), gnn_predictions.max()],
-            'idm_prediction_range': [idm_predictions.min(), idm_predictions.max()],
-            'gnn_prediction_std': np.std(gnn_predictions),
-            'idm_prediction_std': np.std(idm_predictions),
-            'gnn_uncertainty_mean': np.mean(gnn_uncertainty),
-            'idm_uncertainty_mean': np.mean(idm_uncertainty),
-            'total_addresses': len(gnn_predictions),
-            'spatial_score': spatial_score,
-            'gnn_effectiveness': effectiveness
-        }
-        
-        self._log(f"GLOBAL GNN vs IDM CORRELATION: {correlation:.3f}")
-        self._log(f"  GNN spatial std: {global_metrics['gnn_prediction_std']:.6f}")
-        self._log(f"  IDM spatial std: {global_metrics['idm_prediction_std']:.6f}")
-        self._log(f"  GNN effectiveness score: {effectiveness:.3f}")
-        
-        return global_metrics
-
     def _compute_idm_validation_metrics(self, gnn_predictions, idm_result, svi_value):
         """
         Compute GNN vs IDM validation metrics (single tract)
@@ -1277,6 +606,37 @@ class GRANITEPipeline:
                 'comparison_method': 'GNN_only',
                 'error': 'IDM comparison failed'
             }
+
+    def _load_nlcd_for_tract(self, tract_data):
+        """
+        Load NLCD data for single tract area - SIMPLIFIED VERSION
+        """
+        try:
+            # Get tract boundary for NLCD cropping
+            tract_boundary = gpd.GeoDataFrame([tract_data['tract_info']], crs='EPSG:4326')
+            
+            # Load NLCD data
+            nlcd_data = self.data_loader.load_nlcd_data(
+                county_bounds=tract_boundary,
+                nlcd_path="./data/nlcd_hamilton_county.tif"
+            )
+            
+            if nlcd_data is None:
+                self._log("  WARNING: NLCD data not available, falling back to topological features")
+                return None
+            
+            # Extract NLCD features at address locations
+            nlcd_features = self.data_loader.extract_nlcd_features_at_addresses(
+                tract_data['addresses'], 
+                nlcd_data
+            )
+            
+            self._log(f"  Extracted NLCD features for {len(nlcd_features)} addresses")
+            return nlcd_features
+            
+        except Exception as e:
+            self._log(f"  Error loading NLCD: {str(e)}")
+            return None
 
     def _calculate_gnn_effectiveness(self, correlation, gnn_var, idm_var, 
                                 gnn_constraint, idm_constraint):
@@ -1667,23 +1027,65 @@ class GRANITEPipeline:
             self._log(f"Error printing comparison summary: {str(e)}")
 
     def _corrections_to_spde_params(self, corrections, idm_baseline):        
+        """Convert single correction values to 3-parameter SPDE format for MetricGraph"""
         base_kappa = 1.0
         base_alpha = 1.5
         base_tau = 1.0
         
-        # Use stronger multipliers 
-        kappa_values = base_kappa * (1.0 + 5.0 * corrections)   # 5.0x multiplier
-        alpha_values = np.full_like(corrections, base_alpha)
-        tau_values = base_tau * (1.0 + 3.0 * corrections)       # 3.0x multiplier
+        # Use corrections to modulate kappa and tau
+        kappa_values = base_kappa * (1.0 + 3.0 * corrections)   
+        alpha_values = np.full_like(corrections, base_alpha)  # Fixed
+        tau_values = base_tau * (1.0 + 2.0 * corrections)       
         
-        # Ensure parameters stay within valid ranges
-        kappa_values = np.maximum(kappa_values, 0.1)
-        kappa_values = np.minimum(kappa_values, 5.0)
-        tau_values = np.maximum(tau_values, 0.1)
-        tau_values = np.minimum(tau_values, 3.0)
+        # Ensure valid ranges
+        kappa_values = np.clip(kappa_values, 0.1, 5.0)
+        tau_values = np.clip(tau_values, 0.1, 3.0)
+
+        return np.column_stack([kappa_values, alpha_values, tau_values])
     
-        gnn_features = np.column_stack([kappa_values, alpha_values, tau_values])
-        return gnn_features
+    def _prepare_network_data_for_viz(self, tract_data):
+        """Prepare network data in format expected by visualizations"""
+        road_network = tract_data['road_network']
+        
+        # Convert NetworkX graph to GeoDataFrame for edge visualization
+        edges_list = []
+        for u, v, data in road_network.edges(data=True):
+            if 'x' in road_network.nodes[u] and 'x' in road_network.nodes[v]:
+                from shapely.geometry import LineString
+                line = LineString([
+                    (road_network.nodes[u]['x'], road_network.nodes[u]['y']),
+                    (road_network.nodes[v]['x'], road_network.nodes[v]['y'])
+                ])
+                edges_list.append({
+                    'geometry': line,
+                    'from': u,
+                    'to': v,
+                    'weight': data.get('length', 1.0)
+                })
+        
+        edges_gdf = gpd.GeoDataFrame(edges_list, crs='EPSG:4326')
+        
+        return {
+            'graph': road_network,
+            'edges_gdf': edges_gdf
+        }
+
+    def _prepare_transit_data_for_viz(self, tract_data):
+        """Prepare transit data for visualization"""
+        
+        # Load transit stops from data loader if not already in tract_data
+        if 'transit_stops' not in tract_data:
+            transit_stops = self.data_loader.load_transit_stops()
+        else:
+            transit_stops = tract_data['transit_stops']
+        
+        # Filter stops to tract area if needed
+        tract_geom = tract_data['tract_info'].geometry
+        local_stops = transit_stops[transit_stops.intersects(tract_geom.buffer(0.01))]
+        
+        return {
+            'stops': local_stops
+        }
 
     def _apply_hybrid_disaggregation(self, metric_graph, tract_observation, 
                                    prediction_locations, hybrid_predictions, 

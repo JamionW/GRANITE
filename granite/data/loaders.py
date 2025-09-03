@@ -1767,6 +1767,526 @@ class DataLoader:
         # Default: first 5 tracts
         all_fips = self.get_available_fips_codes(state_fips, county_fips)
         return all_fips[:5]
+    
+    def _load_full_gtfs_data(self) -> dict:
+        """
+        Load complete GTFS data including stops, routes, trips, stop_times
+        
+        Extends your existing _load_carta_gtfs_stops() to load full GTFS spec
+        """
+        try:
+            import zipfile
+            import requests
+            import pandas as pd
+            from datetime import datetime, time
+            
+            # Use your existing GTFS file discovery logic
+            gtfs_files = [
+                os.path.join(self.data_dir, 'carta_gtfs.zip'),
+                os.path.join(self.data_dir, 'gtfs', 'carta_gtfs.zip'),
+                os.path.join(self.data_dir, 'raw', 'carta_gtfs.zip')
+            ]
+            
+            gtfs_path = None
+            for path in gtfs_files:
+                if os.path.exists(path):
+                    gtfs_path = path
+                    break
+            
+            # Download if needed (using your existing download logic)
+            if gtfs_path is None:
+                self._log("  Attempting to download CARTA GTFS data...")
+                gtfs_urls = [
+                    "https://www.gocarta.org/gtfs/gtfs.zip",
+                    "https://transitland.org/api/v1/gtfs_exports/carta.zip"
+                ]
+                
+                for url in gtfs_urls:
+                    try:
+                        response = requests.get(url, timeout=30)
+                        if response.status_code == 200:
+                            gtfs_path = os.path.join(self.data_dir, 'carta_gtfs_downloaded.zip')
+                            with open(gtfs_path, 'wb') as f:
+                                f.write(response.content)
+                            self._log(f"  Downloaded GTFS data from {url}")
+                            break
+                    except Exception as e:
+                        self._log(f"  Failed to download from {url}: {e}")
+                        continue
+            
+            if gtfs_path is None:
+                return None
+            
+            gtfs_data = {}
+            
+            # Required GTFS files for accessibility analysis
+            required_files = {
+                'stops.txt': 'stops',
+                'routes.txt': 'routes', 
+                'trips.txt': 'trips',
+                'stop_times.txt': 'stop_times',
+                'calendar.txt': 'calendar'
+            }
+            
+            with zipfile.ZipFile(gtfs_path, 'r') as zip_file:
+                available_files = zip_file.namelist()
+                
+                for filename, key in required_files.items():
+                    if filename in available_files:
+                        self._log(f"  Loading {filename}...")
+                        with zip_file.open(filename) as file:
+                            df = pd.read_csv(file)
+                            gtfs_data[key] = df
+                            self._log(f"    {len(df)} records loaded")
+                    else:
+                        self._log(f"  WARNING: {filename} not found in GTFS")
+            
+            if len(gtfs_data) == 0:
+                return None
+            
+            # Filter to Hamilton County bounds
+            hamilton_bounds = {
+                'min_lat': 34.9, 'max_lat': 35.3,
+                'min_lon': -85.5, 'max_lon': -85.0
+            }
+            
+            if 'stops' in gtfs_data:
+                stops_df = gtfs_data['stops']
+                # Filter stops to Hamilton County
+                hamilton_stops = stops_df[
+                    (stops_df['stop_lat'] >= hamilton_bounds['min_lat']) &
+                    (stops_df['stop_lat'] <= hamilton_bounds['max_lat']) &
+                    (stops_df['stop_lon'] >= hamilton_bounds['min_lon']) &
+                    (stops_df['stop_lon'] <= hamilton_bounds['max_lon'])
+                ]
+                gtfs_data['stops'] = hamilton_stops
+                
+                # Filter other data to only include Hamilton County stops
+                hamilton_stop_ids = set(hamilton_stops['stop_id'])
+                
+                if 'stop_times' in gtfs_data:
+                    gtfs_data['stop_times'] = gtfs_data['stop_times'][
+                        gtfs_data['stop_times']['stop_id'].isin(hamilton_stop_ids)
+                    ]
+            
+            self._log(f"Loaded complete GTFS data: {list(gtfs_data.keys())}")
+            return gtfs_data
+            
+        except Exception as e:
+            self._log(f"  Error loading full GTFS data: {str(e)}")
+            return None
+
+    def build_transit_network(self, gtfs_data: dict) -> dict:
+        """
+        Build transit network for travel time calculations
+        
+        Creates a network representation from GTFS data
+        """
+        if not gtfs_data or 'stops' not in gtfs_data:
+            return None
+        
+        try:
+            import networkx as nx
+            from datetime import datetime, time
+            
+            # Create transit network graph
+            transit_graph = nx.DiGraph()
+            
+            stops_df = gtfs_data['stops']
+            routes_df = gtfs_data.get('routes', pd.DataFrame())
+            trips_df = gtfs_data.get('trips', pd.DataFrame())
+            stop_times_df = gtfs_data.get('stop_times', pd.DataFrame())
+            
+            # Add stops as nodes
+            for _, stop in stops_df.iterrows():
+                transit_graph.add_node(
+                    stop['stop_id'],
+                    lat=stop['stop_lat'],
+                    lon=stop['stop_lon'],
+                    name=stop.get('stop_name', 'Unknown')
+                )
+            
+            # Build route connections if we have complete data
+            if not stop_times_df.empty and not trips_df.empty:
+                self._add_route_edges(transit_graph, gtfs_data)
+            else:
+                # Fallback: connect stops within reasonable distance
+                self._add_proximity_edges(transit_graph, stops_df)
+            
+            # Calculate service frequency for each stop
+            stop_frequencies = self._calculate_stop_frequencies(gtfs_data)
+            
+            return {
+                'graph': transit_graph,
+                'stops': stops_df,
+                'frequencies': stop_frequencies,
+                'routes': routes_df,
+                'gtfs_data': gtfs_data
+            }
+            
+        except Exception as e:
+            self._log(f"Error building transit network: {str(e)}")
+            return None
+
+    def _add_route_edges(self, graph: nx.DiGraph, gtfs_data: dict):
+        """Add edges between consecutive stops on routes"""
+        stop_times_df = gtfs_data['stop_times']
+        trips_df = gtfs_data['trips']
+        
+        # Group by trip and sort by stop_sequence
+        for trip_id, trip_stops in stop_times_df.groupby('trip_id'):
+            trip_stops = trip_stops.sort_values('stop_sequence')
+            
+            if len(trip_stops) < 2:
+                continue
+            
+            # Add edges between consecutive stops
+            for i in range(len(trip_stops) - 1):
+                from_stop = trip_stops.iloc[i]
+                to_stop = trip_stops.iloc[i + 1]
+                
+                # Calculate travel time between stops
+                travel_time = self._parse_gtfs_time(to_stop['arrival_time']) - \
+                            self._parse_gtfs_time(from_stop['departure_time'])
+                
+                # Add edge with travel time (in minutes)
+                graph.add_edge(
+                    from_stop['stop_id'],
+                    to_stop['stop_id'],
+                    travel_time=max(travel_time, 2),  # Minimum 2 minutes
+                    trip_id=trip_id
+                )
+
+    def _add_proximity_edges(self, graph: nx.DiGraph, stops_df: pd.DataFrame):
+        """Fallback: connect nearby stops with estimated times"""
+        from geopy.distance import geodesic
+        
+        stops_list = stops_df.to_dict('records')
+        
+        for i, stop1 in enumerate(stops_list):
+            for j, stop2 in enumerate(stops_list):
+                if i >= j:
+                    continue
+                    
+                # Calculate distance between stops
+                coord1 = (stop1['stop_lat'], stop1['stop_lon'])
+                coord2 = (stop2['stop_lat'], stop2['stop_lon'])
+                distance_km = geodesic(coord1, coord2).kilometers
+                
+                # Connect stops within 2km with estimated travel time
+                if distance_km <= 2.0:
+                    # Estimate: 20 km/h average transit speed
+                    travel_time = (distance_km / 20.0) * 60  # minutes
+                    
+                    graph.add_edge(
+                        stop1['stop_id'], stop2['stop_id'],
+                        travel_time=max(travel_time, 3),
+                        connection_type='proximity'
+                    )
+                    graph.add_edge(
+                        stop2['stop_id'], stop1['stop_id'], 
+                        travel_time=max(travel_time, 3),
+                        connection_type='proximity'
+                    )
+
+    def _calculate_stop_frequencies(self, gtfs_data: dict) -> dict:
+        """Calculate service frequency at each stop"""
+        frequencies = {}
+        
+        if 'stop_times' not in gtfs_data:
+            return frequencies
+        
+        stop_times_df = gtfs_data['stop_times']
+        
+        # Count trips per stop during peak hours (7-9 AM)
+        for stop_id, stop_trips in stop_times_df.groupby('stop_id'):
+            peak_trips = 0
+            total_trips = len(stop_trips)
+            
+            for _, trip in stop_trips.iterrows():
+                arrival_time = self._parse_gtfs_time(trip['arrival_time'])
+                if 7*60 <= arrival_time <= 9*60:  # 7-9 AM in minutes
+                    peak_trips += 1
+            
+            frequencies[stop_id] = {
+                'total_trips': total_trips,
+                'peak_trips': peak_trips,
+                'frequency_score': peak_trips / 2.0 if peak_trips > 0 else 0.5
+            }
+        
+        return frequencies
+
+    def _parse_gtfs_time(self, time_str: str) -> int:
+        """Parse GTFS time format (HH:MM:SS) to minutes since midnight"""
+        try:
+            if pd.isna(time_str):
+                return 0
+            
+            parts = str(time_str).split(':')
+            if len(parts) >= 2:
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                return hours * 60 + minutes
+        except:
+            pass
+        return 0
+
+    def calculate_multimodal_travel_times(self, origins: gpd.GeoDataFrame, 
+                                        destinations: gpd.GeoDataFrame,
+                                        time_periods: list = ['morning', 'evening']) -> pd.DataFrame:
+        """
+        Calculate multi-modal travel times from origins to destinations
+        
+        Parameters:
+        -----------
+        origins : gpd.GeoDataFrame
+            Origin points (typically address points)
+        destinations : gpd.GeoDataFrame  
+            Destination points (hospitals, grocery stores, etc.)
+        time_periods : list
+            Time periods to analyze ['morning', 'evening']
+        
+        Returns:
+        --------
+        pd.DataFrame
+            Travel times with columns: origin_id, destination_id, walk_time, 
+            transit_time, combined_time, time_period
+        """
+        self._log("Calculating multi-modal travel times...")
+        
+        # Load transit network
+        gtfs_data = self._load_full_gtfs_data()
+        if gtfs_data is None:
+            self._log("WARNING: Using walking times only - no GTFS data available")
+            return self._calculate_walking_only_times(origins, destinations)
+        
+        transit_network = self.build_transit_network(gtfs_data)
+        if transit_network is None:
+            self._log("WARNING: Using walking times only - transit network failed")
+            return self._calculate_walking_only_times(origins, destinations)
+        
+        results = []
+        
+        for time_period in time_periods:
+            self._log(f"  Calculating {time_period} accessibility...")
+            
+            for origin_idx, origin in origins.iterrows():
+                for dest_idx, destination in destinations.iterrows():
+                    
+                    # Calculate walking time (direct)
+                    walk_time = self._calculate_walk_time(origin, destination)
+                    
+                    # Calculate transit time (walk to stop + transit + walk from stop)
+                    transit_time = self._calculate_transit_time(
+                        origin, destination, transit_network, time_period
+                    )
+                    
+                    # Combined time (minimum of walk vs transit)
+                    combined_time = min(walk_time, transit_time) if transit_time > 0 else walk_time
+                    
+                    results.append({
+                        'origin_id': getattr(origin, 'address_id', origin_idx),
+                        'destination_id': getattr(destination, 'dest_id', dest_idx),
+                        'destination_type': getattr(destination, 'dest_type', 'unknown'),
+                        'walk_time': walk_time,
+                        'transit_time': transit_time,
+                        'combined_time': combined_time,
+                        'time_period': time_period,
+                        'best_mode': 'walk' if walk_time <= transit_time else 'transit'
+                    })
+        
+        results_df = pd.DataFrame(results)
+        self._log(f"Calculated {len(results_df)} origin-destination-time combinations")
+        
+        return results_df
+
+    def _calculate_walk_time(self, origin: gpd.GeoSeries, destination: gpd.GeoSeries) -> float:
+        """Calculate walking time between two points"""
+        from geopy.distance import geodesic
+        
+        try:
+            origin_coord = (origin.geometry.y, origin.geometry.x)
+            dest_coord = (destination.geometry.y, destination.geometry.x)
+            
+            distance_km = geodesic(origin_coord, dest_coord).kilometers
+            
+            # Walking speed: 5 km/h
+            walk_time_hours = distance_km / 5.0
+            walk_time_minutes = walk_time_hours * 60
+            
+            return walk_time_minutes
+            
+        except Exception as e:
+            self._log(f"Error calculating walk time: {str(e)}")
+            return 999.0  # Large penalty for failed calculations
+
+    def _calculate_transit_time(self, origin: gpd.GeoSeries, destination: gpd.GeoSeries,
+                            transit_network: dict, time_period: str) -> float:
+        """Calculate transit + walking time"""
+        import networkx as nx
+        from geopy.distance import geodesic
+        
+        try:
+            graph = transit_network['graph']
+            stops_df = transit_network['stops']
+            
+            # Find nearest stops to origin and destination
+            origin_stop = self._find_nearest_stop(origin, stops_df)
+            dest_stop = self._find_nearest_stop(destination, stops_df)
+            
+            if origin_stop is None or dest_stop is None:
+                return 999.0
+            
+            # Walking time to first stop
+            walk_to_stop = self._calculate_walk_time(origin, origin_stop)
+            
+            # Walking time from last stop
+            walk_from_stop = self._calculate_walk_time(dest_stop, destination)
+            
+            # Transit time between stops
+            try:
+                path = nx.shortest_path(graph, origin_stop['stop_id'], dest_stop['stop_id'], 
+                                    weight='travel_time')
+                transit_time = nx.shortest_path_length(graph, origin_stop['stop_id'], 
+                                                    dest_stop['stop_id'], weight='travel_time')
+                
+                # Add waiting time based on frequency
+                frequencies = transit_network['frequencies']
+                avg_frequency = frequencies.get(origin_stop['stop_id'], {}).get('frequency_score', 0.5)
+                wait_time = max(5, 15 / max(avg_frequency, 0.1))  # 5-15 minute wait
+                
+                total_transit_time = walk_to_stop + wait_time + transit_time + walk_from_stop
+                
+            except nx.NetworkXNoPath:
+                # No transit path found
+                return 999.0
+            
+            return total_transit_time
+            
+        except Exception as e:
+            self._log(f"Error calculating transit time: {str(e)}")
+            return 999.0
+
+    def _find_nearest_stop(self, point: gpd.GeoSeries, stops_df: pd.DataFrame) -> dict:
+        """Find the nearest transit stop to a point"""
+        from geopy.distance import geodesic
+        
+        point_coord = (point.geometry.y, point.geometry.x)
+        
+        min_distance = float('inf')
+        nearest_stop = None
+        
+        for _, stop in stops_df.iterrows():
+            stop_coord = (stop['stop_lat'], stop['stop_lon'])
+            distance = geodesic(point_coord, stop_coord).kilometers
+            
+            # Only consider stops within 1km walking distance
+            if distance < 1.0 and distance < min_distance:
+                min_distance = distance
+                nearest_stop = {
+                    'stop_id': stop['stop_id'],
+                    'geometry': Point(stop['stop_lon'], stop['stop_lat']),
+                    'distance_km': distance
+                }
+        
+        return nearest_stop
+
+    def _create_employment_destinations(self):
+        """Create employment center destinations - Add this to DataLoader class"""
+        import geopandas as gpd
+        from shapely.geometry import Point
+        
+        # Major Hamilton County employers based on research
+        employers = [
+            {
+                'name': 'Volkswagen Chattanooga',
+                'lat': 35.0614, 'lon': -85.1580,
+                'employees': 4000, 'type': 'manufacturing'
+            },
+            {
+                'name': 'BlueCross BlueShield TN',
+                'lat': 35.0456, 'lon': -85.3097,
+                'employees': 3500, 'type': 'insurance'
+            },
+            {
+                'name': 'Erlanger Health System',
+                'lat': 35.0539, 'lon': -85.3083,
+                'employees': 8000, 'type': 'healthcare'
+            },
+            {
+                'name': 'University of Tennessee Chattanooga',
+                'lat': 35.0456, 'lon': -85.3011,
+                'employees': 2500, 'type': 'education'
+            },
+            {
+                'name': 'Tennessee Valley Authority',
+                'lat': 35.0398, 'lon': -85.3062,
+                'employees': 1500, 'type': 'utilities'
+            },
+            {
+                'name': 'Hamilton County Government',
+                'lat': 35.0456, 'lon': -85.3097,
+                'employees': 2000, 'type': 'government'
+            },
+            {
+                'name': 'Chattanooga Downtown',
+                'lat': 35.0456, 'lon': -85.3097,
+                'employees': 5000, 'type': 'mixed_downtown'
+            }
+        ]
+        
+        geometries = [Point(emp['lon'], emp['lat']) for emp in employers]
+        
+        employment_gdf = gpd.GeoDataFrame(employers, geometry=geometries, crs='EPSG:4326')
+        employment_gdf['dest_id'] = range(len(employment_gdf))
+        employment_gdf['dest_type'] = 'employment'
+        
+        self._log(f"Created {len(employment_gdf)} employment destinations")
+        return employment_gdf
+    
+    def create_basic_accessibility_features(self):
+        """
+        Complete accessibility analysis in DataLoader
+        Returns all travel times and features needed for GNN
+        """
+        self._log("Starting accessibility analysis...")
+        
+        # Load origins (address points)
+        origins = self.load_address_points()
+        
+        # Create employment destinations  
+        employment_destinations = self._create_employment_destinations()  # You already have this
+        
+        # Calculate travel times
+        travel_times = self.calculate_multimodal_travel_times(origins, employment_destinations)
+        
+        return {
+            'origins': origins,
+            'employment_destinations': employment_destinations, 
+            'travel_times': travel_times
+        }
+
+    def _calculate_walking_only_times(self, origins: gpd.GeoDataFrame, 
+                                    destinations: gpd.GeoDataFrame) -> pd.DataFrame:
+        """Fallback: calculate walking times only"""
+        results = []
+        
+        for origin_idx, origin in origins.iterrows():
+            for dest_idx, destination in destinations.iterrows():
+                walk_time = self._calculate_walk_time(origin, destination)
+                
+                results.append({
+                    'origin_id': getattr(origin, 'address_id', origin_idx),
+                    'destination_id': getattr(destination, 'dest_id', dest_idx),
+                    'destination_type': getattr(destination, 'dest_type', 'unknown'),
+                    'walk_time': walk_time,
+                    'transit_time': 999.0,  # No transit available
+                    'combined_time': walk_time,
+                    'time_period': 'all_day',
+                    'best_mode': 'walk'
+                })
+        
+        return pd.DataFrame(results)
 
 # Helper function for addresses validation
 def analyze_address_coverage(data_loader, state_fips='47', county_fips='065'):
@@ -1802,6 +2322,45 @@ def analyze_address_coverage(data_loader, state_fips='47', county_fips='065'):
     print(f"Median addresses per tract: {coverage_df['address_count'].median():.1f}")
     
     return coverage_df
+
+def load_multimodal_accessibility_data(self, destinations: dict) -> dict:
+    """
+    Load accessibility features for your GNN pipeline
+    
+    Parameters:
+    -----------
+    destinations : dict
+        Dictionary with keys like 'hospitals', 'grocery', 'employment'
+        Each containing a GeoDataFrame of destination points
+    
+    Returns:
+    --------
+    dict
+        Dictionary containing travel time matrices and accessibility features
+    """
+    # Load address points (your existing method)
+    origins = self.load_address_points()
+    
+    accessibility_data = {}
+    
+    for dest_type, dest_gdf in destinations.items():
+        if dest_gdf is not None and len(dest_gdf) > 0:
+            self._log(f"Calculating accessibility to {dest_type}...")
+            
+            # Add destination type to the GeoDataFrame
+            dest_gdf = dest_gdf.copy()
+            dest_gdf['dest_type'] = dest_type
+            dest_gdf['dest_id'] = range(len(dest_gdf))
+            
+            # Calculate travel times
+            travel_times = self.calculate_multimodal_travel_times(origins, dest_gdf)
+            
+            accessibility_data[dest_type] = {
+                'travel_times': travel_times,
+                'destinations': dest_gdf
+            }
+    
+    return accessibility_data
 
 # Convenience function for backward compatibility
 def load_hamilton_county_data(data_dir: str = './data', 

@@ -2137,11 +2137,17 @@ class DataLoader:
             if origin_stop is None or dest_stop is None:
                 return 999.0
             
-            # Walking time to first stop
-            walk_to_stop = self._calculate_walk_time(origin, origin_stop)
+            # Walking time to first stop - use direct distance calculation
+            origin_coord = (origin.geometry.y, origin.geometry.x)
+            origin_stop_coord = (origin_stop['geometry'].y, origin_stop['geometry'].x)
+            walk_to_distance = geodesic(origin_coord, origin_stop_coord).kilometers
+            walk_to_stop = (walk_to_distance / 5.0) * 60  # 5 km/h walking speed
             
-            # Walking time from last stop
-            walk_from_stop = self._calculate_walk_time(dest_stop, destination)
+            # Walking time from last stop - use direct distance calculation  
+            dest_coord = (destination.geometry.y, destination.geometry.x)
+            dest_stop_coord = (dest_stop['geometry'].y, dest_stop['geometry'].x)
+            walk_from_distance = geodesic(dest_coord, dest_stop_coord).kilometers
+            walk_from_stop = (walk_from_distance / 5.0) * 60  # 5 km/h walking speed
             
             # Transit time between stops
             try:

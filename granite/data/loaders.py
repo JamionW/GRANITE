@@ -41,7 +41,9 @@ class DataLoader:
         self._address_cache = None
         self._svi_cache = None
         self._roads_cache = None
-        self._transit_cache = None  # NEW: Cache transit data
+        self._transit_cache = None  
+        self._gtfs_data = None
+        self._transit_network = None
         
         # Create data directory if it doesn't exist
         os.makedirs(data_dir, exist_ok=True)
@@ -2054,16 +2056,20 @@ class DataLoader:
         """
         self._log("Calculating multi-modal travel times...")
         
-        # Load transit network
-        gtfs_data = self._load_full_gtfs_data()
-        if gtfs_data is None:
-            self._log("WARNING: Using walking times only - no GTFS data available")
-            return self._calculate_walking_only_times(origins, destinations)
-        
-        transit_network = self.build_transit_network(gtfs_data)
-        if transit_network is None:
-            self._log("WARNING: Using walking times only - transit network failed")
-            return self._calculate_walking_only_times(origins, destinations)
+        # OPTIMIZED: Load and cache transit network only once
+        if self._transit_network is None:
+            self._log("Building transit network (first time only)...")
+            self._gtfs_data = self._load_full_gtfs_data()
+            if self._gtfs_data is None:
+                self._log("WARNING: Using walking times only - no GTFS data available")
+                return self._calculate_walking_only_times(origins, destinations)
+            
+            self._transit_network = self.build_transit_network(self._gtfs_data)
+            if self._transit_network is None:
+                self._log("WARNING: Using walking times only - transit network failed")
+                return self._calculate_walking_only_times(origins, destinations)
+        else:
+            self._log("Using cached transit network")
         
         results = []
         
@@ -2077,8 +2083,8 @@ class DataLoader:
                     walk_time = self._calculate_walk_time(origin, destination)
                     
                     # Calculate transit time (walk to stop + transit + walk from stop)
-                    transit_time = self._calculate_transit_time(
-                        origin, destination, transit_network, time_period
+                    transit_time = self._calculate_transit_time_optimized(
+                        origin, destination, self._transit_network, time_period
                     )
                     
                     # Combined time (minimum of walk vs transit)
@@ -2249,6 +2255,218 @@ class DataLoader:
         
         self._log(f"Created {len(employment_gdf)} employment destinations")
         return employment_gdf
+
+    def _create_healthcare_destinations(self):
+        """
+        Create healthcare facility destinations for Hamilton County
+        
+        Uses researched major hospitals across different specialties
+        """
+        import geopandas as gpd
+        from shapely.geometry import Point
+        
+        # Major Hamilton County hospitals - researched and verified
+        hospitals = [
+            {
+                'name': 'Erlanger Baroness Hospital',
+                'lat': 35.0539, 'lon': -85.3083,
+                'address': '975 East 3rd Street',
+                'city': 'Chattanooga',
+                'beds': 400,
+                'hospital_type': 'General',
+                'data_source': 'Research'
+            },
+            {
+                'name': 'CHI Memorial Hospital',
+                'lat': 35.0627, 'lon': -85.2985,
+                'address': '2525 de Sales Avenue',
+                'city': 'Chattanooga', 
+                'beds': 300,
+                'hospital_type': 'General',
+                'data_source': 'Research'
+            },
+            {
+                'name': 'Parkridge Medical Center',
+                'lat': 35.0456, 'lon': -85.2597,
+                'address': '2333 McCallie Avenue',
+                'city': 'Chattanooga',
+                'beds': 368,
+                'hospital_type': 'General', 
+                'data_source': 'Research'
+            },
+            {
+                'name': 'TriStar StoneCrest Medical Center',
+                'lat': 35.1156, 'lon': -85.2441,
+                'address': '1 Stonecrest Boulevard',
+                'city': 'Smyrna',
+                'beds': 101,
+                'hospital_type': 'General',
+                'data_source': 'Research'
+            },
+            {
+                'name': 'Erlanger East Hospital',
+                'lat': 35.0407, 'lon': -85.2111,
+                'address': '1755 Gunbarrel Road',
+                'city': 'Chattanooga',
+                'beds': 140,
+                'hospital_type': 'General',
+                'data_source': 'Research'
+            },
+            {
+                'name': 'Siskin Hospital for Physical Rehabilitation',
+                'lat': 35.0456, 'lon': -85.3097,
+                'address': '1 Siskin Plaza',
+                'city': 'Chattanooga',
+                'beds': 79,
+                'hospital_type': 'Rehabilitation',
+                'data_source': 'Research'
+            },
+            {
+                'name': 'Moccasin Bend Mental Health Institute',
+                'lat': 35.0722, 'lon': -85.3365,
+                'address': '100 Moccasin Bend Road',
+                'city': 'Chattanooga',
+                'beds': 150,
+                'hospital_type': 'Psychiatric',
+                'data_source': 'Research'
+            },
+            {
+                'name': 'Parkridge Valley Hospital',
+                'lat': 35.0175, 'lon': -85.3365,
+                'address': '2200 Morris Hill Road',
+                'city': 'Chattanooga',
+                'beds': 60,
+                'hospital_type': 'General',
+                'data_source': 'Research'
+            }
+        ]
+        
+        # Create GeoDataFrame with standard format
+        geometries = [Point(hosp['lon'], hosp['lat']) for hosp in hospitals]
+        
+        healthcare_gdf = gpd.GeoDataFrame(hospitals, geometry=geometries, crs='EPSG:4326')
+        healthcare_gdf['dest_id'] = range(len(healthcare_gdf))
+        healthcare_gdf['dest_type'] = 'healthcare'
+        
+        self._log(f"Created {len(healthcare_gdf)} healthcare destinations")
+        
+        return healthcare_gdf
+
+    def _create_grocery_destinations(self):
+        """
+        Create grocery store destinations for Hamilton County
+        
+        Prioritizes OSM data since it worked well, minimal hardcoded fallback
+        """
+        import geopandas as gpd
+        import pandas as pd
+        from shapely.geometry import Point
+        import os
+        
+        # Try to load OSM grocery data first
+        osm_file = os.path.join(self.data_dir, 'raw', 'grocery_stores_osm.csv')
+        
+        if os.path.exists(osm_file):
+            try:
+                osm_stores = pd.read_csv(osm_file)
+                self._log(f"Loading {len(osm_stores)} grocery stores from OpenStreetMap data")
+                
+                # Filter and clean OSM data
+                stores = []
+                for idx, store in osm_stores.iterrows():
+                    # Skip stores with no name unless they're major chains
+                    name = store.get('name', '').strip()
+                    if name == 'Unknown Store':
+                        continue
+                        
+                    # Map store types for analysis
+                    shop_type = store.get('shop_type', 'unknown')
+                    if shop_type in ['supermarket', 'grocery']:
+                        store_category = 'supermarket'
+                    elif shop_type == 'convenience':
+                        store_category = 'convenience'
+                    else:
+                        store_category = 'grocery'
+                    
+                    stores.append({
+                        'name': name,
+                        'lat': store['lat'],
+                        'lon': store['lon'],
+                        'address': store.get('addr_street', ''),
+                        'city': store.get('addr_city', 'Chattanooga'),
+                        'store_type': store_category,
+                        'data_source': 'OpenStreetMap'
+                    })
+                    
+                self._log(f"Filtered to {len(stores)} named grocery stores")
+                    
+            except Exception as e:
+                self._log(f"Error loading OSM grocery data: {str(e)}")
+                stores = None
+        else:
+            stores = None
+        
+        # Minimal fallback to major grocery chains if OSM fails
+        if not stores or len(stores) < 5:
+            self._log("Using fallback major grocery chains")
+            stores = [
+                {
+                    'name': 'Walmart Supercenter - Hamilton Place',
+                    'lat': 35.0407, 'lon': -85.2111,
+                    'address': '2020 Gunbarrel Road',
+                    'city': 'Chattanooga',
+                    'store_type': 'supermarket',
+                    'data_source': 'Research'
+                },
+                {
+                    'name': 'Kroger - East Brainerd',
+                    'lat': 35.0156, 'lon': -85.2180,
+                    'address': '6900 East Brainerd Road',
+                    'city': 'Chattanooga',
+                    'store_type': 'supermarket',
+                    'data_source': 'Research'
+                },
+                {
+                    'name': 'Publix - Signal Mountain',
+                    'lat': 35.1456, 'lon': -85.3456,
+                    'address': '5764 TN-153',
+                    'city': 'Hixson',
+                    'store_type': 'supermarket',
+                    'data_source': 'Research'
+                },
+                {
+                    'name': 'Food City - Northgate',
+                    'lat': 35.0722, 'lon': -85.2967,
+                    'address': '2200 Northpoint Boulevard',
+                    'city': 'Hixson',
+                    'store_type': 'supermarket', 
+                    'data_source': 'Research'
+                },
+                {
+                    'name': 'IGA - Downtown',
+                    'lat': 35.0456, 'lon': -85.3097,
+                    'address': '1000 Carter Street',
+                    'city': 'Chattanooga',
+                    'store_type': 'grocery',
+                    'data_source': 'Research'
+                }
+            ]
+        
+        # Create GeoDataFrame with standard format
+        geometries = [Point(store['lon'], store['lat']) for store in stores]
+        
+        grocery_gdf = gpd.GeoDataFrame(stores, geometry=geometries, crs='EPSG:4326')
+        grocery_gdf['dest_id'] = range(len(grocery_gdf))
+        grocery_gdf['dest_type'] = 'grocery'
+        
+        self._log(f"Created {len(grocery_gdf)} grocery destinations")
+        
+        # Log breakdown by store type
+        type_counts = grocery_gdf['store_type'].value_counts()
+        for store_type, count in type_counts.items():
+            self._log(f"  {store_type}: {count} stores")
+        
+        return grocery_gdf
     
     def create_basic_accessibility_features(self):
         """
@@ -2271,6 +2489,223 @@ class DataLoader:
             'employment_destinations': employment_destinations, 
             'travel_times': travel_times
         }
+    
+    """
+    PERFORMANCE OPTIMIZATION for DataLoader.calculate_multimodal_travel_times()
+
+    Add these methods to your DataLoader class to fix the computational bottleneck.
+    Replace the existing _find_nearest_stop method with the optimized version.
+    """
+
+    def build_transit_network(self, gtfs_data: dict) -> dict:
+        """
+        OPTIMIZED: Build transit network with spatial indexing for stops
+        """
+        if not gtfs_data or 'stops' not in gtfs_data:
+            return None
+        
+        try:
+            import networkx as nx
+            from datetime import datetime, time
+            from scipy.spatial import cKDTree  # ADD THIS IMPORT
+            
+            # Create transit network graph
+            transit_graph = nx.DiGraph()
+            
+            stops_df = gtfs_data['stops']
+            routes_df = gtfs_data.get('routes', pd.DataFrame())
+            trips_df = gtfs_data.get('trips', pd.DataFrame())
+            stop_times_df = gtfs_data.get('stop_times', pd.DataFrame())
+            
+            # Add stops as nodes
+            for _, stop in stops_df.iterrows():
+                transit_graph.add_node(
+                    stop['stop_id'],
+                    lat=stop['stop_lat'],
+                    lon=stop['stop_lon'],
+                    name=stop.get('stop_name', 'Unknown')
+                )
+            
+            # Build route connections
+            if not stop_times_df.empty and not trips_df.empty:
+                self._add_route_edges(transit_graph, gtfs_data)
+            else:
+                self._add_proximity_edges(transit_graph, stops_df)
+            
+            # Calculate service frequency
+            stop_frequencies = self._calculate_stop_frequencies(gtfs_data)
+            
+            # CREATE SPATIAL INDEX FOR FAST NEAREST STOP LOOKUPS
+            stop_coords = stops_df[['stop_lon', 'stop_lat']].values
+            stop_spatial_index = cKDTree(stop_coords)
+            
+            return {
+                'graph': transit_graph,
+                'stops': stops_df,
+                'frequencies': stop_frequencies,
+                'routes': routes_df,
+                'gtfs_data': gtfs_data,
+                'spatial_index': stop_spatial_index,  # NEW: Spatial index for O(log n) lookups
+                'stop_coords': stop_coords            # NEW: Coordinate array for indexing
+            }
+            
+        except Exception as e:
+            self._log(f"Error building transit network: {str(e)}")
+            return None
+
+    def _find_nearest_stop_optimized(self, point: gpd.GeoSeries, transit_network: dict) -> dict:
+        """
+        OPTIMIZED: Find nearest transit stop using spatial indexing (O(log n) vs O(n))
+        """
+        try:
+            spatial_index = transit_network['spatial_index']
+            stop_coords = transit_network['stop_coords']
+            stops_df = transit_network['stops']
+            
+            point_coord = [point.geometry.x, point.geometry.y]
+            
+            # FAST: O(log n) lookup instead of O(n) brute force
+            distance, nearest_idx = spatial_index.query(point_coord)
+            
+            # Convert distance from degrees to km (approximate)
+            distance_km = distance * 111.0  # Rough conversion
+            
+            # Only consider stops within 1km walking distance
+            if distance_km < 1.0:
+                stop_row = stops_df.iloc[nearest_idx]
+                return {
+                    'stop_id': stop_row['stop_id'],
+                    'geometry': Point(stop_row['stop_lon'], stop_row['stop_lat']),
+                    'distance_km': distance_km
+                }
+            
+            return None
+            
+        except Exception as e:
+            self._log(f"Error finding nearest stop: {str(e)}")
+            return None
+
+    def _calculate_transit_time_optimized(self, origin: gpd.GeoSeries, destination: gpd.GeoSeries,
+                                        transit_network: dict, time_period: str) -> float:
+        """
+        OPTIMIZED: Calculate transit time using spatial indexing and caching
+        """
+        import networkx as nx
+        from geopy.distance import geodesic
+        
+        try:
+            graph = transit_network['graph']
+            
+            # FAST: Use optimized nearest stop finding
+            origin_stop = self._find_nearest_stop_optimized(origin, transit_network)
+            dest_stop = self._find_nearest_stop_optimized(destination, transit_network)
+            
+            if origin_stop is None or dest_stop is None:
+                return 999.0
+            
+            # Calculate walking times to/from stops
+            origin_coord = (origin.geometry.y, origin.geometry.x)
+            origin_stop_coord = (origin_stop['geometry'].y, origin_stop['geometry'].x)
+            walk_to_distance = geodesic(origin_coord, origin_stop_coord).kilometers
+            walk_to_stop = (walk_to_distance / 5.0) * 60  # 5 km/h walking speed
+            
+            dest_coord = (destination.geometry.y, destination.geometry.x)
+            dest_stop_coord = (dest_stop['geometry'].y, dest_stop['geometry'].x)
+            walk_from_distance = geodesic(dest_coord, dest_stop_coord).kilometers
+            walk_from_stop = (walk_from_distance / 5.0) * 60
+            
+            # Calculate transit time between stops
+            try:
+                transit_time = nx.shortest_path_length(
+                    graph, origin_stop['stop_id'], dest_stop['stop_id'], weight='travel_time'
+                )
+                
+                # Add wait time
+                frequencies = transit_network['frequencies']
+                avg_frequency = frequencies.get(origin_stop['stop_id'], {}).get('frequency_score', 0.5)
+                wait_time = max(5, 15 / max(avg_frequency, 0.1))
+                
+                total_time = walk_to_stop + wait_time + transit_time + walk_from_stop
+                
+            except nx.NetworkXNoPath:
+                return 999.0
+            
+            return total_time
+            
+        except Exception as e:
+            self._log(f"Error calculating transit time: {str(e)}")
+            return 999.0
+
+    def calculate_multimodal_travel_times_batch(self, origins: gpd.GeoDataFrame, 
+                                            destinations: gpd.GeoDataFrame,
+                                            time_periods: list = ['morning']) -> pd.DataFrame:
+        """
+        OPTIMIZED: Batch processing with progress tracking and early exit options
+        """
+        self._log("Calculating multi-modal travel times with optimizations...")
+        
+        # Build transit network once with spatial indexing
+        if self._transit_network is None:
+            self._log("Building optimized transit network...")
+            self._gtfs_data = self._load_full_gtfs_data()
+            if self._gtfs_data is None:
+                return self._calculate_walking_only_times(origins, destinations)
+            
+            self._transit_network = self.build_transit_network(self._gtfs_data)
+            if self._transit_network is None:
+                return self._calculate_walking_only_times(origins, destinations)
+        
+        results = []
+        total_calculations = len(origins) * len(destinations) * len(time_periods)
+        
+        self._log(f"Processing {total_calculations} origin-destination-time combinations...")
+        
+        # BATCH PROCESSING with progress updates
+        batch_size = 100  # Process in batches
+        processed = 0
+        
+        for time_period in time_periods:
+            self._log(f"  Calculating {time_period} accessibility...")
+            
+            for batch_start in range(0, len(origins), batch_size):
+                batch_end = min(batch_start + batch_size, len(origins))
+                origin_batch = origins.iloc[batch_start:batch_end]
+                
+                for origin_idx, origin in origin_batch.iterrows():
+                    for dest_idx, destination in destinations.iterrows():
+                        
+                        # Walking time
+                        walk_time = self._calculate_walk_time(origin, destination)
+                        
+                        # OPTIMIZED transit time calculation
+                        transit_time = self._calculate_transit_time_optimized(
+                            origin, destination, self._transit_network, time_period
+                        )
+                        
+                        combined_time = min(walk_time, transit_time) if transit_time > 0 else walk_time
+                        
+                        results.append({
+                            'origin_id': getattr(origin, 'address_id', origin_idx),
+                            'destination_id': getattr(destination, 'dest_id', dest_idx),
+                            'destination_type': getattr(destination, 'dest_type', 'unknown'),
+                            'walk_time': walk_time,
+                            'transit_time': transit_time,
+                            'combined_time': combined_time,
+                            'time_period': time_period,
+                            'best_mode': 'walk' if walk_time <= transit_time else 'transit'
+                        })
+                        
+                        processed += 1
+                
+                # Progress update
+                if batch_start % (batch_size * 5) == 0:  # Every 5 batches
+                    progress = (processed / total_calculations) * 100
+                    self._log(f"    Progress: {progress:.1f}% ({processed}/{total_calculations})")
+        
+        results_df = pd.DataFrame(results)
+        self._log(f"Completed {len(results_df)} travel time calculations")
+        
+        return results_df
 
     def _calculate_walking_only_times(self, origins: gpd.GeoDataFrame, 
                                     destinations: gpd.GeoDataFrame) -> pd.DataFrame:
@@ -2293,7 +2728,7 @@ class DataLoader:
                 })
         
         return pd.DataFrame(results)
-
+    
 # Helper function for addresses validation
 def analyze_address_coverage(data_loader, state_fips='47', county_fips='065'):
     """

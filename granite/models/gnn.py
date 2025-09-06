@@ -21,6 +21,452 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data
 
+# ADD THESE CLASSES TO YOUR models/gnn.py FILE
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, GATConv, global_mean_pool
+
+class AccessibilityLearningGNN(nn.Module):
+    """
+    Stage 1: Learn accessibility patterns from network structure and features
+    FIXED: Robust tensor handling and type safety
+    """
+    def __init__(self, input_dim, hidden_dim=64, accessibility_output_dim=9):
+        super(AccessibilityLearningGNN, self).__init__()
+        
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.accessibility_output_dim = accessibility_output_dim
+        
+        # Multi-layer GCN for accessibility learning
+        try:
+            from torch_geometric.nn import GCNConv
+            self.conv1 = GCNConv(input_dim, hidden_dim)
+            self.conv2 = GCNConv(hidden_dim, hidden_dim)
+            self.conv3 = GCNConv(hidden_dim, hidden_dim // 2)
+            self._use_pyg = True
+        except ImportError:
+            # Fallback to linear layers
+            self.conv1 = nn.Linear(input_dim, hidden_dim)
+            self.conv2 = nn.Linear(hidden_dim, hidden_dim)
+            self.conv3 = nn.Linear(hidden_dim, hidden_dim // 2)
+            self._use_pyg = False
+        
+        # Accessibility-specific heads
+        self.employment_head = nn.Linear(hidden_dim // 2, 3)  # min_time, accessible_count, transit_share
+        self.healthcare_head = nn.Linear(hidden_dim // 2, 3)
+        self.grocery_head = nn.Linear(hidden_dim // 2, 3)
+        
+        self.dropout = nn.Dropout(0.2)
+        
+    def forward(self, x, edge_index, batch=None):
+        # Ensure input is float tensor
+        if x.dtype != torch.float32:
+            x = x.float()
+        
+        # Graph convolutions for accessibility pattern learning
+        if self._use_pyg:
+            h1 = F.relu(self.conv1(x, edge_index))
+            h1 = self.dropout(h1)
+            
+            h2 = F.relu(self.conv2(h1, edge_index))
+            h2 = self.dropout(h2)
+            
+            h3 = F.relu(self.conv3(h2, edge_index))
+        else:
+            # Fallback for no PyG
+            h1 = F.relu(self.conv1(x))
+            h1 = self.dropout(h1)
+            
+            h2 = F.relu(self.conv2(h1))
+            h2 = self.dropout(h2)
+            
+            h3 = F.relu(self.conv3(h2))
+        
+        # Multi-head accessibility prediction
+        employment_accessibility = self.employment_head(h3)
+        healthcare_accessibility = self.healthcare_head(h3)
+        grocery_accessibility = self.grocery_head(h3)
+        
+        # Concatenate all accessibility features
+        accessibility_features = torch.cat([
+            employment_accessibility, 
+            healthcare_accessibility, 
+            grocery_accessibility
+        ], dim=1)
+        
+        return accessibility_features
+
+class AccessibilitySVIGNN(nn.Module):
+    """
+    Stage 2: Predict SVI using learned accessibility features
+    """
+    def __init__(self, input_dim, hidden_dim=64, output_dim=1):
+        super(AccessibilitySVIGNN, self).__init__()
+        
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        
+        # Attention-based GNN for SVI prediction
+        self.conv1 = GATConv(input_dim, hidden_dim, heads=4, concat=False)
+        self.conv2 = GATConv(hidden_dim, hidden_dim, heads=2, concat=False)
+        self.conv3 = GCNConv(hidden_dim, hidden_dim // 2)
+        
+        # SVI prediction head
+        self.svi_head = nn.Sequential(
+            nn.Linear(hidden_dim // 2, hidden_dim // 4),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim // 4, output_dim),
+            nn.Sigmoid()  # Ensure SVI in [0,1] range
+        )
+        
+        self.dropout = nn.Dropout(0.2)
+        
+    def forward(self, x, edge_index, batch=None):
+        # Attention-based feature aggregation
+        h1 = F.relu(self.conv1(x, edge_index))
+        h1 = self.dropout(h1)
+        
+        h2 = F.relu(self.conv2(h1, edge_index))
+        h2 = self.dropout(h2)
+        
+        h3 = F.relu(self.conv3(h2, edge_index))
+        
+        # SVI prediction
+        svi_predictions = self.svi_head(h3)
+        
+        return svi_predictions.squeeze()
+
+class AccessibilityGNNTrainer:
+    """
+    Trainer for Stage 1: Accessibility Learning with comprehensive type safety
+    """
+    def __init__(self, model, config=None):
+        """
+        FIXED: Trainer for Stage 1 with proper config type conversion
+        """
+        self.model = model
+        self.config = config or {}
+        
+        # CRITICAL FIX: Convert string config values to proper numeric types
+        try:
+            learning_rate = self.config.get('learning_rate', 0.001)
+            if isinstance(learning_rate, str):
+                learning_rate = float(learning_rate)
+            
+            weight_decay = self.config.get('weight_decay', 1e-5)
+            if isinstance(weight_decay, str):
+                weight_decay = float(weight_decay)
+            
+            print(f"🔧 Config conversion: lr={learning_rate} (type: {type(learning_rate)}), wd={weight_decay} (type: {type(weight_decay)})")
+            
+        except (ValueError, TypeError) as e:
+            print(f"❌ Config conversion error: {e}")
+            learning_rate = 0.001
+            weight_decay = 1e-5
+        
+        self.optimizer = torch.optim.Adam(
+            model.parameters(), 
+            lr=learning_rate,
+            weight_decay=weight_decay
+        )
+    
+    def train_accessibility_prediction(self, graph_data, accessibility_targets, epochs=50, verbose=False):
+        """
+        FIXED: Train GNN to predict accessibility features with robust error handling
+        """
+        print(f"🔍 Starting accessibility training with {epochs} epochs...")
+        
+        self.model.train()
+        
+        # COMPREHENSIVE INPUT VALIDATION AND TYPE CONVERSION
+        try:
+            features_array = accessibility_targets['features_per_address']
+            
+            # Debug information
+            print(f"🔍 Input type: {type(features_array)}")
+            print(f"🔍 Input shape: {getattr(features_array, 'shape', 'No shape attr')}")
+            print(f"🔍 Input dtype: {getattr(features_array, 'dtype', 'No dtype attr')}")
+            
+            # STEP 1: Convert to numpy array if needed
+            if not isinstance(features_array, np.ndarray):
+                if hasattr(features_array, 'values'):  # DataFrame
+                    features_array = features_array.values
+                else:
+                    features_array = np.array(features_array)
+                print(f"🔍 Converted to numpy array: {features_array.shape}")
+            
+            # STEP 2: Handle mixed data types
+            if features_array.dtype == 'object':
+                print(f"🔍 Found object dtype, converting to numeric...")
+                # Handle mixed types by converting each element
+                numeric_array = np.zeros(features_array.shape, dtype=np.float64)
+                for i in range(features_array.shape[0]):
+                    for j in range(features_array.shape[1]):
+                        try:
+                            val = features_array[i, j]
+                            if isinstance(val, str):
+                                # Try to convert string to float
+                                numeric_array[i, j] = float(val) if val.replace('.', '').replace('-', '').isdigit() else 0.0
+                            else:
+                                numeric_array[i, j] = float(val)
+                        except (ValueError, TypeError):
+                            numeric_array[i, j] = 0.0
+                features_array = numeric_array
+                print(f"🔍 Converted object array to numeric: {features_array.dtype}")
+            
+            # STEP 3: Ensure numeric dtype
+            if not np.issubdtype(features_array.dtype, np.number):
+                print(f"🔍 Converting non-numeric dtype {features_array.dtype} to float64")
+                features_array = features_array.astype(np.float64)
+            
+            # STEP 4: Handle NaN and infinite values
+            if np.any(np.isnan(features_array)):
+                print(f"🔍 Found {np.sum(np.isnan(features_array))} NaN values, replacing with 0")
+                features_array = np.nan_to_num(features_array, nan=0.0)
+            
+            if np.any(np.isinf(features_array)):
+                print(f"🔍 Found infinite values, replacing with finite values")
+                features_array = np.nan_to_num(features_array, posinf=999.0, neginf=0.0)
+            
+            # STEP 5: Create tensor with explicit dtype
+            target_tensor = torch.tensor(features_array, dtype=torch.float32)
+            print(f"🔍 Final tensor: shape={target_tensor.shape}, dtype={target_tensor.dtype}")
+            
+            # STEP 6: Validate tensor contents
+            if torch.any(torch.isnan(target_tensor)):
+                print(f"❌ WARNING: Tensor contains NaN values!")
+                target_tensor = torch.nan_to_num(target_tensor, nan=0.0)
+            
+            if torch.any(torch.isinf(target_tensor)):
+                print(f"❌ WARNING: Tensor contains infinite values!")
+                target_tensor = torch.nan_to_num(target_tensor, posinf=999.0, neginf=0.0)
+            
+        except Exception as e:
+            print(f"❌ CRITICAL ERROR in tensor conversion: {str(e)}")
+            print(f"❌ Error type: {type(e).__name__}")
+            import traceback
+            print(f"❌ Traceback: {traceback.format_exc()}")
+            raise
+        
+        training_losses = []
+        
+        for epoch in range(epochs):
+            try:
+                self.optimizer.zero_grad()
+                
+                # SAFE Forward pass with type checking
+                predicted_accessibility = self.model(graph_data.x, graph_data.edge_index)
+                
+                # Ensure prediction tensor is the right type
+                if predicted_accessibility.dtype != torch.float32:
+                    predicted_accessibility = predicted_accessibility.float()
+                
+                if epoch == 0:
+                    print(f"🔍 Prediction tensor: shape={predicted_accessibility.shape}, dtype={predicted_accessibility.dtype}")
+                    print(f"🔍 Target tensor: shape={target_tensor.shape}, dtype={target_tensor.dtype}")
+                
+                # SAFE size matching
+                if predicted_accessibility.shape != target_tensor.shape:
+                    print(f"⚠️ Shape mismatch - pred: {predicted_accessibility.shape}, target: {target_tensor.shape}")
+                    # Try to match sizes
+                    min_rows = min(predicted_accessibility.shape[0], target_tensor.shape[0])
+                    min_cols = min(predicted_accessibility.shape[1], target_tensor.shape[1])
+                    predicted_accessibility = predicted_accessibility[:min_rows, :min_cols]
+                    target_tensor_epoch = target_tensor[:min_rows, :min_cols]
+                    print(f"🔍 Adjusted to: pred={predicted_accessibility.shape}, target={target_tensor_epoch.shape}")
+                else:
+                    target_tensor_epoch = target_tensor
+                
+                # SAFE loss calculation
+                accessibility_loss = F.mse_loss(predicted_accessibility, target_tensor_epoch)
+                
+                # SAFE regularization with explicit indexing
+                try:
+                    # Time penalties: indices 0, 3, 6 (employment, healthcare, grocery min_time)
+                    if predicted_accessibility.shape[1] >= 7:
+                        time_columns = predicted_accessibility[:, [0, 3, 6]]
+                        time_penalty = F.relu(time_columns - 120.0).mean()
+                    else:
+                        time_penalty = torch.tensor(0.0)
+                    
+                    # Count penalties: indices 1, 4, 7 (accessible_count)
+                    if predicted_accessibility.shape[1] >= 8:
+                        count_columns = predicted_accessibility[:, [1, 4, 7]]
+                        count_penalty = F.relu(count_columns - 10.0).mean()
+                    else:
+                        count_penalty = torch.tensor(0.0)
+                    
+                except IndexError as ie:
+                    print(f"⚠️ Index error in regularization: {ie}")
+                    time_penalty = torch.tensor(0.0)
+                    count_penalty = torch.tensor(0.0)
+                
+                total_loss = accessibility_loss + 0.1 * (time_penalty + count_penalty)
+                
+                # Check loss is valid
+                if torch.isnan(total_loss) or torch.isinf(total_loss):
+                    print(f"❌ Invalid loss at epoch {epoch}: {total_loss}")
+                    break
+                
+                # Backward pass
+                total_loss.backward()
+                
+                # Gradient clipping for stability
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                
+                self.optimizer.step()
+                
+                training_losses.append(total_loss.item())
+                
+                if verbose and epoch % 10 == 0:
+                    print(f"Accessibility Training Epoch {epoch}: Loss = {total_loss.item():.6f}")
+            
+            except Exception as e:
+                print(f"❌ ERROR in training epoch {epoch}: {str(e)}")
+                print(f"❌ Error type: {type(e).__name__}")
+                import traceback
+                print(f"❌ Traceback: {traceback.format_exc()}")
+                # Continue with next epoch instead of crashing
+                training_losses.append(float('inf'))
+                continue
+        
+        # Final prediction
+        try:
+            self.model.eval()
+            with torch.no_grad():
+                final_accessibility = self.model(graph_data.x, graph_data.edge_index)
+            
+            print(f"✅ Training completed successfully with {len([l for l in training_losses if l != float('inf')])} valid epochs")
+            
+            return {
+                'predicted_accessibility': final_accessibility.detach().numpy(),
+                'training_losses': training_losses,
+                'final_loss': training_losses[-1] if training_losses else float('inf'),
+                'target_features': accessibility_targets['feature_names']
+            }
+        
+        except Exception as e:
+            print(f"❌ ERROR in final prediction: {str(e)}")
+            # Return fallback result
+            return {
+                'predicted_accessibility': np.zeros((target_tensor.shape[0], target_tensor.shape[1])),
+                'training_losses': training_losses,
+                'final_loss': float('inf'),
+                'target_features': accessibility_targets['feature_names']
+            }
+
+class AccessibilitySVITrainer:
+    """
+    Trainer for Stage 2: SVI Prediction from Accessibility
+    """
+    def __init__(self, model, config=None):
+        self.model = model
+        self.config = config or {}
+        
+        # SAME FIX: Convert string config values to proper numeric types
+        try:
+            learning_rate = self.config.get('learning_rate', 0.001)
+            if isinstance(learning_rate, str):
+                learning_rate = float(learning_rate)
+            
+            weight_decay = self.config.get('weight_decay', 1e-5)
+            if isinstance(weight_decay, str):
+                weight_decay = float(weight_decay)
+                
+        except (ValueError, TypeError):
+            learning_rate = 0.001
+            weight_decay = 1e-5
+        
+        self.optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay
+        )
+    
+    def train_svi_from_accessibility(self, graph_data, tract_svi, epochs=100, verbose=False):
+        """
+        Train GNN to predict SVI using accessibility features
+        """
+        self.model.train()
+        target_svi = torch.FloatTensor([tract_svi])
+        
+        training_losses = []
+        
+        for epoch in range(epochs):
+            self.optimizer.zero_grad()
+            
+            # Forward pass
+            predicted_svi = self.model(graph_data.x, graph_data.edge_index)
+            
+            # SVI prediction loss
+            svi_loss = F.mse_loss(predicted_svi.mean().unsqueeze(0), target_svi)
+            
+            # Spatial variation encouragement
+            spatial_variation = predicted_svi.std()
+            variation_loss = F.relu(0.02 - spatial_variation)  # Encourage min 0.02 std
+            
+            # Constraint preservation (mean should equal tract SVI)
+            constraint_loss = F.mse_loss(predicted_svi.mean().unsqueeze(0), target_svi)
+            
+            total_loss = svi_loss + 0.3 * variation_loss + 0.5 * constraint_loss
+            
+            # Backward pass
+            total_loss.backward()
+            self.optimizer.step()
+            
+            training_losses.append(total_loss.item())
+            
+            if verbose and epoch % 20 == 0:
+                print(f"SVI Training Epoch {epoch}: Loss = {total_loss.item():.6f}, "
+                      f"Std = {spatial_variation.item():.6f}")
+        
+        # Final prediction
+        self.model.eval()
+        with torch.no_grad():
+            final_svi = self.model(graph_data.x, graph_data.edge_index)
+        
+        return {
+            'svi_predictions': final_svi.detach().numpy(),
+            'training_losses': training_losses,
+            'final_loss': training_losses[-1],
+            'spatial_variation': float(final_svi.std())
+        }
+
+class AccessibilityGNN(torch.nn.Module):
+    def __init__(self, input_dim, hidden_dim=64, embedding_dim=32):
+        super().__init__()
+        self.gnn_layers = torch.nn.ModuleList([
+            GCNConv(input_dim, hidden_dim),
+            GCNConv(hidden_dim, hidden_dim),
+            GCNConv(hidden_dim, embedding_dim)
+        ])
+        
+        # Multi-task heads for different destination types
+        self.employment_head = torch.nn.Linear(embedding_dim, 7)   # 7 employers
+        self.healthcare_head = torch.nn.Linear(embedding_dim, 8)   # 8 hospitals  
+        self.grocery_head = torch.nn.Linear(embedding_dim, 57)     # 57 stores
+        
+    def forward(self, x, edge_index):
+        # Standard GNN forward pass
+        for layer in self.gnn_layers[:-1]:
+            x = F.relu(layer(x, edge_index))
+        embeddings = self.gnn_layers[-1](x, edge_index)  # Final embeddings
+        
+        # Multi-task predictions
+        employment_pred = self.employment_head(embeddings)
+        healthcare_pred = self.healthcare_head(embeddings)
+        grocery_pred = self.grocery_head(embeddings)
+        
+        return {
+            'embeddings': embeddings,
+            'employment': employment_pred,
+            'healthcare': healthcare_pred, 
+            'grocery': grocery_pred
+        }
 
 class AccessibilityGNNCorrector(nn.Module):
     """

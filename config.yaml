@@ -1,7 +1,7 @@
-# GRANITE Framework Configuration - Cleaned for Single-Tract Hybrid Mode
+# GRANITE Framework Configuration - Hybrid Accessibility-SVI Research Mode
 
 data:
-  # Geographic scope 
+  # Geographic scope
   state_fips: "47"
   county_fips: "065"
   census_year: 2020
@@ -9,78 +9,155 @@ data:
   use_real_addresses: true
   
   # Processing mode - simplified to only support single FIPS
-  processing_mode: "fips"  # Changed from "county"
+  processing_mode: "fips"
   
   # File paths
   svi_file: "data/raw/SVI2020_US_tract.csv"
   roads_file: "data/raw/tl_2023_47065_roads.shp"
   census_tracts_file: "data/raw/tl_2020_47_tract.shp"
 
+# Research approach selection - UPDATED FOR HYBRID ACCESSIBILITY-SVI
+research:
+  approach: "hybrid_accessibility_svi"  # NEW: Two-stage GNN approach
+  methodology: "accessibility_learning_to_svi_prediction"
+  contribution: "first_systematic_gnn_accessibility_svi_integration"
+
+# Accessibility analysis configuration - ENABLED FOR NEW APPROACH
+accessibility:
+  enabled: true  # CHANGED: Now required for hybrid approach
+  max_addresses_per_tract: 10  # REDUCED: Optimized for two-stage training
+  destinations:
+    employment: true    # Calculate employment accessibility
+    healthcare: true    # Calculate healthcare accessibility  
+    grocery: true       # Calculate food accessibility
+  performance:
+    cache_transit_network: true    # Use caching optimization
+    parallel_calculation: false    # Future: parallel processing
+    timeout_minutes: 2             # Max time per tract
+  
+  # NEW: Accessibility target computation
+  target_features:
+    employment: ["min_time", "accessible_count", "transit_share"]
+    healthcare: ["min_time", "accessible_count", "transit_share"] 
+    grocery: ["min_time", "accessible_count", "transit_share"]
+
 # Transit configuration
 transit:
   preferred_source: 'gtfs'
   local_file: 'carta_gtfs.zip'
-  download_real_data: true  # Added missing field
+  download_real_data: true
 
-# GNN model configuration - FIXED for correction approach
+# Two-stage GNN model configuration - NEW ARCHITECTURE
 model:
-  # Core architecture for AccessibilityGNNCorrector
-  input_dim: 5      # Number of input features from NLCD
-  hidden_dim: 64    # REDUCED from 128 (your working config)
-  output_dim: 1     # Single correction value (not 3 SPDE parameters)
+  # Stage 1: Accessibility Learning GNN
+  accessibility_learning:
+    input_dim: 5  # NLCD features
+    hidden_dim: 64
+    accessibility_output_dim: 9  # 3 features × 3 destination types
+    dropout_rate: 0.2
+    
+  # Stage 2: SVI Prediction GNN  
+  svi_prediction:
+    # input_dim computed dynamically (NLCD + learned accessibility)
+    hidden_dim: 64
+    output_dim: 1
+    attention_heads: 4
+    dropout_rate: 0.2
   
-  # Training parameters
-  epochs: 100       # Default (overridden by --epochs)
+  # Training epochs for each stage
+  accessibility_epochs: 50   # Stage 1 training
+  svi_epochs: 100           # Stage 2 training
+  
+  # Shared parameters
   learning_rate: 0.001
   weight_decay: 1e-5
-  
-  # Features
-  features:
-    type: "nlcd" 
-    nlcd_path: "./data/nlcd_hamilton_county.tif"
+  use_accessibility_features: true
 
-# MetricGraph configuration 
+# NEW: Stage-specific training configurations
+accessibility_training:
+  learning_rate: 0.002        # Slightly higher for accessibility learning
+  weight_decay: 1e-5
+  regularization_weight: 0.1  # Penalty for unrealistic accessibility values
+  time_penalty_weight: 0.1    # Penalize travel times > 2 hours
+  count_penalty_weight: 0.1   # Penalize accessible counts > 10
+  
+svi_training:
+  learning_rate: 0.001
+  weight_decay: 1e-5
+  variation_weight: 0.3       # Encourage spatial variation
+  constraint_weight: 0.5      # Enforce tract constraint
+  min_spatial_std: 0.02       # Minimum spatial standard deviation
+
+# Features configuration
+features:
+  type: "nlcd"
+  nlcd_path: "./data/nlcd_hamilton_county.tif"
+  
+  # NEW: Enhanced feature integration
+  combine_nlcd_accessibility: true
+  accessibility_feature_scaling: "standardization"
+
+# MetricGraph configuration (kept for compatibility/comparison)
 metricgraph:
-  alpha: 1                    # Smoothness parameter
-  mesh_resolution: 0.05       # Mesh building parameter
-  max_edges: 50000           # Memory management
+  alpha: 1
+  mesh_resolution: 0.05
+  max_edges: 50000
 
-# Hybrid approach configuration - REBALANCED weights
+# OLD HYBRID APPROACH - DISABLED (kept for reference/comparison)
 hybrid:
-  # Component mixing
-  idm_weight: 0.7           # 70% IDM baseline  
-  gnn_weight: 0.3           # 30% GNN corrections
-  max_correction: 0.15      # ±15% correction limit
-  target_cv: 0.20           # Target coefficient of variation
+  enabled: false  # DISABLED: Replaced by new two-stage approach
   
-  # Loss function weights - WORKING configuration
-  constraint_weight: 5.0      # HIGH - enforce tract constraint
-  spatial_weight: 1.0         # Moderate spatial smoothness  
-  diversity_weight: 0.5       # LOW - gentle diversity
-  variation_weight: 0.3       # LOW - gentle variation
-  variance_preservation_weight: 0.1  # LOW - prevent collapse
-  feature_weight: 0.05        # MINIMAL - feature utilization
+  # Legacy settings (kept for baseline comparison if needed)
+  idm_weight: 0.6
+  gnn_weight: 0.4
+  max_correction: 0.15
+  target_cv: 0.20
   
-  # Training parameters
-  learning_rate: 0.001
-  weight_decay: 1e-5
+  # Legacy loss function weights
+  constraint_weight: 5.0
+  spatial_weight: 1.0
+  diversity_weight: 0.5
+  variation_weight: 0.3
+  variance_preservation_weight: 0.1
+  feature_weight: 0.05
 
-# Output settings
+# NEW: Validation and comparison settings
+validation:
+  compare_with_idm: true                    # Generate IDM baseline for comparison
+  compare_with_traditional_accessibility: true  # Compare learned vs traditional accessibility
+  correlation_analysis: true               # Analyze accessibility-SVI correlations
+  research_metrics: true                   # Compute research contribution metrics
+
+# Output settings - ENHANCED
 output:
   save_predictions: true
   save_plots: true
   
-# Baselines 
+  # NEW: Research-specific outputs
+  save_accessibility_features: true       # Save learned accessibility features
+  save_stage_results: true               # Save both stage 1 and stage 2 results
+  save_comparison_analysis: true         # Save validation comparisons
+  save_research_metrics: true            # Save research contribution metrics
+
+# Baselines configuration
 baselines:
-  enable_idm: true
+  enable_idm: true  # Keep IDM for comparison
 
 # Processing settings
 processing:
   continue_on_error: true
   verbose: true
   random_seed: 42
+  
+  # NEW: Research mode settings
+  research_mode: true
+  detailed_logging: true
+  save_intermediate_results: true
 
-# REMOVED unused sections:
-# - Multi-tract processing configs
-# - Complex sampling strategies  
-# - Unimplemented validation settings
+# NEW: Research documentation
+research_documentation:
+  methodology: "Two-stage Graph Neural Network approach for accessibility-SVI integration"
+  stage1_description: "Learn accessibility patterns from network topology and demographics"
+  stage2_description: "Predict social vulnerability using learned accessibility features"
+  research_question: "Can GNNs learn accessibility patterns that accurately predict social vulnerability?"
+  expected_contribution: "First systematic GNN-based accessibility-vulnerability integration"

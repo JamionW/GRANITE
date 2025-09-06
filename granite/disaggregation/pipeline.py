@@ -22,7 +22,7 @@ warnings.filterwarnings('ignore')
 from ..data.loaders import DataLoader
 from ..models.gnn import prepare_graph_data_with_nlcd, prepare_graph_data_topological
 from ..metricgraph.interface import MetricGraphInterface
-from ..visualization.plots import DisaggregationVisualizer
+from ..visualization.plots import GRANITEResearchVisualizer
 from ..baselines.idm import IDMBaseline
 from ..models.gnn import (
     prepare_graph_data_with_nlcd, 
@@ -77,7 +77,7 @@ class GRANITEPipeline:
             verbose=verbose,
             config=self.config  
         )
-        self.visualizer = DisaggregationVisualizer()
+        self.visualizer = GRANITEResearchVisualizer()
         self.idm_baseline = IDMBaseline(config=config, grid_resolution_meters=100)
         
         # Storage for results
@@ -374,6 +374,13 @@ class GRANITEPipeline:
             )
             
             learned_accessibility_features = stage1_result['predicted_accessibility']
+            # CRITICAL FIX: Slice learned accessibility features to addresses only
+            num_addresses = len(tract_data['addresses'])  # 2394
+            
+            if learned_accessibility_features.shape[0] > num_addresses:
+                learned_accessibility_features = learned_accessibility_features[:num_addresses]
+                print(f"🔧 Fixed: Sliced learned_accessibility_features from shape {stage1_result['predicted_accessibility'].shape} to {learned_accessibility_features.shape}")
+            
             stage1_time = time.time() - stage1_start
             
             self._log(f"    Stage 1 completed: learned {learned_accessibility_features.shape[1]} accessibility features")
@@ -422,14 +429,17 @@ class GRANITEPipeline:
             
             # STEP 6: Create final predictions with proper constraint satisfaction
             self._log("  Step 6: Finalizing predictions and constraint satisfaction...")
-            
+
+            # CRITICAL FIX: Slice hybrid_predictions to addresses first
+            num_addresses = len(tract_data['addresses'])
+            if hybrid_predictions.shape[0] > num_addresses:
+                hybrid_predictions = hybrid_predictions[:num_addresses]
+                print(f"🔧 Fixed: Sliced hybrid_predictions from {hybrid_predictions.shape[0]} to {num_addresses}")
+
             # Ensure tract constraint
-            current_mean = np.mean(hybrid_predictions)
+            current_mean = np.mean(hybrid_predictions)  # Now uses sliced version
             adjustment = svi_value - current_mean
-            address_predictions = hybrid_predictions[:len(tract_data['addresses'])]
-            current_mean = np.mean(address_predictions)
-            adjustment = svi_value - current_mean
-            constrained_predictions = address_predictions + adjustment
+            constrained_predictions = hybrid_predictions + adjustment
             constrained_predictions = np.clip(constrained_predictions, 0.0, 1.0)
 
             print(f"🔍 DEBUG Step 6 inputs:")
@@ -470,6 +480,42 @@ class GRANITEPipeline:
                 idm_predictions=idm_result['predictions']['svi_prediction'].values if idm_result['success'] else None,
                 tract_svi=svi_value
             )
+
+            # GRANITE RESEARCH VISUALIZATION
+            if self.verbose:
+                self._log("Creating research analysis visualizations...")
+                
+                # Prepare results dictionary for visualization
+                visualization_results = {
+                    'gnn_predictions': predictions,  # Your final DataFrame
+                    'idm_predictions': idm_result if idm_result['success'] else None,
+                    'learned_accessibility': learned_accessibility_features,
+                    'traditional_accessibility': traditional_accessibility,
+                    'stage1_metrics': stage1_result,
+                    'stage2_metrics': stage2_result,
+                    'validation_results': validation_results
+                }
+                
+                # Import and create visualizations
+                try:
+                    from granite.visualization.plots import GRANITEResearchVisualizer
+                    visualizer = GRANITEResearchVisualizer()
+                    
+                    # Create output directory
+                    import os
+                    viz_output_dir = os.path.join(self.output_dir, 'research_analysis')
+                    os.makedirs(viz_output_dir, exist_ok=True)
+                    
+                    # Generate all research visualizations
+                    visualizer.create_comprehensive_research_analysis(
+                        visualization_results, 
+                        viz_output_dir
+                    )
+                    
+                    self._log(f"Research visualizations saved to {viz_output_dir}")
+                    
+                except Exception as e:
+                    self._log(f"Warning: Visualization creation failed: {str(e)}")
             
             return {
                 'status': 'success',
@@ -1355,16 +1401,19 @@ class GRANITEPipeline:
         print(f"  node_mapping type: {type(node_mapping)}")
         print(f"  node_mapping length: {len(node_mapping) if node_mapping else 'None'}")
 
-        
         # Expand accessibility features to match graph nodes if needed
         if accessibility_tensor.shape[0] != graph_data.x.shape[0]:
-            # Map accessibility features to graph nodes using node_mapping
-            expanded_accessibility = torch.zeros(graph_data.x.shape[0], accessibility_tensor.shape[1])
+            # SIMPLE FIX: Addresses are first N nodes (confirmed by your test)
+            num_addresses = accessibility_tensor.shape[0]  # 2394
+            total_nodes = graph_data.x.shape[0]  # 3098
             
-            for i, node_id in enumerate(node_mapping):
-                if i < accessibility_tensor.shape[0]:
-                    expanded_accessibility[node_id] = accessibility_tensor[i]
+            # Create expanded tensor with zeros for road nodes
+            expanded_accessibility = torch.zeros(total_nodes, accessibility_tensor.shape[1])
             
+            # Place accessibility features in first N positions (address nodes)
+            expanded_accessibility[:num_addresses] = accessibility_tensor
+            
+            print(f"🔧 Expanded accessibility: {accessibility_tensor.shape} -> {expanded_accessibility.shape}")
             accessibility_tensor = expanded_accessibility
         
         # Concatenate original features with accessibility features

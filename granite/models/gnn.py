@@ -270,16 +270,13 @@ class AccessibilityGNNTrainer:
                     print(f"🔍 Target tensor: shape={target_tensor.shape}, dtype={target_tensor.dtype}")
                 
                 # SAFE size matching
-                if predicted_accessibility.shape != target_tensor.shape:
-                    print(f"⚠️ Shape mismatch - pred: {predicted_accessibility.shape}, target: {target_tensor.shape}")
-                    # Try to match sizes
-                    min_rows = min(predicted_accessibility.shape[0], target_tensor.shape[0])
-                    min_cols = min(predicted_accessibility.shape[1], target_tensor.shape[1])
-                    predicted_accessibility = predicted_accessibility[:min_rows, :min_cols]
-                    target_tensor_epoch = target_tensor[:min_rows, :min_cols]
-                    print(f"🔍 Adjusted to: pred={predicted_accessibility.shape}, target={target_tensor_epoch.shape}")
-                else:
-                    target_tensor_epoch = target_tensor
+                num_addresses = target_tensor.shape[0]  # 2394
+                if predicted_accessibility.shape[0] > num_addresses:
+                    predicted_accessibility = predicted_accessibility[:num_addresses]
+                    if epoch == 0:
+                        print(f"🔧 Fixed: Sliced predictions to {num_addresses} address nodes")
+
+                target_tensor_epoch = target_tensor
                 
                 # SAFE loss calculation
                 accessibility_loss = F.mse_loss(predicted_accessibility, target_tensor_epoch)

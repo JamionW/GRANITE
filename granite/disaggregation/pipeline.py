@@ -21,14 +21,10 @@ warnings.filterwarnings('ignore')
 # Local imports
 from ..data.loaders import DataLoader
 from ..models.gnn import prepare_graph_data_with_nlcd, prepare_graph_data_topological
-from ..metricgraph.interface import MetricGraphInterface
 from ..visualization.plots import GRANITEResearchVisualizer
-from ..baselines.idm import IDMBaseline
 from ..models.gnn import (
     prepare_graph_data_with_nlcd, 
     prepare_graph_data_topological,
-    AccessibilityGNNCorrector, 
-    HybridCorrectionTrainer,
     AccessibilityLearningGNN,
     AccessibilitySVIGNN, 
     AccessibilityGNNTrainer,
@@ -53,9 +49,8 @@ class GRANITEPipeline:
         
         os.makedirs(output_dir, exist_ok=True)
         
-        # Simplified components - NO MetricGraph!
+        # Simplified components
         self.data_loader = DataLoader(data_dir, config=config)
-        self.accessibility_baseline = AccessibilityBaseline(config=config)  # Replace IDM
         self.visualizer = GRANITEResearchVisualizer()
         
         self.results = {}
@@ -79,11 +74,8 @@ class GRANITEPipeline:
         if not target_fips:
             return {'success': False, 'error': 'FIPS code required for accessibility research'}
         
-        results = self._process_accessibility_research(data, target_fips)
-        
-        # Save results
-        self._save_accessibility_results(results)
-        
+        results = self.run_hybrid_accessibility_research()
+    
         elapsed_time = time.time() - start_time
         self._log(f"Accessibility research completed in {elapsed_time:.2f} seconds")
         

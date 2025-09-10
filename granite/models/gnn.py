@@ -185,51 +185,6 @@ class AccessibilitySVITrainer:
             'spatial_variation': float(final_svi.std())
         }
 
-class AccessibilityGNN(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim=64, embedding_dim=32):
-        super().__init__()
-        self.gnn_layers = torch.nn.ModuleList([
-            GCNConv(input_dim, hidden_dim),
-            GCNConv(hidden_dim, hidden_dim),
-            GCNConv(hidden_dim, embedding_dim)
-        ])
-        
-        # Multi-task heads for different destination types
-        self.employment_head = torch.nn.Linear(embedding_dim, 7)   # 7 employers
-        self.healthcare_head = torch.nn.Linear(embedding_dim, 8)   # 8 hospitals  
-        self.grocery_head = torch.nn.Linear(embedding_dim, 57)     # 57 stores
-        
-    def forward(self, x, edge_index):
-        # Standard GNN forward pass
-        for layer in self.gnn_layers[:-1]:
-            x = F.relu(layer(x, edge_index))
-        embeddings = self.gnn_layers[-1](x, edge_index)  # Final embeddings
-        
-        # Multi-task predictions
-        employment_pred = self.employment_head(embeddings)
-        healthcare_pred = self.healthcare_head(embeddings)
-        grocery_pred = self.grocery_head(embeddings)
-        
-        return {
-            'embeddings': embeddings,
-            'employment': employment_pred,
-            'healthcare': healthcare_pred, 
-            'grocery': grocery_pred
-        }
-
-# Convenience function for easy use in pipeline
-def create_accessibility_corrector(input_dim: int, hidden_dim: int = 64, 
-                                 max_correction: float = 0.15) -> AccessibilityGNNCorrector:
-    """
-    Convenience function to create AccessibilityGNNCorrector.
-    Can be used in pipeline.py for easy model creation.
-    """
-    return AccessibilityGNNCorrector(
-        input_dim=input_dim,
-        hidden_dim=hidden_dim,
-        max_correction=max_correction
-    )
-
 def safe_feature_normalization_vectorized(node_features):
     """
     Fully vectorized normalization

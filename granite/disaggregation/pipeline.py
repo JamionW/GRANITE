@@ -46,41 +46,18 @@ class GRANITEPipeline:
     """
     
     def __init__(self, config, data_dir='./data', output_dir='./output', verbose=None):
-        """
-        Initialize GRANITE pipeline
-        
-        Parameters:
-        -----------
-        config : dict
-            Configuration dictionary (from config.yaml)
-        data_dir : str
-            Directory containing input data
-        output_dir : str
-            Directory for output files
-        verbose : bool
-            Enable verbose logging
-        """
-        if config is None:
-            raise ValueError("Configuration is required. Please provide a config dict from config.yaml")
-            
         self.config = config
         self.data_dir = data_dir
         self.output_dir = output_dir
         self.verbose = config.get('processing', {}).get('verbose', False)
-                
-        # Create output directory
+        
         os.makedirs(output_dir, exist_ok=True)
         
-        # Initialize components
+        # Simplified components - NO MetricGraph!
         self.data_loader = DataLoader(data_dir, config=config)
-        self.mg_interface = MetricGraphInterface(
-            verbose=verbose,
-            config=self.config  
-        )
+        self.accessibility_baseline = AccessibilityBaseline(config=config)  # Replace IDM
         self.visualizer = GRANITEResearchVisualizer()
-        self.idm_baseline = IDMBaseline(config=config, grid_resolution_meters=100)
         
-        # Storage for results
         self.results = {}
     
     def _log(self, message, level='INFO'):
@@ -90,39 +67,28 @@ class GRANITEPipeline:
             print(f"[{timestamp}] {level}: {message}")
 
     def run(self):
-        """
-        Main entry point - redirects to hybrid accessibility research approach
-        """
-        return self.run_hybrid_accessibility_research()
-    
-    def _old_run(self):
-        """Run the simplified GRANITE pipeline for single-tract processing"""
-        
+        """Simplified run method - pure accessibility research"""
         start_time = time.time()
         
         # Load data
-        self._log("Loading data...")
+        self._log("Loading data for accessibility research...")
         data = self._load_data()
         
-        # Check processing mode - only support single FIPS now
-        processing_mode = self.config.get('data', {}).get('processing_mode', 'fips')
+        # Single FIPS processing only
         target_fips = self.config.get('data', {}).get('target_fips')
+        if not target_fips:
+            return {'success': False, 'error': 'FIPS code required for accessibility research'}
         
-        if processing_mode == 'fips' and target_fips:
-            self._log(f"Processing single FIPS: {target_fips}")
-            results = self._process_fips_mode(data)
-        else:
-            self._log("ERROR: Only single FIPS mode supported. Use --fips command line argument.")
-            return {'success': False, 'error': 'Multi-tract processing removed. Use --fips mode.'}
+        results = self._process_accessibility_research(data, target_fips)
         
         # Save results
-        self._save_results(results)
+        self._save_accessibility_results(results)
         
         elapsed_time = time.time() - start_time
-        self._log(f"Pipeline completed in {elapsed_time:.2f} seconds")
+        self._log(f"Accessibility research completed in {elapsed_time:.2f} seconds")
         
         return results
-    
+
     def _load_data(self):
         """
         Load data using Chattanooga addresses
@@ -220,10 +186,6 @@ class GRANITEPipeline:
         """
         # Get target FIPS from config
         target_fips = self.config.get('data', {}).get('target_fips')
-        
-        if not target_fips:
-            self._log("No target FIPS specified in config, processing all tracts")
-            return self._process_county_mode(data)
         
         # Ensure target_fips is string
         target_fips = str(target_fips).strip()
@@ -792,34 +754,7 @@ class GRANITEPipeline:
         validation['novel_methodology'] = True  # This is the first implementation
         
         return validation
-    
-    def _prepare_metricgraph_data(self, road_network):
-        """Prepare node and edge dataframes for MetricGraph"""
-        # Extract nodes
-        nodes = []
-        for i, (node_id, data) in enumerate(road_network.nodes(data=True)):
-            nodes.append({
-                'node_id': i,
-                'x': data['x'],
-                'y': data['y']
-            })
-        nodes_df = pd.DataFrame(nodes)
-        
-        # Create node ID mapping
-        node_id_map = {node_id: i for i, node_id in enumerate(road_network.nodes())}
-        
-        # Extract edges
-        edges = []
-        for u, v, data in road_network.edges(data=True):
-            edges.append({
-                'from': node_id_map[u],
-                'to': node_id_map[v],
-                'weight': data.get('length', 1.0)
-            })
-        edges_df = pd.DataFrame(edges)
-        
-        return nodes_df, edges_df
-    
+
     def _compute_idm_validation_metrics(self, gnn_predictions, idm_result, svi_value):
         """
         Compute GNN vs IDM validation metrics (single tract)
@@ -1295,24 +1230,7 @@ class GRANITEPipeline:
             
         except Exception as e:
             self._log(f"Error printing comparison summary: {str(e)}")
-
-    def _corrections_to_spde_params(self, corrections, idm_baseline):        
-        """Convert single correction values to 3-parameter SPDE format for MetricGraph"""
-        base_kappa = 1.0
-        base_alpha = 1.5
-        base_tau = 1.0
-        
-        # Use corrections to modulate kappa and tau
-        kappa_values = base_kappa * (1.0 + 3.0 * corrections)   
-        alpha_values = np.full_like(corrections, base_alpha)  # Fixed
-        tau_values = base_tau * (1.0 + 2.0 * corrections)       
-        
-        # Ensure valid ranges
-        kappa_values = np.clip(kappa_values, 0.1, 5.0)
-        tau_values = np.clip(tau_values, 0.1, 3.0)
-
-        return np.column_stack([kappa_values, alpha_values, tau_values])
-    
+  
     def _prepare_network_data_for_viz(self, tract_data):
         """Prepare network data in format expected by visualizations"""
         road_network = tract_data['road_network']
@@ -1356,36 +1274,6 @@ class GRANITEPipeline:
         return {
             'stops': local_stops
         }
-
-    def _apply_hybrid_disaggregation(self, metric_graph, tract_observation, 
-                                   prediction_locations, hybrid_predictions, 
-                                   gnn_features, alpha):
-        """Apply hybrid disaggregation using pre-computed hybrid predictions"""
-        try:
-            result = self.mg_interface.disaggregate_svi(
-                metric_graph=metric_graph,
-                tract_observation=tract_observation,
-                prediction_locations=prediction_locations,
-                gnn_features=gnn_features,
-                alpha=alpha
-            )
-            
-            if result['success']:
-                predictions_df = result['predictions'].copy()
-                predictions_df['mean'] = hybrid_predictions
-                
-                diagnostics = result['diagnostics'].copy()
-                diagnostics['mean_prediction'] = np.mean(hybrid_predictions)
-                diagnostics['std_prediction'] = np.std(hybrid_predictions)
-                diagnostics['constraint_satisfied'] = abs(np.mean(hybrid_predictions) - tract_observation['svi_value'].iloc[0]) < 0.01
-                
-                result['predictions'] = predictions_df
-                result['diagnostics'] = diagnostics
-            
-            return result
-            
-        except Exception as e:
-            return {'success': False, 'error': f'Hybrid disaggregation failed: {str(e)}'}
 
     def _augment_graph_with_accessibility(self, graph_data, accessibility_features, node_mapping):
         """

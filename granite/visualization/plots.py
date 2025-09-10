@@ -39,71 +39,7 @@ class GRANITEResearchVisualizer:
         self.accessibility_cmap = 'plasma_r'  # High accessibility = bright
         self.vulnerability_cmap = 'viridis_r'  # High vulnerability = bright
         self.difference_cmap = 'RdBu_r'
-        
-    def create_comprehensive_research_analysis(self, results: Dict, output_dir: str = "./"):
-        """
-        Create complete research validation suite
-        
-        Args:
-            results: Dictionary containing:
-                - gnn_predictions: DataFrame with x, y, mean columns
-                - idm_predictions: DataFrame with x, y, mean columns  
-                - learned_accessibility: Array (N, 9) of learned features
-                - traditional_accessibility: Array (N, K) of traditional measures
-                - stage1_metrics: Training metrics from accessibility learning
-                - stage2_metrics: Training metrics from SVI prediction
-                - validation_results: Cross-validation metrics
-        """
-        
-        # Extract data
-        gnn_pred = results['gnn_predictions']
-        idm_pred = results.get('idm_predictions')
-        learned_acc = results.get('learned_accessibility')
-        traditional_acc = results.get('traditional_accessibility')
-        
-        # Create visualizations
-        print("Creating GRANITE Research Analysis...")
-        
-        # 1. Stage 1 Validation: Accessibility Learning
-        self.plot_accessibility_learning_validation(
-            learned_acc, traditional_acc, 
-            f"{output_dir}/stage1_accessibility_learning.png"
-        )
-        
-        # 2. Stage 2 Validation: SVI Prediction Quality
-        self.plot_svi_prediction_validation(
-            gnn_pred, results.get('stage2_metrics', {}),
-            f"{output_dir}/stage2_svi_prediction.png"
-        )
-        
-        # 3. Method Comparison: GNN vs IDM
-        if idm_pred is not None:
-            self.plot_comprehensive_method_comparison(
-                gnn_pred, idm_pred,
-                f"{output_dir}/method_comparison.png"
-            )
-        
-        # 4. Research Insights: Accessibility-Vulnerability Relationships
-        if learned_acc is not None:
-            self.plot_accessibility_vulnerability_analysis(
-                learned_acc, gnn_pred,
-                f"{output_dir}/accessibility_vulnerability_insights.png"
-            )
-        
-        # 5. Training Diagnostics
-        self.plot_training_diagnostics(
-            results.get('stage1_metrics', {}),
-            results.get('stage2_metrics', {}),
-            f"{output_dir}/training_diagnostics.png"
-        )
-        
-        # 6. Research Summary Dashboard
-        self.create_research_summary_dashboard(
-            results, f"{output_dir}/research_summary.png"
-        )
-        
-        print("Research analysis complete. Generated 6 visualization files.")
-    
+
     def plot_accessibility_learning_validation(self, learned_acc: np.ndarray, 
                                             traditional_acc: Optional[np.ndarray],
                                             output_path: str):
@@ -627,299 +563,45 @@ Status: {self._interpret_stage2_quality(overall_score)}
         plt.tight_layout()
         plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
-    
-    def plot_accessibility_vulnerability_analysis(self, learned_accessibility: np.ndarray,
-                                                gnn_predictions: pd.DataFrame,
-                                                output_path: str):
-        """
-        Analyze the learned accessibility-vulnerability relationships
+
+    def plot_accessibility_learning_validation(self, learned_features, baseline_features, output_path):
+        """Simple validation: Do learned features correlate with traditional accessibility?"""
         
-        Key Research Question: Does the model learn that lower accessibility = higher vulnerability?
-        """
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle('Transportation Equity Analysis: Accessibility-Vulnerability Relationships', 
-                    fontsize=16, fontweight='bold')
-        
-        # Extract data
-        vulnerability = gnn_predictions['mean'].values
-        n_addresses = min(len(vulnerability), learned_accessibility.shape[0])
-        vulnerability = vulnerability[:n_addresses]
-        accessibility = learned_accessibility[:n_addresses]
-        
-        # 1. Overall Accessibility-Vulnerability Correlation
-        ax1 = axes[0, 0]
-        mean_accessibility = np.mean(accessibility, axis=1)
-        correlation = pearsonr(mean_accessibility, vulnerability)[0]
-        
-        ax1.scatter(mean_accessibility, vulnerability, alpha=0.6, s=20, color='darkred')
-        
-        # Add trend line
-        z = np.polyfit(mean_accessibility, vulnerability, 1)
-        p = np.poly1d(z)
-        ax1.plot(mean_accessibility, p(mean_accessibility), "r--", alpha=0.8, linewidth=2)
-        
-        ax1.set_xlabel('Mean Learned Accessibility')
-        ax1.set_ylabel('Predicted Vulnerability (SVI)')
-        ax1.set_title(f'Accessibility-Vulnerability Relationship\nr = {correlation:.3f}')
-        ax1.grid(True, alpha=0.3)
-        
-        # Add equity interpretation
-        if correlation < -0.3:
-            equity_text = "Strong equity pattern:\nLower access → Higher vulnerability"
-            color = 'green'
-        elif correlation < -0.1:
-            equity_text = "Moderate equity pattern"
-            color = 'orange'
-        else:
-            equity_text = "Weak/reverse equity pattern"
-            color = 'red'
-        
-        ax1.text(0.05, 0.95, equity_text, transform=ax1.transAxes,
-                bbox=dict(boxstyle='round', facecolor=color, alpha=0.7))
-        
-        # 2. Mode-Specific Analysis
-        ax2 = axes[0, 1]
-        if accessibility.shape[1] >= 9:
-            # Assume structure: employment[0:3], healthcare[3:6], grocery[6:9]
-            employment_acc = np.mean(accessibility[:, 0:3], axis=1)
-            healthcare_acc = np.mean(accessibility[:, 3:6], axis=1)
-            grocery_acc = np.mean(accessibility[:, 6:9], axis=1)
+        # 1. Feature correlation
+        if baseline_features is not None:
+            correlation = np.corrcoef(learned_features.mean(axis=1), baseline_features.mean(axis=1))[0,1]
+            axes[0].scatter(baseline_features.mean(axis=1), learned_features.mean(axis=1), alpha=0.6)
+            axes[0].set_xlabel('Traditional Accessibility')
+            axes[0].set_ylabel('Learned Accessibility')
+            axes[0].set_title(f'Learning Validation (r={correlation:.3f})')
             
-            emp_corr = pearsonr(employment_acc, vulnerability)[0]
-            health_corr = pearsonr(healthcare_acc, vulnerability)[0]
-            grocery_corr = pearsonr(grocery_acc, vulnerability)[0]
-            
-            modes = ['Employment', 'Healthcare', 'Grocery']
-            correlations = [emp_corr, health_corr, grocery_corr]
-            colors = ['blue', 'red', 'green']
-            
-            bars = ax2.bar(modes, correlations, color=colors, alpha=0.7)
-            ax2.axhline(0, color='black', linestyle='-', alpha=0.5)
-            ax2.set_ylabel('Correlation with Vulnerability')
-            ax2.set_title('Mode-Specific Equity Patterns')
-            ax2.grid(True, alpha=0.3)
-            
-            # Color bars by equity strength
-            for bar, corr in zip(bars, correlations):
-                if corr < -0.2:
-                    bar.set_color('darkgreen')
-                elif corr < 0:
-                    bar.set_color('lightgreen')
-                elif corr < 0.2:
-                    bar.set_color('orange')
-                else:
-                    bar.set_color('red')
-        else:
-            ax2.text(0.5, 0.5, 'Insufficient features\nfor mode analysis', 
-                    ha='center', va='center', transform=ax2.transAxes)
-        
-        # 3. Spatial Equity Patterns
-        ax3 = axes[0, 2]
-        x_coords = gnn_predictions['x'].values[:n_addresses]
-        y_coords = gnn_predictions['y'].values[:n_addresses]
-        
-        # Create equity index: (vulnerability - accessibility)
-        equity_index = vulnerability - (mean_accessibility - np.mean(mean_accessibility))
-        
-        scatter = ax3.scatter(x_coords, y_coords, c=equity_index, 
-                             cmap='RdYlBu_r', s=15, alpha=0.8)
-        ax3.set_title('Spatial Equity Index\n(Red = High Need, Low Access)')
-        ax3.set_xlabel('Longitude')
-        ax3.set_ylabel('Latitude')
-        ax3.set_aspect('equal')
-        plt.colorbar(scatter, ax=ax3, label='Equity Index')
-        
-        # 4. Accessibility Distribution by Vulnerability Quartiles
-        ax4 = axes[1, 0]
-        
-        # Create vulnerability quartiles
-        vuln_quartiles = np.percentile(vulnerability, [25, 50, 75])
-        quartile_labels = ['Low Vuln\n(Q1)', 'Med-Low\n(Q2)', 'Med-High\n(Q3)', 'High Vuln\n(Q4)']
-        
-        quartile_accessibility = []
-        for i in range(4):
-            if i == 0:
-                mask = vulnerability <= vuln_quartiles[0]
-            elif i == 3:
-                mask = vulnerability > vuln_quartiles[2]
+            # Success criteria: correlation > 0.3 indicates meaningful learning
+            if correlation > 0.3:
+                axes[0].text(0.05, 0.95, 'LEARNING SUCCESS', transform=axes[0].transAxes,
+                            bbox=dict(boxstyle='round', facecolor='green', alpha=0.7))
             else:
-                mask = (vulnerability > vuln_quartiles[i-1]) & (vulnerability <= vuln_quartiles[i])
-            
-            quartile_accessibility.append(mean_accessibility[mask])
+                axes[0].text(0.05, 0.95, 'LEARNING FAILURE', transform=axes[0].transAxes,
+                            bbox=dict(boxstyle='round', facecolor='red', alpha=0.7))
         
-        # Box plot
-        ax4.boxplot(quartile_accessibility, labels=quartile_labels)
-        ax4.set_ylabel('Mean Accessibility')
-        ax4.set_title('Accessibility by Vulnerability Quartile')
-        ax4.grid(True, alpha=0.3)
+        # 2. Feature diversity
+        feature_stds = np.std(learned_features, axis=0)
+        axes[1].bar(range(len(feature_stds)), feature_stds)
+        axes[1].set_title('Learned Feature Diversity')
+        axes[1].set_xlabel('Feature Index')
+        axes[1].set_ylabel('Standard Deviation')
         
-        # 5. Transportation Mode Equity Analysis
-        ax5 = axes[1, 1]
-        if accessibility.shape[1] >= 9:
-            # Analyze which features show strongest equity patterns
-            feature_names = ['Emp_Time', 'Emp_Count', 'Emp_Transit',
-                            'Health_Time', 'Health_Count', 'Health_Transit',
-                            'Grocery_Time', 'Grocery_Count', 'Grocery_Transit']
-            
-            feature_correlations = []
-            for i in range(min(9, accessibility.shape[1])):
-                corr = pearsonr(accessibility[:, i], vulnerability)[0]
-                feature_correlations.append(corr)
-            
-            # Create horizontal bar chart
-            y_pos = np.arange(len(feature_correlations))
-            bars = ax5.barh(y_pos, feature_correlations)
-            
-            # Color by equity strength
-            for bar, corr in zip(bars, feature_correlations):
-                if corr < -0.2:
-                    bar.set_color('darkgreen')
-                elif corr < 0:
-                    bar.set_color('lightgreen')
-                elif corr < 0.2:
-                    bar.set_color('orange')
-                else:
-                    bar.set_color('red')
-            
-            ax5.set_yticks(y_pos)
-            ax5.set_yticklabels(feature_names[:len(feature_correlations)])
-            ax5.set_xlabel('Correlation with Vulnerability')
-            ax5.set_title('Feature-Specific Equity Patterns')
-            ax5.axvline(0, color='black', linestyle='-', alpha=0.5)
-            ax5.grid(True, alpha=0.3)
-        else:
-            ax5.text(0.5, 0.5, 'Detailed feature\nanalysis unavailable', 
-                    ha='center', va='center', transform=ax5.transAxes)
-        
-        # 6. Transportation Equity Summary
-        ax6 = axes[1, 2]
-        ax6.axis('off')
-        
-        equity_summary = self._generate_equity_analysis_summary(
-            correlation, accessibility, vulnerability
-        )
-        
-        ax6.text(0.05, 0.95, equity_summary, transform=ax6.transAxes,
-                fontsize=10, verticalalignment='top', fontfamily='monospace',
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.8))
+        # 3. Spatial pattern
+        # Simple scatter plot of learned vs baseline
+        axes[2].text(0.5, 0.5, f'Research Status:\n\nCorrelation: {correlation:.3f}\nFeatures: {learned_features.shape[1]}\nAddresses: {learned_features.shape[0]}', 
+                    ha='center', va='center', transform=axes[2].transAxes)
+        axes[2].set_title('Research Summary')
         
         plt.tight_layout()
-        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
-    
-    def plot_training_diagnostics(self, stage1_metrics: Dict, stage2_metrics: Dict,
-                                output_path: str):
-        """Training convergence and quality diagnostics"""
-        
-        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-        fig.suptitle('Training Diagnostics: Two-Stage GNN Learning', 
-                    fontsize=16, fontweight='bold')
-        
-        # Stage 1 diagnostics
-        if 'loss_history' in stage1_metrics:
-            ax1 = axes[0, 0]
-            losses = stage1_metrics['loss_history']
-            ax1.plot(losses, 'b-', linewidth=2)
-            ax1.set_title('Stage 1: Accessibility Learning Loss')
-            ax1.set_xlabel('Epoch')
-            ax1.set_ylabel('Loss')
-            ax1.grid(True, alpha=0.3)
-            
-            # Add convergence indicator
-            final_loss = losses[-1] if losses else 0
-            initial_loss = losses[0] if losses else 0
-            improvement = (initial_loss - final_loss) / initial_loss if initial_loss > 0 else 0
-            ax1.text(0.7, 0.9, f'Improvement: {improvement:.1%}', 
-                    transform=ax1.transAxes, bbox=dict(boxstyle='round', facecolor='white'))
-        else:
-            axes[0, 0].text(0.5, 0.5, 'No Stage 1\ntraining metrics', 
-                           ha='center', va='center', transform=axes[0, 0].transAxes)
-        
-        # Stage 2 diagnostics
-        if 'loss_history' in stage2_metrics:
-            ax2 = axes[0, 1]
-            losses = stage2_metrics['loss_history']
-            ax2.plot(losses, 'r-', linewidth=2)
-            ax2.set_title('Stage 2: SVI Prediction Loss')
-            ax2.set_xlabel('Epoch')
-            ax2.set_ylabel('Loss')
-            ax2.grid(True, alpha=0.3)
-            
-            final_loss = losses[-1] if losses else 0
-            initial_loss = losses[0] if losses else 0
-            improvement = (initial_loss - final_loss) / initial_loss if initial_loss > 0 else 0
-            ax2.text(0.7, 0.9, f'Improvement: {improvement:.1%}', 
-                    transform=ax2.transAxes, bbox=dict(boxstyle='round', facecolor='white'))
-        else:
-            axes[0, 1].text(0.5, 0.5, 'No Stage 2\ntraining metrics', 
-                           ha='center', va='center', transform=axes[0, 1].transAxes)
-        
-        # Combined loss comparison
-        ax3 = axes[0, 2]
-        if 'loss_history' in stage1_metrics and 'loss_history' in stage2_metrics:
-            losses1 = stage1_metrics['loss_history']
-            losses2 = stage2_metrics['loss_history']
-            
-            # Normalize for comparison
-            norm_losses1 = np.array(losses1) / losses1[0] if losses1[0] > 0 else losses1
-            norm_losses2 = np.array(losses2) / losses2[0] if losses2[0] > 0 else losses2
-            
-            ax3.plot(norm_losses1, 'b-', label='Stage 1 (Normalized)', linewidth=2)
-            ax3.plot(norm_losses2, 'r-', label='Stage 2 (Normalized)', linewidth=2)
-            ax3.set_title('Training Convergence Comparison')
-            ax3.set_xlabel('Epoch')
-            ax3.set_ylabel('Normalized Loss')
-            ax3.legend()
-            ax3.grid(True, alpha=0.3)
-        else:
-            ax3.text(0.5, 0.5, 'Insufficient data for\ncomparison', 
-                    ha='center', va='center', transform=ax3.transAxes)
-        
-        # Learning rate effectiveness (if available)
-        ax4 = axes[1, 0]
-        ax4.text(0.5, 0.5, 'Learning Rate\nAnalysis\n(Future Enhancement)', 
-                ha='center', va='center', transform=ax4.transAxes)
-        ax4.set_title('Learning Rate Analysis')
-        
-        # Feature evolution (if available)
-        ax5 = axes[1, 1]
-        ax5.text(0.5, 0.5, 'Feature Evolution\nTracking\n(Future Enhancement)', 
-                ha='center', va='center', transform=ax5.transAxes)
-        ax5.set_title('Feature Evolution')
-        
-        # Training summary
-        ax6 = axes[1, 2]
-        ax6.axis('off')
-        
-        training_summary = f"""
-TRAINING SUMMARY
 
-Stage 1 (Accessibility):
-• Epochs: {len(stage1_metrics.get('loss_history', []))}
-• Final Loss: {stage1_metrics.get('loss_history', [0])[-1]:.4f if stage1_metrics.get('loss_history') else 'N/A'}
-• Convergence: {'✓' if stage1_metrics.get('loss_history') else '?'}
-
-Stage 2 (SVI Prediction):
-• Epochs: {len(stage2_metrics.get('loss_history', []))}
-• Final Loss: {stage2_metrics.get('loss_history', [0])[-1]:.4f if stage2_metrics.get('loss_history') else 'N/A'}
-• Convergence: {'✓' if stage2_metrics.get('loss_history') else '?'}
-
-Two-Stage Architecture:
-• Stage 1 → Stage 2: {'✓' if stage1_metrics and stage2_metrics else '?'}
-• Learning Transfer: {'Good' if stage1_metrics and stage2_metrics else 'Unknown'}
-
-Overall Status: {'Successful' if stage1_metrics and stage2_metrics else 'Incomplete'}
-        """
-        
-        ax6.text(0.05, 0.95, training_summary.strip(), transform=ax6.transAxes,
-                fontsize=10, verticalalignment='top', fontfamily='monospace',
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcyan', alpha=0.8))
-        
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
-        plt.close()
-    
     def create_research_summary_dashboard(self, results: Dict, output_path: str):
         """
         Create a comprehensive research summary dashboard

@@ -369,13 +369,9 @@ class GRANITEPipeline:
             # STEP 5: Generate comparison baselines
             self._log("  Step 5: Generating comparison baselines...")
             
-            # IDM baseline for comparison
-            idm_result = self.idm_baseline.disaggregate_svi(
-                tract_svi=svi_value,
-                prediction_locations=tract_data['addresses'],
-                nlcd_features=nlcd_features,
-                tract_geometry=tract_data['tract_info'].geometry
-            )
+            # IDM baseline for comparison - TEMPORARILY DISABLED
+            self._log("    Skipping IDM baseline comparison (temporarily disabled)")
+            idm_result = None
             
             # Traditional accessibility measures for validation
             traditional_accessibility = self._compute_traditional_accessibility_measures(tract_data)
@@ -430,7 +426,7 @@ class GRANITEPipeline:
                 learned_accessibility=learned_accessibility_features[:len(tract_data['addresses'])],
                 traditional_accessibility=traditional_accessibility,
                 svi_predictions=constrained_predictions,
-                idm_predictions=idm_result['predictions']['svi_prediction'].values if idm_result['success'] else None,
+                idm_predictions=None,
                 tract_svi=svi_value
             )
 

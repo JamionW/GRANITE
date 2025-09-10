@@ -85,7 +85,6 @@ svi_training:
   learning_rate: 0.001
   weight_decay: 1e-5
   variation_weight: 0.3       # Encourage spatial variation
-  constraint_weight: 0.5      # Enforce tract constraint
   min_spatial_std: 0.02       # Minimum spatial standard deviation
 
 # Features configuration
@@ -96,30 +95,6 @@ features:
   # NEW: Enhanced feature integration
   combine_nlcd_accessibility: true
   accessibility_feature_scaling: "standardization"
-
-# MetricGraph configuration (kept for compatibility/comparison)
-metricgraph:
-  alpha: 1
-  mesh_resolution: 0.05
-  max_edges: 50000
-
-# OLD HYBRID APPROACH - DISABLED (kept for reference/comparison)
-hybrid:
-  enabled: false  # DISABLED: Replaced by new two-stage approach
-  
-  # Legacy settings (kept for baseline comparison if needed)
-  idm_weight: 0.6
-  gnn_weight: 0.4
-  max_correction: 0.15
-  target_cv: 0.20
-  
-  # Legacy loss function weights
-  constraint_weight: 5.0
-  spatial_weight: 1.0
-  diversity_weight: 0.5
-  variation_weight: 0.3
-  variance_preservation_weight: 0.1
-  feature_weight: 0.05
 
 # NEW: Validation and comparison settings
 validation:

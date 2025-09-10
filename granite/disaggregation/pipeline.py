@@ -313,18 +313,17 @@ class GRANITEPipeline:
             
             accessibility_gnn = AccessibilityLearningGNN(
                 input_dim=graph_data.x.shape[1],
-                hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
-                accessibility_output_dim=len(accessibility_targets['features_per_address'][0])
+                hidden_dim=self.config.get('model', {}).get('accessibility_learning', {}).get('hidden_dim', 64),
+                output_dim=len(accessibility_targets['features_per_address'][0])
             )
             
             stage1_trainer = AccessibilityGNNTrainer(accessibility_gnn, 
                                                     config=self.config.get('accessibility_training', {}))
             
-            stage1_result = stage1_trainer.train_accessibility_prediction(
+            stage1_result = stage1_trainer.train_accessibility_learning(
                 graph_data=graph_data,
-                accessibility_targets=accessibility_targets,
-                epochs=self.config.get('model', {}).get('accessibility_epochs', 50),
-                verbose=self.verbose
+                accessibility_targets=accessibility_targets['features_per_address'],
+                epochs=self.config.get('model', {}).get('accessibility_epochs', 50)
             )
             
             learned_accessibility_features = stage1_result['predicted_accessibility']
@@ -350,7 +349,7 @@ class GRANITEPipeline:
             
             svi_gnn = AccessibilitySVIGNN(
                 input_dim=enhanced_graph_data.x.shape[1],
-                hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
+                hidden_dim=self.config.get('model', {}).get('svi_prediction', {}).get('hidden_dim', 64),
                 output_dim=1  # SVI prediction
             )
             
@@ -554,7 +553,7 @@ class GRANITEPipeline:
             self._log(f"    Calculating travel times for {len(addresses)} addresses to {len(all_destinations)} destinations...")
             start_time = time.time()
             
-            travel_times = self.data_loader.calculate_multimodal_travel_times(
+            travel_times = self.data_loader.calculate_multimodal_travel_times_batch(
                 addresses, all_destinations, time_periods=['morning']
             )
             

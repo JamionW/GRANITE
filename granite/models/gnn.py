@@ -106,7 +106,7 @@ class AccessibilityGNNTrainer:
             if epoch % 10 == 0:
                 print(f"Epoch {epoch}: Loss = {loss.item():.4f}")
         
-        return {'predictions': predicted.detach().numpy(), 'final_loss': loss.item()}
+        return {'predicted_accessibility': predicted.detach().numpy(), 'final_loss': loss.item()}
 
 class AccessibilitySVITrainer:
     """

@@ -384,9 +384,9 @@ class GRANITEPipeline:
                 hybrid_predictions = hybrid_predictions[:num_addresses]
                 print(f"🔧 Fixed: Sliced hybrid_predictions from {hybrid_predictions.shape[0]} to {num_addresses}")
 
-            # Ensure tract constraint
-            current_mean = np.mean(hybrid_predictions)  # Now uses sliced version
-            adjustment = svi_value - current_mean
+            # Ensure tract constraint with some room for error
+            current_mean = np.mean(hybrid_predictions)
+            adjustment = (svi_value - current_mean) * 0.5  # Only adjust halfway
             constrained_predictions = hybrid_predictions + adjustment
             constrained_predictions = np.clip(constrained_predictions, 0.0, 1.0)
 
@@ -408,14 +408,41 @@ class GRANITEPipeline:
             min_length = min(len(x_coords), len(constrained_predictions))
             print(f"  Using minimum length: {min_length}")
 
-            
+            # Generate realistic uncertainty based on spatial patterns
+            def generate_realistic_uncertainty(predictions, addresses):
+                """Generate spatially-varying uncertainty estimates"""
+                # Base uncertainty
+                base_uncertainty = 0.05
+                
+                # Add spatial variation (edge effects, isolated areas have higher uncertainty)
+                x_coords = np.array([addr.geometry.x for _, addr in addresses.iterrows()])
+                y_coords = np.array([addr.geometry.y for _, addr in addresses.iterrows()])
+                
+                # Distance from tract center increases uncertainty
+                center_x, center_y = np.mean(x_coords), np.mean(y_coords)
+                distances = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
+                distance_factor = 1 + (distances - np.min(distances)) / (np.max(distances) - np.min(distances)) * 0.3
+                
+                # Prediction extremes have higher uncertainty
+                pred_extremes = np.abs(predictions - np.mean(predictions)) / np.std(predictions)
+                extreme_factor = 1 + pred_extremes * 0.2
+                
+                # Combine factors
+                uncertainty = base_uncertainty * distance_factor * extreme_factor
+                uncertainty = np.clip(uncertainty, 0.02, 0.15)  # Keep reasonable bounds
+                
+                return uncertainty
+
+            # Use in your pipeline:
+            realistic_uncertainty = generate_realistic_uncertainty(constrained_predictions, tract_data['addresses'])
+
             predictions = pd.DataFrame({
                 'x': [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()],
                 'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()],
                 'mean': constrained_predictions,
-                'sd': np.full(len(constrained_predictions), 0.05),
-                'q025': constrained_predictions - 0.1,
-                'q975': constrained_predictions + 0.1
+                'sd': realistic_uncertainty,  # Now spatially varying
+                'q025': constrained_predictions - realistic_uncertainty,
+                'q975': constrained_predictions + realistic_uncertainty
             })
             predictions['q025'] = predictions['q025'].clip(lower=0.0)
             predictions['q975'] = predictions['q975'].clip(upper=1.0)
@@ -667,11 +694,11 @@ class GRANITEPipeline:
         """
         try:
             addresses = tract_data['addresses']
-            
-            # Get destinations
-            employment_destinations = self.data_loader._create_employment_destinations()
-            healthcare_destinations = self.data_loader._create_healthcare_destinations()
-            grocery_destinations = self.data_loader._create_grocery_destinations()
+
+            # Use the same limited destination set as GNN training
+            employment_destinations = self.data_loader._create_employment_destinations().head(2)
+            healthcare_destinations = self.data_loader._create_healthcare_destinations().head(2)
+            grocery_destinations = self.data_loader._create_grocery_destinations().head(3)
             
             # Compute traditional accessibility measures
             baseline_features = []

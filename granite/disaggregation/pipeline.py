@@ -22,6 +22,7 @@ warnings.filterwarnings('ignore')
 from ..data.loaders import DataLoader
 from ..models.gnn import prepare_graph_data_with_nlcd, prepare_graph_data_topological
 from ..visualization.plots import GRANITEResearchVisualizer
+from ..baselines.accessibility_baseline import AccessibilityBaseline
 from ..models.gnn import (
     prepare_graph_data_with_nlcd, 
     prepare_graph_data_topological,
@@ -45,6 +46,7 @@ class GRANITEPipeline:
         self.config = config
         self.data_dir = data_dir
         self.output_dir = output_dir
+        self.accessibility_baseline = AccessibilityBaseline(config=config)
         self.verbose = config.get('processing', {}).get('verbose', False)
         
         os.makedirs(output_dir, exist_ok=True)
@@ -366,13 +368,10 @@ class GRANITEPipeline:
             hybrid_predictions = stage2_result['svi_predictions']
             stage2_time = time.time() - stage2_start
             
-            # STEP 5: Generate comparison baselines
-            self._log("  Step 5: Generating comparison baselines...")
-            
-            # IDM baseline for comparison - TEMPORARILY DISABLED
-            self._log("    Skipping IDM baseline comparison (temporarily disabled)")
-            idm_result = None
-            
+            # STEP 5: Generate traditional accessibility baseline comparison
+            self._log("  Step 5: Computing traditional accessibility baseline...")
+            traditional_accessibility = self._compute_traditional_accessibility_baseline(tract_data)
+                        
             # Traditional accessibility measures for validation
             traditional_accessibility = self._compute_traditional_accessibility_measures(tract_data)
             
@@ -426,7 +425,6 @@ class GRANITEPipeline:
                 learned_accessibility=learned_accessibility_features[:len(tract_data['addresses'])],
                 traditional_accessibility=traditional_accessibility,
                 svi_predictions=constrained_predictions,
-                idm_predictions=None,
                 tract_svi=svi_value
             )
 
@@ -443,7 +441,8 @@ class GRANITEPipeline:
                         'traditional_accessibility': traditional_accessibility,
                         'stage1_metrics': stage1_result,
                         'stage2_metrics': stage2_result,
-                        'validation_results': validation_results
+                        'validation_results': validation_results,
+                        'tract_svi': svi_value
                     }
                 except Exception as e:
                     self._log(f"Skipping visualization due to missing methods: {str(e)}")
@@ -489,7 +488,6 @@ class GRANITEPipeline:
                 
                 # Comparison data
                 'traditional_accessibility': traditional_accessibility,
-                'idm_baseline': idm_result,
                 'validation_results': validation_results,
                 
                 # Research-specific metrics
@@ -662,6 +660,59 @@ class GRANITEPipeline:
             import traceback
             self._log(f"    Traceback: {traceback.format_exc()}")
             return self._create_fallback_accessibility_targets(addresses)
+        
+    def _compute_traditional_accessibility_baseline(self, tract_data):
+        """
+        Compute traditional accessibility measures using AccessibilityBaseline class
+        """
+        try:
+            addresses = tract_data['addresses']
+            
+            # Get destinations
+            employment_destinations = self.data_loader._create_employment_destinations()
+            healthcare_destinations = self.data_loader._create_healthcare_destinations()
+            grocery_destinations = self.data_loader._create_grocery_destinations()
+            
+            # Compute traditional accessibility measures
+            baseline_features = []
+            
+            # Employment accessibility
+            emp_gravity = self.accessibility_baseline.compute_gravity_accessibility(
+                addresses, employment_destinations
+            )
+            emp_cumulative = self.accessibility_baseline.compute_cumulative_opportunities(
+                addresses, employment_destinations, threshold=0.01
+            )
+            
+            # Healthcare accessibility  
+            health_gravity = self.accessibility_baseline.compute_gravity_accessibility(
+                addresses, healthcare_destinations
+            )
+            health_cumulative = self.accessibility_baseline.compute_cumulative_opportunities(
+                addresses, healthcare_destinations, threshold=0.01
+            )
+            
+            # Grocery accessibility
+            grocery_gravity = self.accessibility_baseline.compute_gravity_accessibility(
+                addresses, grocery_destinations
+            )
+            grocery_cumulative = self.accessibility_baseline.compute_cumulative_opportunities(
+                addresses, grocery_destinations, threshold=0.01
+            )
+            
+            # Combine features
+            traditional_features = np.column_stack([
+                emp_gravity, emp_cumulative,
+                health_gravity, health_cumulative,
+                grocery_gravity, grocery_cumulative
+            ])
+            
+            self._log(f"    Computed traditional accessibility: {traditional_features.shape}")
+            return traditional_features
+            
+        except Exception as e:
+            self._log(f"    Error computing traditional accessibility: {str(e)}")
+            return None
 
     def _create_fallback_accessibility_targets(self, addresses):
         """
@@ -710,39 +761,43 @@ class GRANITEPipeline:
         }
 
     def _validate_hybrid_accessibility_approach(self, learned_accessibility, traditional_accessibility, 
-                                            svi_predictions, idm_predictions, tract_svi):
+                                            svi_predictions, tract_svi):  # Remove idm_predictions parameter
         """
         Comprehensive validation comparing learned vs traditional accessibility,
-        and hybrid vs IDM SVI prediction
+        and accessibility-informed SVI prediction quality
         """
         validation = {}
         
         # 1. Accessibility Learning Validation
         if traditional_accessibility is not None:
-            correlation = np.corrcoef(
-                learned_accessibility.mean(axis=1), 
-                traditional_accessibility.mean(axis=1)
-            )[0, 1]
+            # Compare learned vs traditional accessibility
+            learned_mean = np.mean(learned_accessibility, axis=1)
+            traditional_mean = np.mean(traditional_accessibility, axis=1) if traditional_accessibility.ndim > 1 else traditional_accessibility
+            
+            correlation = np.corrcoef(learned_mean, traditional_mean)[0, 1]
+            r_squared = correlation ** 2
+            
             validation['accessibility_correlation'] = correlation
-            validation['accessibility_learning_quality'] = 'good' if correlation > 0.6 else 'moderate' if correlation > 0.3 else 'poor'
+            validation['accessibility_r_squared'] = r_squared
+            validation['accessibility_learning_quality'] = (
+                'excellent' if r_squared > 0.64 else 
+                'good' if r_squared > 0.36 else 
+                'moderate' if r_squared > 0.16 else 'poor'
+            )
         
         # 2. SVI Prediction Validation  
         constraint_error = abs(np.mean(svi_predictions) - tract_svi) / tract_svi
         validation['constraint_satisfaction'] = constraint_error < 0.01
         validation['constraint_error'] = constraint_error
         
-        # 3. Comparison with IDM
-        if idm_predictions is not None:
-            idm_correlation = np.corrcoef(svi_predictions, idm_predictions)[0, 1]
-            validation['hybrid_vs_idm_correlation'] = idm_correlation
-            validation['hybrid_spatial_variation'] = np.std(svi_predictions)
-            validation['idm_spatial_variation'] = np.std(idm_predictions)
-            validation['variation_improvement'] = np.std(svi_predictions) / np.std(idm_predictions)
+        # 3. Spatial Quality Assessment
+        validation['spatial_variation'] = np.std(svi_predictions)
+        validation['prediction_range'] = np.max(svi_predictions) - np.min(svi_predictions)
         
         # 4. Research Contribution Metrics
         validation['accessibility_features_learned'] = learned_accessibility.shape[1]
         validation['spatial_resolution'] = len(svi_predictions)
-        validation['novel_methodology'] = True  # This is the first implementation
+        validation['novel_methodology'] = True
         
         return validation
 
@@ -976,106 +1031,6 @@ class GRANITEPipeline:
         with open(summary_path, 'w') as f:
             json.dump(results['summary'], f, indent=2)
         self._log(f"Saved summary to {summary_path}")
-        
-        # Create visualizations with clear GNN vs IDM comparison
-        self._log("Creating enhanced visualizations...")
-        
-        # FIXED: Actually set viz_data and extract IDM predictions
-        viz_data = None
-        gnn_predictions = results['predictions']
-        idm_predictions = None
-        
-        if results.get('tract_results'):
-            for i, tract_result in enumerate(results['tract_results'][:1]):  # Check first tract
-                
-                viz_data = tract_result
-                
-                # Extract IDM predictions from any available field
-                for field_name in ['baseline_comparison', 'idm_comparison', 'idm_baseline', 'comparison_results']:
-                    if field_name in tract_result and tract_result[field_name]:
-                        idm_source = tract_result[field_name]
-                        if (isinstance(idm_source, dict) and 
-                            idm_source.get('success') and 
-                            'predictions' in idm_source):
-                            
-                            idm_predictions = idm_source['predictions']
-                            self._log(f"Found IDM data from '{field_name}': {len(idm_predictions)} predictions")
-                            
-                            # Verify required columns exist
-                            required_cols = ['mean', 'x', 'y']
-                            missing_cols = [col for col in required_cols if col not in idm_predictions.columns]
-                            if not missing_cols:
-                                self._log(f"All required columns present: {list(idm_predictions.columns)}")
-                                break
-                            else:
-                                self._log(f"Missing required columns: {missing_cols}")
-                                idm_predictions = None
-                
-                # Break after first tract (we only need one for visualization)
-                if viz_data:
-                    break
-        
-        # FIXED: Now this condition should be True
-        if viz_data and idm_predictions is not None:
-            self._log(f"SUCCESS: Creating GNN vs IDM comparison visualization!")
-            
-            try:
-                clear_comparison_path = os.path.join(self.output_dir, 'gnn_vs_idm_comparison.png')
-                
-                self.visualizer.create_clear_method_comparison(
-                    gnn_predictions=gnn_predictions,
-                    idm_predictions=idm_predictions,
-                    gnn_results=results,
-                    idm_results={'success': True, 'predictions': idm_predictions},
-                    output_path=clear_comparison_path
-                )
-                
-                self._log(f"Saved GNN vs IDM comparison to {clear_comparison_path}")
-                
-                # Also create other visualizations
-                original_viz_path = os.path.join(self.output_dir, 'granite_visualization.png')
-                self.visualizer.create_disaggregation_plot(
-                    predictions=gnn_predictions,
-                    results=results,
-                    comparison_results={'success': True, 'predictions': idm_predictions},
-                    output_path=original_viz_path
-                )
-                self._log(f"Saved comparison visualization to {original_viz_path}")
-                
-                # Print comparison summary to console
-                self._print_comparison_summary(gnn_predictions, idm_predictions)
-                
-            except Exception as e:
-                self._log(f"Visualization creation failed: {e}")
-                import traceback
-                self._log(f"Full traceback: {traceback.format_exc()}")
-                
-        else:
-            self._log(f"  Could not extract IDM predictions for visualization")
-            self._log(f"   viz_data exists: {viz_data is not None}")
-            self._log(f"   idm_predictions exists: {idm_predictions is not None}")
-            
-            # Create fallback single-method visualization
-            try:
-                fallback_path = os.path.join(self.output_dir, 'granite_visualization_single.png')
-                self.visualizer.create_disaggregation_plot(
-                    predictions=gnn_predictions,
-                    results=results,
-                    comparison_results=None,  # No comparison
-                    output_path=fallback_path
-                )
-                self._log(f"Created fallback single-method visualization: {fallback_path}")
-            except Exception as e:
-                self._log(f"Even fallback visualization failed: {e}")
-
-        # Global validation summary
-        if results.get('global_validation'):
-            self._log(f"\n=== GLOBAL VALIDATION SUMMARY ===")
-            global_val = results['global_validation']
-            if global_val.get('method_correlation'):
-                self._log(f"Global GNN-IDM Correlation: {global_val['method_correlation']:.3f}")
-            self._log(f"Total Addresses Compared: {global_val.get('total_addresses', 'N/A')}")
-
         self._log(f"\nAll results and visualizations saved to {self.output_dir}/")
 
     def debug_gnn_data_sources(self, result):

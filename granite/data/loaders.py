@@ -2433,6 +2433,117 @@ class DataLoader:
         except Exception as e:
             self._log(f"Error calculating transit time: {str(e)}")
             return 999.0
+        
+    def _load_full_gtfs_data(self):
+        """
+        Load complete GTFS dataset (all required files)
+        Builds on existing _load_carta_gtfs_stops() infrastructure
+        """
+        try:
+            import zipfile
+            import requests
+            import pandas as pd
+            
+            # Use same GTFS file discovery logic as _load_carta_gtfs_stops
+            gtfs_files = [
+                os.path.join(self.data_dir, 'carta_gtfs.zip'),
+                os.path.join(self.data_dir, 'gtfs', 'carta_gtfs.zip'),
+                os.path.join(self.data_dir, 'raw', 'carta_gtfs.zip')
+            ]
+            
+            gtfs_path = None
+            for path in gtfs_files:
+                if os.path.exists(path):
+                    gtfs_path = path
+                    break
+            
+            # Download if needed (reuse your existing download logic)
+            if gtfs_path is None:
+                self._log("  Downloading CARTA GTFS for complete travel time analysis...")
+                gtfs_urls = [
+                    "https://www.gocarta.org/gtfs/gtfs.zip",
+                    "https://transitland.org/api/v1/gtfs_exports/carta.zip"
+                ]
+                
+                for url in gtfs_urls:
+                    try:
+                        response = requests.get(url, timeout=30)
+                        if response.status_code == 200:
+                            gtfs_path = os.path.join(self.data_dir, 'carta_gtfs_full.zip')
+                            with open(gtfs_path, 'wb') as f:
+                                f.write(response.content)
+                            self._log(f"  Downloaded complete GTFS from {url}")
+                            break
+                    except Exception as e:
+                        continue
+            
+            if gtfs_path is None:
+                self._log("  No GTFS data available for travel time calculations")
+                return None
+            
+            # Extract ALL required GTFS files
+            gtfs_data = {}
+            required_files = ['stops.txt', 'routes.txt', 'trips.txt', 'stop_times.txt']
+            optional_files = ['agency.txt', 'calendar.txt', 'shapes.txt']
+            
+            with zipfile.ZipFile(gtfs_path, 'r') as zip_file:
+                available_files = zip_file.namelist()
+                
+                # Load required files
+                for filename in required_files:
+                    if filename in available_files:
+                        with zip_file.open(filename) as file:
+                            gtfs_data[filename.replace('.txt', '')] = pd.read_csv(file)
+                            self._log(f"    Loaded {filename}: {len(gtfs_data[filename.replace('.txt', '')])} records")
+                    else:
+                        self._log(f"    Missing required file: {filename}")
+                        return None
+                
+                # Load optional files
+                for filename in optional_files:
+                    if filename in available_files:
+                        try:
+                            with zip_file.open(filename) as file:
+                                gtfs_data[filename.replace('.txt', '')] = pd.read_csv(file)
+                        except Exception as e:
+                            self._log(f"    Could not load {filename}: {str(e)}")
+            
+            # Filter to Hamilton County area
+            hamilton_bounds = {
+                'min_lat': 34.9, 'max_lat': 35.3,
+                'min_lon': -85.5, 'max_lon': -85.0
+            }
+            
+            stops_df = gtfs_data['stops']
+            stops_df = stops_df[
+                (stops_df['stop_lat'] >= hamilton_bounds['min_lat']) &
+                (stops_df['stop_lat'] <= hamilton_bounds['max_lat']) &
+                (stops_df['stop_lon'] >= hamilton_bounds['min_lon']) &
+                (stops_df['stop_lon'] <= hamilton_bounds['max_lon'])
+            ]
+            
+            if len(stops_df) == 0:
+                self._log("  No stops in Hamilton County bounds")
+                return None
+            
+            # Filter other tables to only include Hamilton County stops
+            hamilton_stop_ids = set(stops_df['stop_id'])
+            
+            if 'stop_times' in gtfs_data:
+                gtfs_data['stop_times'] = gtfs_data['stop_times'][
+                    gtfs_data['stop_times']['stop_id'].isin(hamilton_stop_ids)
+                ]
+            
+            # Update stops in gtfs_data
+            gtfs_data['stops'] = stops_df
+            
+            self._log(f"  Loaded complete GTFS: {len(stops_df)} stops, {len(gtfs_data.get('routes', []))} routes")
+            
+            return gtfs_data
+            
+        except Exception as e:
+            self._log(f"  Error loading full GTFS data: {str(e)}")
+            return None
 
     def calculate_multimodal_travel_times_batch(self, origins: gpd.GeoDataFrame, 
                                             destinations: gpd.GeoDataFrame,

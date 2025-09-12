@@ -291,6 +291,8 @@ class GRANITEPipeline:
             # STEP 1: Calculate accessibility targets for GNN training
             self._log("  Step 1: Computing accessibility targets...")
             accessibility_targets = self._compute_accessibility_targets(tract_data)
+
+            self.traditional_accessibility_features = accessibility_targets['features_per_address'].copy()
             
             if accessibility_targets is None:
                 raise RuntimeError("Failed to compute accessibility targets")
@@ -329,6 +331,30 @@ class GRANITEPipeline:
             )
             
             learned_accessibility_features = stage1_result['predicted_accessibility']
+
+            try:
+                self._log("  Quick Stage 1 debug...")
+                if learned_accessibility_features is not None:
+                    feature_std = np.std(learned_accessibility_features)
+                    feature_mean = np.mean(learned_accessibility_features)
+                    self._log(f"  Learned features: mean={feature_mean:.4f}, std={feature_std:.6f}")
+                    
+                    if feature_std < 1e-6:
+                        self._log("  ❌ CRITICAL: Features are constant - explains R²=0")
+                    else:
+                        self._log("  ✓ Features show variation")
+                        
+                    # Check if traditional accessibility exists
+                    if not hasattr(self, 'traditional_accessibility_features') or self.traditional_accessibility_features is None:
+                        self._log("  ❌ CRITICAL: No traditional accessibility baseline - explains R²=0")
+                        self._log("  ➤ Fix: Ensure traditional accessibility is computed before Stage 1")
+                    else:
+                        self._log("  ✓ Traditional accessibility exists")
+                else:
+                    self._log("  ❌ No learned features generated")
+            except Exception as e:
+                self._log(f"  Debug check failed: {e}")
+
             # CRITICAL FIX: Slice learned accessibility features to addresses only
             num_addresses = len(tract_data['addresses'])  # 2394
             
@@ -368,13 +394,14 @@ class GRANITEPipeline:
             hybrid_predictions = stage2_result['svi_predictions']
             stage2_time = time.time() - stage2_start
             
-            # STEP 5: Generate traditional accessibility baseline comparison
-            self._log("  Step 5: Computing traditional accessibility baseline...")
-            traditional_accessibility = self._compute_traditional_accessibility_baseline(tract_data)
+            # STEP 5: Use preserved accessibility features for comparison
+            self._log("  Step 5: Using preserved traditional accessibility baseline...")
+            traditional_accessibility = self.traditional_accessibility_features
+            self._log(f"    Using preserved features: {traditional_accessibility.shape}")
                         
-            # Traditional accessibility measures for validation
-            traditional_accessibility = self._compute_traditional_accessibility_measures(tract_data)
-            
+            if self.verbose:
+                self.debug_correlation_issue(learned_accessibility_features, traditional_accessibility)
+
             # STEP 6: Create final predictions with proper constraint satisfaction
             self._log("  Step 6: Finalizing predictions and constraint satisfaction...")
 
@@ -462,10 +489,10 @@ class GRANITEPipeline:
                     
                     # Prepare results dictionary for visualization
                     visualization_results = {
-                        'gnn_predictions': predictions,  # Your final DataFrame
+                        'gnn_predictions': predictions,  
                         'idm_predictions': None,
                         'learned_accessibility': learned_accessibility_features,
-                        'traditional_accessibility': traditional_accessibility,
+                        'traditional_accessibility': self.traditional_accessibility_features,
                         'stage1_metrics': stage1_result,
                         'stage2_metrics': stage2_result,
                         'validation_results': validation_results,
@@ -740,6 +767,27 @@ class GRANITEPipeline:
         except Exception as e:
             self._log(f"    Error computing traditional accessibility: {str(e)}")
             return None
+        
+    def debug_correlation_issue(self, learned_accessibility, traditional_accessibility):
+        print(f"\n=== CORRELATION DEBUG ===")
+        print(f"Learned shape: {learned_accessibility.shape}")
+        print(f"Traditional shape: {traditional_accessibility.shape}")
+        
+        learned_mean = np.mean(learned_accessibility, axis=1)
+        traditional_mean = np.mean(traditional_accessibility, axis=1)
+        
+        print(f"Learned stats: mean={np.mean(learned_mean):.4f}, std={np.std(learned_mean):.4f}")
+        print(f"Traditional stats: mean={np.mean(traditional_mean):.4f}, std={np.std(traditional_mean):.4f}")
+        
+        # Check if they're actually the same data
+        if np.array_equal(learned_accessibility, traditional_accessibility):
+            print("Arrays are identical - something else is wrong")
+        else:
+            print("Arrays are different - GNN learned different patterns")
+            
+        correlation = np.corrcoef(learned_mean, traditional_mean)[0,1]
+        print(f"Direct correlation: {correlation:.6f}")
+        print("=========================\n")
 
     def _create_fallback_accessibility_targets(self, addresses):
         """

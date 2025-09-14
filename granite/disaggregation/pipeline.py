@@ -16,7 +16,7 @@ from ..visualization.plots import GRANITEResearchVisualizer
 
 class GRANITEPipeline:
     """
-    Simplified GRANITE: Direct accessibility → SVI prediction
+    GRANITE: Direct accessibility for SVI prediction
     
     Architecture:
     1. Load spatial data (addresses, tracts, destinations)
@@ -46,12 +46,12 @@ class GRANITEPipeline:
         """Main pipeline execution"""
         start_time = time.time()
         
-        self._log("Starting GRANITE Accessibility → SVI Pipeline...")
+        self._log("Starting GRANITE Accessibility SVI Pipeline...")
         
         # Load data
         data = self._load_spatial_data()
         
-        # Process single FIPS only (batch processing removed for simplicity)
+        # Process single FIPS 
         target_fips = self.config.get('data', {}).get('target_fips')
         if not target_fips:
             return {'success': False, 'error': 'FIPS code required'}
@@ -89,7 +89,11 @@ class GRANITEPipeline:
         data['grocery_destinations'] = self.data_loader.create_grocery_destinations()
         
         # Load road network and addresses
-        data['roads'] = self.data_loader.load_road_network(state_fips, county_fips)
+        data['roads'] = self.data_loader.load_road_network(
+            roads_file=None, 
+            state_fips=state_fips, 
+            county_fips=county_fips
+        )
         data['addresses'] = self.data_loader.load_address_points(state_fips, county_fips)
         
         self._log(f"Loaded data: {len(data['tracts'])} tracts, {len(data['addresses'])} addresses")
@@ -110,6 +114,9 @@ class GRANITEPipeline:
         target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips]
         if len(target_tract) == 0:
             return {'success': False, 'error': f'FIPS {target_fips} not found'}
+        
+        state_fips = target_fips[:2]
+        county_fips = target_fips[2:5]
         
         tract_info = target_tract.iloc[0]
         tract_svi = tract_info['RPL_THEMES']
@@ -132,19 +139,21 @@ class GRANITEPipeline:
             return {'success': False, 'error': 'Failed to compute accessibility features'}
         
         # Step 2: Build accessibility-based graph
-        from ..models.gnn import create_accessibility_graph, normalize_accessibility_features
-        
+        from ..models.gnn import normalize_accessibility_features
+
         normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
-        
-        graph_data = create_accessibility_graph(
+
+        # Create spatial graph based on road network and geographic proximity
+        graph_data = self.data_loader.create_spatial_accessibility_graph(
             addresses=tract_addresses,
             accessibility_features=normalized_features,
-            k_neighbors=8
+            state_fips=state_fips,
+            county_fips=county_fips
         )
         
         self._log(f"Built graph: {graph_data.x.shape[0]} nodes, {graph_data.edge_index.shape[1]} edges")
         
-        # Step 3: Train GNN for accessibility → SVI prediction
+        # Step 3: Train GNN for accessibility and SVI prediction
         training_result = self._train_accessibility_svi_gnn(
             graph_data, tract_svi, tract_addresses
         )
@@ -195,7 +204,7 @@ class GRANITEPipeline:
         """
         Compute comprehensive accessibility features for addresses
         
-        Features computed:
+        Features:
         - Travel times to employment, healthcare, grocery (min, mean, 90th percentile)
         - Destination counts within time thresholds (30, 60, 90 minutes)
         - Transit accessibility scores
@@ -267,7 +276,6 @@ class GRANITEPipeline:
             self._log(f"Error computing accessibility features: {str(e)}")
             import traceback
             self._log(f"Traceback: {traceback.format_exc()}")
-            return self._create_fallback_accessibility_features(len(addresses))
 
     def _extract_accessibility_features(self, addresses, travel_times, dest_type):
         """Extract 8 accessibility features for one destination type"""
@@ -375,63 +383,10 @@ class GRANITEPipeline:
         
         return np.array(derived, dtype=np.float64)
 
-    def _create_fallback_accessibility_features(self, n_addresses):
-        """Create fallback accessibility features when calculation fails"""
-        
-        np.random.seed(42)
-        
-        # Create realistic but simple accessibility patterns
-        base_accessibility = np.random.beta(2, 5, n_addresses)  # Skewed toward lower accessibility
-        
-        features = []
-        for i in range(n_addresses):
-            base_score = base_accessibility[i]
-            
-            # Employment features
-            emp_min = 30 + (1 - base_score) * 60
-            emp_mean = emp_min * 1.3
-            emp_90th = emp_mean * 1.5
-            emp_counts = [max(0, int(base_score * 5)), max(0, int(base_score * 8)), max(0, int(base_score * 12))]
-            emp_transit = base_score * 0.3
-            emp_gravity = base_score * 10
-            
-            # Healthcare features
-            health_min = 25 + (1 - base_score) * 50
-            health_mean = health_min * 1.4
-            health_90th = health_mean * 1.6
-            health_counts = [max(0, int(base_score * 3)), max(0, int(base_score * 5)), max(0, int(base_score * 8))]
-            health_transit = base_score * 0.2
-            health_gravity = base_score * 6
-            
-            # Grocery features
-            grocery_min = 15 + (1 - base_score) * 30
-            grocery_mean = grocery_min * 1.2
-            grocery_90th = grocery_mean * 1.4
-            grocery_counts = [max(0, int(base_score * 4)), max(0, int(base_score * 7)), max(0, int(base_score * 10))]
-            grocery_transit = base_score * 0.4
-            grocery_gravity = base_score * 15
-            
-            row = [
-                emp_min, emp_mean, emp_90th, emp_counts[0], emp_counts[1], emp_counts[2], emp_transit, emp_gravity,
-                health_min, health_mean, health_90th, health_counts[0], health_counts[1], health_counts[2], health_transit, health_gravity,
-                grocery_min, grocery_mean, grocery_90th, grocery_counts[0], grocery_counts[1], grocery_counts[2], grocery_transit, grocery_gravity
-            ]
-            features.append(row)
-        
-        features_array = np.array(features, dtype=np.float64)
-        
-        # Add derived features
-        derived = self._compute_derived_accessibility_features(features_array)
-        final_features = np.column_stack([features_array, derived])
-        
-        self._log(f"Created fallback accessibility features: {final_features.shape}")
-        
-        return final_features
-
     def _train_accessibility_svi_gnn(self, graph_data, tract_svi, addresses):
-        """Train GNN for direct accessibility → SVI prediction"""
+        """Train GNN for direct accessibility and SVI predictions"""
         
-        self._log("Training Accessibility → SVI GNN...")
+        self._log("Training Accessibility SVI GNN...")
         
         try:
             from ..models.gnn import AccessibilitySVIGNN, AccessibilityGNNTrainer
@@ -450,7 +405,7 @@ class GRANITEPipeline:
             # Training parameters
             epochs = self.config.get('model', {}).get('epochs', 100)
             
-            self._log(f"Training model: {graph_data.x.shape[1]} features → SVI prediction")
+            self._log(f"Training model: {graph_data.x.shape[1]} features for SVI prediction")
             self._log(f"Target SVI: {tract_svi:.4f}, Epochs: {epochs}")
             
             # Train
@@ -512,23 +467,28 @@ class GRANITEPipeline:
         else:
             predictions = raw_predictions
         
-        # Apply light constraint adjustment (preserve most variation)
+        # Simple, direct constraint correction
         current_mean = np.mean(predictions)
-        adjustment = (tract_svi - current_mean) * 0.2  # Only 20% adjustment
-        adjusted_predictions = self._apply_strong_constraint_correction(predictions, tract_svi)
+        adjustment = tract_svi - current_mean
+        adjusted_predictions = predictions + adjustment
         adjusted_predictions = np.clip(adjusted_predictions, 0.0, 1.0)
         
-        # Generate realistic uncertainty estimates
-        base_uncertainty = 0.05
+        # Verify constraint is satisfied
+        final_mean = np.mean(adjusted_predictions)
+        final_error = abs(final_mean - tract_svi) / tract_svi * 100
         
-        # Higher uncertainty for predictions far from tract mean
+        self._log(f"Constraint correction: raw_mean={current_mean:.4f}, target={tract_svi:.4f}, final_mean={final_mean:.4f}, error={final_error:.2f}%")
+        
+        # Extract coordinates
+        x_coords = np.array([addr.geometry.x for _, addr in addresses.iterrows()])
+        y_coords = np.array([addr.geometry.y for _, addr in addresses.iterrows()])
+        
+        # Generate uncertainty estimates
+        base_uncertainty = 0.05
         distance_from_mean = np.abs(adjusted_predictions - tract_svi)
         distance_uncertainty = distance_from_mean * 0.1
         
         # Spatial uncertainty (edge locations have higher uncertainty)
-        x_coords = np.array([addr.geometry.x for _, addr in addresses.iterrows()])
-        y_coords = np.array([addr.geometry.y for _, addr in addresses.iterrows()])
-        
         center_x, center_y = np.mean(x_coords), np.mean(y_coords)
         edge_distances = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
         max_distance = np.max(edge_distances) if np.max(edge_distances) > 0 else 1

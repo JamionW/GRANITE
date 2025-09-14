@@ -149,6 +149,348 @@ class DataLoader:
                 })
         
         return pd.DataFrame(results)
+    
+    def create_road_network_graph(self, addresses, state_fips='47', county_fips='065'):
+        """
+        Create graph based on actual road network connectivity
+        
+        Args:
+            addresses: GeoDataFrame of addresses
+            state_fips: State FIPS code
+            county_fips: County FIPS code
+            
+        Returns:
+            PyTorch Geometric Data object with road network edges
+        """
+        import torch
+        from sklearn.neighbors import NearestNeighbors
+        
+        n_addresses = len(addresses)
+        
+        # Load road network
+        roads = self.load_road_network(state_fips=state_fips, county_fips=county_fips)
+        
+        if len(roads) > 0:
+            # Method 1: Road network-based connectivity
+            road_graph, address_to_road_mapping = self._create_road_connectivity(addresses, roads)
+            network_edges = self._extract_network_edges(road_graph, address_to_road_mapping)
+        else:
+            self._log("No road network available, using geographic connectivity only")
+            network_edges = []
+        
+        # Method 2: Geographic proximity (for disconnected areas)
+        geographic_edges = self._create_geographic_edges(addresses)
+        
+        # Combine edges
+        all_edges = network_edges + geographic_edges
+        
+        # Remove duplicates and create tensors
+        edge_set = set()
+        edge_list = []
+        edge_weights = []
+        edge_types = []
+        
+        for edge in all_edges:
+            edge_key = tuple(sorted([edge['from'], edge['to']]))
+            if edge_key not in edge_set and edge['from'] != edge['to']:
+                edge_set.add(edge_key)
+                edge_list.extend([[edge['from'], edge['to']], [edge['to'], edge['from']]])  # Undirected
+                edge_weights.extend([edge['weight'], edge['weight']])
+                edge_types.extend([edge['type'], edge['type']])
+        
+        # Convert to tensors
+        if edge_list:
+            edge_index = torch.LongTensor(edge_list).t().contiguous()
+            edge_weight = torch.FloatTensor(edge_weights)
+        else:
+            # Fallback: connect each address to nearest neighbor
+            edge_index, edge_weight = self._create_fallback_edges(n_addresses)
+            edge_types = ['fallback'] * edge_index.shape[1]
+        
+        # Log edge statistics
+        network_count = sum(1 for t in edge_types if t == 'network')
+        geographic_count = sum(1 for t in edge_types if t == 'geographic')
+        
+        self._log(f"Created road network graph: {n_addresses} nodes, {len(edge_list)//2} undirected edges")
+        self._log(f"  Network edges: {network_count//2}")
+        self._log(f"  Geographic edges: {geographic_count//2}")
+        
+        return edge_index, edge_weight
+
+    def _create_road_connectivity(self, addresses, roads):
+        """Create NetworkX graph from road segments and map addresses to roads"""
+        import networkx as nx
+        from sklearn.neighbors import BallTree
+        import numpy as np
+        
+        self._log("Building road network graph...")
+        
+        # Create NetworkX graph from roads
+        road_graph = nx.Graph()
+        
+        # Add road segments as edges
+        for idx, road in roads.iterrows():
+            if road.geometry.geom_type == 'LineString':
+                coords = list(road.geometry.coords)
+                
+                # Add edges between consecutive points along road
+                for i in range(len(coords) - 1):
+                    u, v = coords[i], coords[i + 1]
+                    
+                    # Calculate edge length (approximate)
+                    length = ((u[0] - v[0])**2 + (u[1] - v[1])**2)**0.5 * 111000  # Convert to meters
+                    
+                    # Add edge with road properties
+                    road_graph.add_edge(
+                        u, v, 
+                        length=length,
+                        road_id=idx,
+                        road_type=road.get('RTTYP', 'unknown')
+                    )
+        
+        # Map each address to nearest road node
+        if road_graph.number_of_nodes() == 0:
+            self._log("No road nodes found")
+            return road_graph, {}
+        
+        # Get all road nodes
+        road_nodes = np.array(list(road_graph.nodes()))
+        
+        # Build spatial index for road nodes
+        tree = BallTree(np.radians(road_nodes), metric='haversine')
+        
+        # Map addresses to nearest road nodes
+        address_to_road_mapping = {}
+        address_coords = np.array([[addr.geometry.x, addr.geometry.y] for _, addr in addresses.iterrows()])
+        
+        # Find nearest road node for each address (within 500m)
+        distances, indices = tree.query(np.radians(address_coords), k=1)
+        distances = distances.flatten() * 6371000  # Convert to meters
+        
+        for i, (addr_idx, addr) in enumerate(addresses.iterrows()):
+            if distances[i] < 500:  # Within 500m of a road
+                nearest_road_node = tuple(road_nodes[indices[i][0]])
+                address_to_road_mapping[i] = nearest_road_node
+            # else: address not connected to road network
+        
+        self._log(f"Mapped {len(address_to_road_mapping)}/{len(addresses)} addresses to road network")
+        
+        return road_graph, address_to_road_mapping
+
+    def _extract_network_edges(self, road_graph, address_to_road_mapping):
+        """
+        EFFICIENT: Extract address-to-address edges via road network connectivity
+        Uses distance limits and local connectivity instead of all-pairs shortest paths
+        """
+        import networkx as nx
+        from sklearn.neighbors import NearestNeighbors
+        import numpy as np
+        
+        network_edges = []
+        
+        # Get road-connected addresses
+        road_connected_addresses = list(address_to_road_mapping.keys())
+        
+        if len(road_connected_addresses) < 2:
+            return network_edges
+        
+        self._log(f"Computing network connectivity for {len(road_connected_addresses)} road-connected addresses...")
+        
+        # OPTIMIZATION 1: Use geographic proximity to limit road network queries
+        # Only compute road distances for geographically nearby addresses
+        address_coords = []
+        for addr_idx in road_connected_addresses:
+            road_node = address_to_road_mapping[addr_idx]
+            address_coords.append([road_node[0], road_node[1]])  # lon, lat
+        
+        address_coords = np.array(address_coords)
+        
+        # Find geographic neighbors (much faster than road network pathfinding)
+        max_neighbors = min(20, len(road_connected_addresses) - 1)  # Limit to 20 neighbors max
+        nbrs = NearestNeighbors(n_neighbors=max_neighbors, metric='euclidean').fit(address_coords)
+        distances, indices = nbrs.kneighbors(address_coords)
+        
+        # OPTIMIZATION 2: Only compute road paths for geographic neighbors
+        for i, addr1_idx in enumerate(road_connected_addresses):
+            road_node1 = address_to_road_mapping[addr1_idx]
+            
+            # Check only geographic neighbors, not all addresses
+            for j_idx in range(1, min(10, len(indices[i]))):  # Limit to top 10 neighbors
+                j = indices[i][j_idx]
+                addr2_idx = road_connected_addresses[j]
+                road_node2 = address_to_road_mapping[addr2_idx]
+                
+                # Skip if same node
+                if road_node1 == road_node2:
+                    continue
+                
+                # Geographic distance check (convert degrees to meters approximately)
+                geo_distance = distances[i][j_idx] * 111000  # rough conversion to meters
+                
+                # Only compute road path for nearby addresses (within 1km)
+                if geo_distance < 1000:
+                    try:
+                        # OPTIMIZATION 3: Use cutoff to limit search depth
+                        path_length = nx.shortest_path_length(
+                            road_graph, road_node1, road_node2, 
+                            weight='length', cutoff=1500  # Don't search beyond 1.5km
+                        )
+                        
+                        # Weight inversely proportional to road distance
+                        weight = 1.0 / (1.0 + path_length / 500.0)
+                        
+                        network_edges.append({
+                            'from': addr1_idx,
+                            'to': addr2_idx,
+                            'weight': weight,
+                            'type': 'network',
+                            'road_distance': path_length
+                        })
+                        
+                    except (nx.NetworkXNoPath, nx.NetworkXError):
+                        # No road connection or search exceeded cutoff
+                        continue
+            
+            # Progress update every 100 addresses
+            if (i + 1) % 100 == 0:
+                self._log(f"  Processed {i + 1}/{len(road_connected_addresses)} addresses...")
+        
+        self._log(f"Created {len(network_edges)} network edges")
+        return network_edges
+
+    def _create_geographic_edges(self, addresses, max_neighbors=6):
+        """Create edges based on geographic proximity"""
+        from sklearn.neighbors import NearestNeighbors
+        import numpy as np
+        
+        coords = np.array([[addr.geometry.x, addr.geometry.y] for _, addr in addresses.iterrows()])
+        n_addresses = len(addresses)
+        
+        # Find geographic neighbors
+        k_neighbors = min(max_neighbors, n_addresses - 1)
+        nbrs = NearestNeighbors(n_neighbors=k_neighbors + 1).fit(coords)  # +1 because includes self
+        distances, indices = nbrs.kneighbors(coords)
+        
+        geographic_edges = []
+        
+        for i in range(n_addresses):
+            for j_idx in range(1, len(indices[i])):  # Skip self (index 0)
+                j = indices[i][j_idx]
+                distance_deg = distances[i][j_idx]
+                distance_m = distance_deg * 111000  # Approximate conversion to meters
+                
+                # Only connect nearby addresses (within 1km)
+                if distance_m < 1000:
+                    weight = np.exp(-distance_m / 300.0)  # Exponential decay, 300m characteristic distance
+                    
+                    geographic_edges.append({
+                        'from': i,
+                        'to': j,
+                        'weight': weight,
+                        'type': 'geographic',
+                        'distance': distance_m
+                    })
+        
+        return geographic_edges
+
+    def _create_fallback_edges(self, n_addresses):
+        """Create minimal connectivity as fallback"""
+        import torch
+        from sklearn.neighbors import NearestNeighbors
+        import numpy as np
+        
+        # Create simple ring connectivity as absolute fallback
+        edge_list = []
+        edge_weights = []
+        
+        for i in range(n_addresses):
+            next_i = (i + 1) % n_addresses
+            edge_list.extend([[i, next_i], [next_i, i]])
+            edge_weights.extend([1.0, 1.0])
+        
+        edge_index = torch.LongTensor(edge_list).t().contiguous()
+        edge_weight = torch.FloatTensor(edge_weights)
+        
+        return edge_index, edge_weight
+
+    # Replace the entire road network approach with this simple, robust method:
+
+    def create_spatial_accessibility_graph(self, addresses, accessibility_features, 
+                                        state_fips='47', county_fips='065'):
+        """
+        Create graph based on geographic proximity (simple and robust)
+        
+        For spatial GNNs, local neighborhood connectivity is what matters,
+        not exact road network pathfinding.
+        """
+        import torch
+        from torch_geometric.data import Data
+        from sklearn.neighbors import NearestNeighbors
+        import numpy as np
+        
+        n_addresses = len(addresses)
+        
+        self._log(f"Creating spatial graph for {n_addresses} addresses...")
+        
+        # Use simple geographic connectivity
+        coords = np.array([[addr.geometry.x, addr.geometry.y] for _, addr in addresses.iterrows()])
+        
+        # Adaptive number of neighbors based on density
+        if n_addresses < 100:
+            k_neighbors = min(8, n_addresses - 1)
+        elif n_addresses < 500:
+            k_neighbors = min(12, n_addresses - 1)
+        else:
+            k_neighbors = min(16, n_addresses - 1)
+        
+        # Find k-nearest geographic neighbors
+        nbrs = NearestNeighbors(n_neighbors=k_neighbors + 1, metric='euclidean').fit(coords)
+        distances, indices = nbrs.kneighbors(coords)
+        
+        edge_list = []
+        edge_weights = []
+        
+        for i in range(n_addresses):
+            for j_idx in range(1, len(indices[i])):  # Skip self (index 0)
+                j = indices[i][j_idx]
+                distance_deg = distances[i][j_idx]
+                distance_m = distance_deg * 111000  # Convert to meters
+                
+                # Distance-based weight with reasonable cutoff
+                if distance_m < 1000:  # Within 1km
+                    weight = np.exp(-distance_m / 300.0)  # Exponential decay
+                    
+                    # Add both directions for undirected graph
+                    edge_list.extend([[i, j], [j, i]])
+                    edge_weights.extend([weight, weight])
+        
+        # Ensure we have connectivity
+        if not edge_list:
+            # Fallback: connect each node to nearest neighbor
+            for i in range(n_addresses):
+                if len(indices[i]) > 1:
+                    j = indices[i][1]  # Nearest neighbor
+                    edge_list.extend([[i, j], [j, i]])
+                    edge_weights.extend([1.0, 1.0])
+        
+        # Convert to tensors
+        edge_index = torch.LongTensor(edge_list).t().contiguous()
+        edge_weight = torch.FloatTensor(edge_weights)
+        
+        # Node features are the accessibility features
+        node_features = torch.FloatTensor(accessibility_features)
+        
+        # Create graph data
+        graph_data = Data(
+            x=node_features,
+            edge_index=edge_index,
+            edge_attr=edge_weight
+        )
+        
+        self._log(f"Created spatial graph: {n_addresses} nodes, {len(edge_list)//2} edges")
+        self._log(f"  Average neighbors per node: {len(edge_list)/n_addresses:.1f}")
+        
+        return graph_data
 
     def load_road_network(self, roads_file: Optional[str] = None, 
                         state_fips: str = '47', county_fips: str = '065') -> gpd.GeoDataFrame:

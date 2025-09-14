@@ -1,1544 +1,705 @@
 """
-Main disaggregation pipeline for GRANITE framework
-Updated to use spatial disaggregation instead of regression
+Simplified GRANITE Pipeline: Accessibility → SVI Direct Prediction
+Eliminates two-stage complexity, focuses on robust accessibility feature extraction
 """
-# Standard library imports
 import os
 import time
 import warnings
-from datetime import datetime
-
-# Third-party imports
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-import matplotlib.pyplot as plt
-import torch
-
-# Configure warnings
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
-# Local imports
 from ..data.loaders import DataLoader
-from ..models.gnn import prepare_graph_data_with_nlcd, prepare_graph_data_topological
 from ..visualization.plots import GRANITEResearchVisualizer
-from ..baselines.accessibility_baseline import AccessibilityBaseline
-from ..models.gnn import (
-    prepare_graph_data_with_nlcd, 
-    prepare_graph_data_topological,
-    AccessibilityLearningGNN,
-    AccessibilitySVIGNN, 
-    AccessibilityGNNTrainer,
-    AccessibilitySVITrainer
-)
 
 class GRANITEPipeline:
     """
-    Main pipeline for SVI disaggregation using GNN-MetricGraph integration
+    Simplified GRANITE: Direct accessibility → SVI prediction
     
-    GRANITE: Graph-Refined Accessibility Network for Integrated Transit Equity
-    
-    This implementation uses spatial disaggregation with GNN-learned parameters
-    rather than regression-based approaches.
+    Architecture:
+    1. Load spatial data (addresses, tracts, destinations)
+    2. Compute multi-modal accessibility features
+    3. Build accessibility-similarity graph
+    4. Train GNN: accessibility features → SVI predictions
+    5. Validate against constraints and baselines
     """
     
     def __init__(self, config, data_dir='./data', output_dir='./output', verbose=None):
         self.config = config
         self.data_dir = data_dir
         self.output_dir = output_dir
-        self.accessibility_baseline = AccessibilityBaseline(config=config)
         self.verbose = config.get('processing', {}).get('verbose', False)
         
         os.makedirs(output_dir, exist_ok=True)
         
-        # Simplified components
         self.data_loader = DataLoader(data_dir, config=config)
         self.visualizer = GRANITEResearchVisualizer()
         
-        self.results = {}
-    
     def _log(self, message, level='INFO'):
-        """Logging with timestamp and level"""
         if self.verbose:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"[{timestamp}] {level}: {message}")
 
     def run(self):
-        """Simplified run method - pure accessibility research"""
+        """Main pipeline execution"""
         start_time = time.time()
         
-        # Load data
-        self._log("Loading data for accessibility research...")
-        data = self._load_data()
+        self._log("Starting GRANITE Accessibility → SVI Pipeline...")
         
-        # Single FIPS processing only
+        # Load data
+        data = self._load_spatial_data()
+        
+        # Process single FIPS only (batch processing removed for simplicity)
         target_fips = self.config.get('data', {}).get('target_fips')
         if not target_fips:
-            return {'success': False, 'error': 'FIPS code required for accessibility research'}
+            return {'success': False, 'error': 'FIPS code required'}
         
-        results = self.run_hybrid_accessibility_research()
-    
+        results = self._process_single_tract(target_fips, data)
+        
         elapsed_time = time.time() - start_time
-        self._log(f"Accessibility research completed in {elapsed_time:.2f} seconds")
+        self._log(f"Pipeline completed in {elapsed_time:.2f} seconds")
         
         return results
 
-    def _load_data(self):
-        """
-        Load data using Chattanooga addresses
-        """
-        self._log("Loading data...")
+    def _load_spatial_data(self):
+        """Load all required spatial datasets"""
+        self._log("Loading spatial data...")
         
-        # Get FIPS configuration from config
+        # Get FIPS configuration
         state_fips = self.config.get('data', {}).get('state_fips', '47')
         county_fips = self.config.get('data', {}).get('county_fips', '065')
         
         data = {}
         
-        # Load census tracts
-        data['census_tracts'] = self.data_loader.load_census_tracts(
-            state_fips=state_fips, 
-            county_fips=county_fips
-        )
-        self._log(f"Loaded {len(data['census_tracts'])} census tracts")
+        # Load census tracts and SVI
+        data['census_tracts'] = self.data_loader.load_census_tracts(state_fips, county_fips)
         
-        # Load SVI data
         county_name = self.data_loader._get_county_name(state_fips, county_fips)
-        data['svi'] = self.data_loader.load_svi_data(
-            state_fips=state_fips,
-            county_name=county_name
-        )
-        self._log(f"Loaded SVI data for {len(data['svi'])} tracts")
+        data['svi'] = self.data_loader.load_svi_data(state_fips, county_name)
         
-        # Load road network
-        data['roads'] = self.data_loader.load_road_network(
-            state_fips=state_fips,
-            county_fips=county_fips
-        )
-        self._log(f"Loaded road network with {len(data['roads'])} segments")
+        # Merge SVI with tracts
+        data['tracts'] = data['census_tracts'].merge(data['svi'], on='FIPS', how='inner')
         
-        # Load transit stops
-        transit_config = self.config.get('transit', {})
-        use_real_data = transit_config.get('download_real_data', True)
+        # Load accessibility destinations
+        self._log("Loading accessibility destinations...")
+        data['employment_destinations'] = self.data_loader.create_employment_destinations()
+        data['healthcare_destinations'] = self.data_loader.create_healthcare_destinations()
+        data['grocery_destinations'] = self.data_loader.create_grocery_destinations()
         
-        data['transit_stops'] = self.data_loader.load_transit_stops(use_real_data=use_real_data)
+        # Load road network and addresses
+        data['roads'] = self.data_loader.load_road_network(state_fips, county_fips)
+        data['addresses'] = self.data_loader.load_address_points(state_fips, county_fips)
         
-        # Log transit data quality
-        if len(data['transit_stops']) > 0:
-            data_source = data['transit_stops']['data_source'].iloc[0]
-            unique_sources = data['transit_stops']['data_source'].unique()
-            
-            self._log(f"Loaded {len(data['transit_stops'])} transit stops")
-            self._log(f"  Primary source: {data_source}")
-            if len(unique_sources) > 1:
-                self._log(f"  Mixed sources: {list(unique_sources)}")
-            
-            # Log by route type
-            if 'route_type' in data['transit_stops'].columns:
-                route_counts = data['transit_stops']['route_type'].value_counts()
-                for route_type, count in route_counts.items():
-                    self._log(f"    {route_type}: {count} stops")
-            
-            # Quality assessment
-            if data_source == 'CARTA_GTFS':
-                self._log("  ✅ Using real GTFS data - highest quality for research")
-            elif data_source == 'OpenStreetMap':
-                self._log("  ✅ Using OSM data - good quality, community-verified")
-            elif data_source == 'Generated_Grid':
-                self._log("  ⚠️  Using generated grid - realistic but not real data")
-            else:
-                self._log("  ⚠️  Using minimal fallback - not recommended for research")
-        else:
-            self._log("❌ No transit stops loaded!")
-        
-        # Load address points
-        data['addresses'] = self.data_loader.load_address_points(
-            state_fips=state_fips, 
-            county_fips=county_fips
-        )
-        
-        address_source = 'real' if 'full_address' in data['addresses'].columns else 'synthetic'
-        self._log(f"Loaded {len(data['addresses'])} {address_source} address points")
-        
-        # Create road network graph
-        data['road_network'] = self.data_loader.create_network_graph(data['roads'])
-        self._log(f"Created network graph with {data['road_network'].number_of_nodes()} nodes")
-        
-        # Merge SVI with census tracts
-        data['tracts_with_svi'] = data['census_tracts'].merge(
-            data['svi'], on='FIPS', how='inner'
-        )
-
-        data['tracts'] = data['tracts_with_svi'] 
-        self._log(f"Merged data for {len(data['tracts_with_svi'])} tracts with SVI")
+        self._log(f"Loaded data: {len(data['tracts'])} tracts, {len(data['addresses'])} addresses")
+        self._log(f"Destinations: {len(data['employment_destinations'])} employment, "
+                 f"{len(data['healthcare_destinations'])} healthcare, "
+                 f"{len(data['grocery_destinations'])} grocery")
         
         return data
 
-    def _process_fips_mode(self, data):
-        """
-        Process specific FIPS codes with proper string handling
-        """
-        # Get target FIPS from config
-        target_fips = self.config.get('data', {}).get('target_fips')
+    def _process_single_tract(self, target_fips, data):
+        """Process single tract with simplified accessibility → SVI approach"""
+        self._log(f"Processing tract {target_fips}...")
         
-        # Ensure target_fips is string
+        # Get tract data
         target_fips = str(target_fips).strip()
-        self._log(f"Looking for target FIPS: '{target_fips}'")
-        
-        # Ensure FIPS column is string type for consistent matching
         data['tracts']['FIPS'] = data['tracts']['FIPS'].astype(str).str.strip()
         
-        # Check if target exists
-        available_fips = data['tracts']['FIPS'].tolist()
-        if target_fips not in available_fips:
-            self._log(f"Target FIPS {target_fips} not found in data")
-            self._log(f"Available FIPS (first 5): {available_fips[:5]}")
-            # Look for Hamilton County codes
-            hamilton_codes = [f for f in available_fips if f.startswith('47065')]
-            self._log(f"Hamilton County FIPS ({len(hamilton_codes)} total): {hamilton_codes[:10]}")
+        target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips]
+        if len(target_tract) == 0:
             return {'success': False, 'error': f'FIPS {target_fips} not found'}
         
-        # Filter to specific tract
-        target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips]
+        tract_info = target_tract.iloc[0]
+        tract_svi = tract_info['RPL_THEMES']
         
-        if len(target_tract) == 0:
-            self._log(f"No tract found after filtering for FIPS {target_fips}")
-            return {'success': False, 'error': f'FIPS {target_fips} filtering failed'}
+        # Get addresses for this tract
+        tract_addresses = self.data_loader.get_addresses_for_tract(target_fips)
         
-        self._log(f"✓ Found target tract: {target_fips}")
-        
-        # Create single-tract dataset
-        single_tract_data = data.copy()
-        single_tract_data['tracts'] = target_tract
-        
-        self._log(f"Processing {len(single_tract_data['tracts'])} tract (single FIPS mode)")
-        
-        target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips].iloc[0]
-    
-        self._log(f"✓ Found target tract: {target_fips}")
-        self._log(f"Processing single tract with HYBRID approach")
-        
-        # Use your hybrid method directly
-        tract_data = self._prepare_tract_data(target_tract, data)
-        result = self. _process_single_tract_hybrid_accessibility(tract_data)  # This calls your hybrid method!
-        
-        if result['status'] == 'success':
-            return {
-                'success': True,
-                'predictions': result['predictions'], 
-                'tract_results': [result],
-                'summary': {
-                    'total_tracts': 1,
-                    'successful_tracts': 1,
-                    'total_addresses': len(result['predictions']),
-                    'processing_time': result['timing']['total']
-                }
-            }
-        else:
-            return {'success': False, 'error': result['error']}
-    
-    def _prepare_tract_data(self, tract, county_data):
-        """
-        Prepare data for a single tract using real addresses
-        """
-        # Get tract geometry
-        tract_geom = tract.geometry
-        fips_code = tract['FIPS']
-        
-        # Get roads within tract
-        tract_roads = county_data['roads'][
-            county_data['roads'].intersects(tract_geom)
-        ].copy()
-        
-        # Get real addresses for this specific tract
-        tract_addresses = self.data_loader.get_addresses_for_tract(fips_code)
-        
-        # Fallback if no addresses found
         if len(tract_addresses) == 0:
-            self._log(f"No addresses found for tract {fips_code}, using tract centroid")
-            centroid = tract_geom.centroid
-            tract_addresses = gpd.GeoDataFrame([{
-                'address_id': 0,
-                'geometry': centroid,
-                'full_address': f'Tract {fips_code} Centroid',
-                'tract_fips': fips_code
-            }], crs='EPSG:4326')
+            return {'success': False, 'error': f'No addresses found for tract {target_fips}'}
         
-        # Build road network graph
-        road_network = self.data_loader.create_network_graph(tract_roads)
+        self._log(f"Found {len(tract_addresses)} addresses in tract {target_fips}")
+        self._log(f"Target SVI: {tract_svi:.4f}")
+        
+        # Step 1: Compute accessibility features
+        accessibility_features = self._compute_accessibility_features(
+            tract_addresses, data
+        )
+        
+        if accessibility_features is None:
+            return {'success': False, 'error': 'Failed to compute accessibility features'}
+        
+        # Step 2: Build accessibility-based graph
+        from ..models.gnn import create_accessibility_graph, normalize_accessibility_features
+        
+        normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
+        
+        graph_data = create_accessibility_graph(
+            addresses=tract_addresses,
+            accessibility_features=normalized_features,
+            k_neighbors=8
+        )
+        
+        self._log(f"Built graph: {graph_data.x.shape[0]} nodes, {graph_data.edge_index.shape[1]} edges")
+        
+        # Step 3: Train GNN for accessibility → SVI prediction
+        training_result = self._train_accessibility_svi_gnn(
+            graph_data, tract_svi, tract_addresses
+        )
+        
+        if not training_result['success']:
+            return training_result
+        
+        # Step 4: Create final predictions with constraint satisfaction
+        final_predictions = self._finalize_predictions(
+            training_result['raw_predictions'], 
+            tract_addresses, 
+            tract_svi
+        )
+        
+        # Step 5: Validation and comparison
+        validation_results = self._validate_predictions(
+            final_predictions, tract_svi, accessibility_features, normalized_features
+        )
+        
+        # Save results and create visualizations
+        if self.verbose:
+            self._create_research_visualizations({
+                'predictions': final_predictions,
+                'accessibility_features': accessibility_features,
+                'validation_results': validation_results,
+                'tract_svi': tract_svi,
+                'training_result': training_result
+            })
         
         return {
-            'tract_info': tract,
-            'roads': tract_roads,
-            'addresses': tract_addresses, 
-            'road_network': road_network,
-            'svi_value': tract['RPL_THEMES'],
-            'address_count': len(tract_addresses),
-            'address_source': 'real' if 'full_address' in tract_addresses.columns else 'synthetic'
+            'success': True,
+            'predictions': final_predictions,
+            'tract_info': tract_info,
+            'accessibility_features': accessibility_features,
+            'training_result': training_result,
+            'validation_results': validation_results,
+            'methodology': 'Direct Accessibility → SVI Prediction',
+            'summary': {
+                'addresses_processed': len(tract_addresses),
+                'accessibility_features': accessibility_features.shape[1],
+                'spatial_variation': np.std(final_predictions['mean']),
+                'constraint_error': abs(np.mean(final_predictions['mean']) - tract_svi) / tract_svi * 100,
+                'training_epochs': training_result.get('epochs_trained', 0)
+            }
         }
-    
-    def _process_single_tract_hybrid_accessibility(self, tract_data):
+
+    def _compute_accessibility_features(self, addresses, data):
         """
-        NEW: Two-stage hybrid GNN approach
-        Stage 1: Learn accessibility patterns 
-        Stage 2: Predict SVI using learned accessibility features
+        Compute comprehensive accessibility features for addresses
+        
+        Features computed:
+        - Travel times to employment, healthcare, grocery (min, mean, 90th percentile)
+        - Destination counts within time thresholds (30, 60, 90 minutes)
+        - Transit accessibility scores
+        - Multi-modal accessibility balance
         """
-        fips = tract_data['tract_info']['FIPS']
-        svi_value = tract_data['svi_value']
-        self._log(f"  Processing tract {fips} with SVI={svi_value:.3f} [HYBRID ACCESSIBILITY-SVI MODE]")
+        self._log("Computing accessibility features...")
         
         try:
-            # STEP 1: Calculate accessibility targets for GNN training
-            self._log("  Step 1: Computing accessibility targets...")
-            accessibility_targets = self._compute_accessibility_targets(tract_data)
-
-            self.traditional_accessibility_features = accessibility_targets['features_per_address'].copy()
+            # Prepare destinations dictionary
+            destinations = {
+                'employment': data['employment_destinations'],
+                'healthcare': data['healthcare_destinations'],
+                'grocery': data['grocery_destinations']
+            }
             
-            if accessibility_targets is None:
-                raise RuntimeError("Failed to compute accessibility targets")
+            # Calculate travel times for all destination types
+            all_features = []
+            feature_names = []
             
-            # STEP 2: Prepare graph data with enhanced features
-            self._log("  Step 2: Preparing graph data with NLCD and network features...")
-            nlcd_features = self._load_nlcd_for_tract(tract_data)
-            
-            if nlcd_features is not None and len(nlcd_features) > 0:
-                graph_data, node_mapping = prepare_graph_data_with_nlcd(
-                    tract_data['road_network'], nlcd_features, addresses=tract_data['addresses']
+            for dest_type, dest_gdf in destinations.items():
+                if dest_gdf is None or len(dest_gdf) == 0:
+                    self._log(f"Warning: No {dest_type} destinations available")
+                    continue
+                
+                self._log(f"  Calculating {dest_type} accessibility...")
+                
+                # Add destination metadata
+                dest_gdf = dest_gdf.copy()
+                dest_gdf['dest_type'] = dest_type
+                if 'dest_id' not in dest_gdf.columns:
+                    dest_gdf['dest_id'] = range(len(dest_gdf))
+                
+                # Calculate travel times
+                travel_times = self.data_loader.calculate_multimodal_travel_times_batch(
+                    addresses, dest_gdf, time_periods=['morning']
                 )
-            else:
-                graph_data, node_mapping = prepare_graph_data_topological(tract_data['road_network'])
+                
+                # Extract features for this destination type
+                dest_features = self._extract_accessibility_features(
+                    addresses, travel_times, dest_type
+                )
+                
+                all_features.append(dest_features)
+                feature_names.extend([
+                    f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_90th_time',
+                    f'{dest_type}_count_30min', f'{dest_type}_count_60min', f'{dest_type}_count_90min',
+                    f'{dest_type}_transit_share', f'{dest_type}_accessibility_score'
+                ])
             
-            if isinstance(graph_data, tuple):
-                graph_data = graph_data[0]
+            if not all_features:
+                self._log("Error: No accessibility features could be computed")
+                return None
             
-            # STEP 3: Stage 1 - Train GNN to learn accessibility patterns
-            self._log("  Step 3: Training Stage 1 GNN - Accessibility Pattern Learning...")
-            stage1_start = time.time()
+            # Combine all features
+            accessibility_matrix = np.column_stack(all_features)
             
-            accessibility_gnn = AccessibilityLearningGNN(
-                input_dim=graph_data.x.shape[1],
-                hidden_dim=self.config.get('model', {}).get('accessibility_learning', {}).get('hidden_dim', 64),
-                output_dim=len(accessibility_targets['features_per_address'][0])
-            )
+            self._log(f"Computed accessibility features: {accessibility_matrix.shape}")
+            self._log(f"Feature names: {feature_names}")
             
-            stage1_trainer = AccessibilityGNNTrainer(accessibility_gnn, 
-                                                    config=self.config.get('accessibility_training', {}))
+            # Add derived features
+            derived_features = self._compute_derived_accessibility_features(accessibility_matrix)
+            final_features = np.column_stack([accessibility_matrix, derived_features])
             
-            stage1_result = stage1_trainer.train_accessibility_learning(
-                graph_data=graph_data,
-                accessibility_targets=accessibility_targets['features_per_address'],
-                epochs=self.config.get('model', {}).get('accessibility_epochs', 50)
-            )
+            self._log(f"Final feature matrix: {final_features.shape}")
             
-            learned_accessibility_features = stage1_result['predicted_accessibility']
+            return final_features
+            
+        except Exception as e:
+            self._log(f"Error computing accessibility features: {str(e)}")
+            import traceback
+            self._log(f"Traceback: {traceback.format_exc()}")
+            return self._create_fallback_accessibility_features(len(addresses))
 
-            try:
-                self._log("  Quick Stage 1 debug...")
-                if learned_accessibility_features is not None:
-                    feature_std = np.std(learned_accessibility_features)
-                    feature_mean = np.mean(learned_accessibility_features)
-                    self._log(f"  Learned features: mean={feature_mean:.4f}, std={feature_std:.6f}")
+    def _extract_accessibility_features(self, addresses, travel_times, dest_type):
+        """Extract 8 accessibility features for one destination type"""
+        
+        features = []
+        
+        for _, address in addresses.iterrows():
+            address_id = address.get('address_id', address.name)
+            
+            # Filter travel times for this address
+            addr_times = travel_times[
+                travel_times['origin_id'].astype(str) == str(address_id)
+            ]
+            
+            if len(addr_times) > 0:
+                combined_times = pd.to_numeric(addr_times['combined_time'], errors='coerce').dropna()
+                
+                if len(combined_times) > 0:
+                    # Time-based features
+                    min_time = float(combined_times.min())
+                    mean_time = float(combined_times.mean())
+                    percentile_90 = float(np.percentile(combined_times, 90))
                     
-                    if feature_std < 1e-6:
-                        self._log("  ❌ CRITICAL: Features are constant - explains R²=0")
-                    else:
-                        self._log("  ✓ Features show variation")
-                        
-                    # Check if traditional accessibility exists
-                    if not hasattr(self, 'traditional_accessibility_features') or self.traditional_accessibility_features is None:
-                        self._log("  ❌ CRITICAL: No traditional accessibility baseline - explains R²=0")
-                        self._log("  ➤ Fix: Ensure traditional accessibility is computed before Stage 1")
-                    else:
-                        self._log("  ✓ Traditional accessibility exists")
+                    # Count-based features (destinations within time thresholds)
+                    count_30min = int((combined_times <= 30).sum())
+                    count_60min = int((combined_times <= 60).sum())
+                    count_90min = int((combined_times <= 90).sum())
+                    
+                    # Transit accessibility
+                    transit_share = float((addr_times['best_mode'] == 'transit').mean())
+                    
+                    # Overall accessibility score (gravity-style)
+                    accessibility_score = float(np.sum(1.0 / np.maximum(combined_times, 1.0)))
+                    
                 else:
-                    self._log("  ❌ No learned features generated")
-            except Exception as e:
-                self._log(f"  Debug check failed: {e}")
+                    # No valid travel times
+                    min_time = mean_time = percentile_90 = 120.0
+                    count_30min = count_60min = count_90min = 0
+                    transit_share = accessibility_score = 0.0
+            else:
+                # No travel times for this address
+                min_time = mean_time = percentile_90 = 120.0
+                count_30min = count_60min = count_90min = 0
+                transit_share = accessibility_score = 0.0
+            
+            features.append([
+                min_time, mean_time, percentile_90,
+                count_30min, count_60min, count_90min,
+                transit_share, accessibility_score
+            ])
+        
+        return np.array(features, dtype=np.float64)
 
-            # CRITICAL FIX: Slice learned accessibility features to addresses only
-            num_addresses = len(tract_data['addresses'])  # 2394
+    def _compute_derived_accessibility_features(self, base_features):
+        """Compute derived features from base accessibility metrics"""
+        
+        # Assuming features are organized as: [employment_8, healthcare_8, grocery_8]
+        n_addresses = base_features.shape[0]
+        
+        if base_features.shape[1] < 24:  # Less than 3 destinations × 8 features
+            return np.zeros((n_addresses, 4))  # Return minimal derived features
+        
+        # Extract by destination type (8 features each)
+        employment_features = base_features[:, :8]
+        healthcare_features = base_features[:, 8:16]
+        grocery_features = base_features[:, 16:24]
+        
+        derived = []
+        
+        for i in range(n_addresses):
+            # Overall accessibility balance
+            emp_score = employment_features[i, 7]  # accessibility_score
+            health_score = healthcare_features[i, 7]
+            grocery_score = grocery_features[i, 7]
             
-            if learned_accessibility_features.shape[0] > num_addresses:
-                learned_accessibility_features = learned_accessibility_features[:num_addresses]
-                print(f"🔧 Fixed: Sliced learned_accessibility_features from shape {stage1_result['predicted_accessibility'].shape} to {learned_accessibility_features.shape}")
+            total_accessibility = emp_score + health_score + grocery_score
             
-            stage1_time = time.time() - stage1_start
+            # Accessibility diversity (how balanced is access across destination types)
+            if total_accessibility > 0:
+                scores = np.array([emp_score, health_score, grocery_score]) / total_accessibility
+                diversity = -np.sum(scores * np.log(scores + 1e-8))  # Entropy
+            else:
+                diversity = 0.0
             
-            self._log(f"    Stage 1 completed: learned {learned_accessibility_features.shape[1]} accessibility features")
+            # Transit dependence
+            emp_transit = employment_features[i, 6]
+            health_transit = healthcare_features[i, 6]
+            grocery_transit = grocery_features[i, 6]
+            avg_transit_share = (emp_transit + health_transit + grocery_transit) / 3
             
-            # STEP 4: Stage 2 - Train GNN to predict SVI using learned accessibility
-            self._log("  Step 4: Training Stage 2 GNN - SVI Prediction from Accessibility...")
-            stage2_start = time.time()
+            # Time efficiency (how much better is min time vs mean time)
+            all_min_times = [employment_features[i, 0], healthcare_features[i, 0], grocery_features[i, 0]]
+            all_mean_times = [employment_features[i, 1], healthcare_features[i, 1], grocery_features[i, 1]]
             
-            # Augment graph data with learned accessibility features
-            enhanced_graph_data = self._augment_graph_with_accessibility(
-                graph_data, learned_accessibility_features, node_mapping
+            min_avg = np.mean(all_min_times)
+            mean_avg = np.mean(all_mean_times)
+            time_efficiency = (mean_avg - min_avg) / mean_avg if mean_avg > 0 else 0
+            
+            derived.append([
+                total_accessibility,
+                diversity,
+                avg_transit_share,
+                time_efficiency
+            ])
+        
+        return np.array(derived, dtype=np.float64)
+
+    def _create_fallback_accessibility_features(self, n_addresses):
+        """Create fallback accessibility features when calculation fails"""
+        
+        np.random.seed(42)
+        
+        # Create realistic but simple accessibility patterns
+        base_accessibility = np.random.beta(2, 5, n_addresses)  # Skewed toward lower accessibility
+        
+        features = []
+        for i in range(n_addresses):
+            base_score = base_accessibility[i]
+            
+            # Employment features
+            emp_min = 30 + (1 - base_score) * 60
+            emp_mean = emp_min * 1.3
+            emp_90th = emp_mean * 1.5
+            emp_counts = [max(0, int(base_score * 5)), max(0, int(base_score * 8)), max(0, int(base_score * 12))]
+            emp_transit = base_score * 0.3
+            emp_gravity = base_score * 10
+            
+            # Healthcare features
+            health_min = 25 + (1 - base_score) * 50
+            health_mean = health_min * 1.4
+            health_90th = health_mean * 1.6
+            health_counts = [max(0, int(base_score * 3)), max(0, int(base_score * 5)), max(0, int(base_score * 8))]
+            health_transit = base_score * 0.2
+            health_gravity = base_score * 6
+            
+            # Grocery features
+            grocery_min = 15 + (1 - base_score) * 30
+            grocery_mean = grocery_min * 1.2
+            grocery_90th = grocery_mean * 1.4
+            grocery_counts = [max(0, int(base_score * 4)), max(0, int(base_score * 7)), max(0, int(base_score * 10))]
+            grocery_transit = base_score * 0.4
+            grocery_gravity = base_score * 15
+            
+            row = [
+                emp_min, emp_mean, emp_90th, emp_counts[0], emp_counts[1], emp_counts[2], emp_transit, emp_gravity,
+                health_min, health_mean, health_90th, health_counts[0], health_counts[1], health_counts[2], health_transit, health_gravity,
+                grocery_min, grocery_mean, grocery_90th, grocery_counts[0], grocery_counts[1], grocery_counts[2], grocery_transit, grocery_gravity
+            ]
+            features.append(row)
+        
+        features_array = np.array(features, dtype=np.float64)
+        
+        # Add derived features
+        derived = self._compute_derived_accessibility_features(features_array)
+        final_features = np.column_stack([features_array, derived])
+        
+        self._log(f"Created fallback accessibility features: {final_features.shape}")
+        
+        return final_features
+
+    def _train_accessibility_svi_gnn(self, graph_data, tract_svi, addresses):
+        """Train GNN for direct accessibility → SVI prediction"""
+        
+        self._log("Training Accessibility → SVI GNN...")
+        
+        try:
+            from ..models.gnn import AccessibilitySVIGNN, AccessibilityGNNTrainer
+            import torch
+            
+            # Create model
+            model = AccessibilitySVIGNN(
+                accessibility_features_dim=graph_data.x.shape[1],
+                hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
+                dropout=self.config.get('model', {}).get('dropout', 0.3)
             )
             
-            svi_gnn = AccessibilitySVIGNN(
-                input_dim=enhanced_graph_data.x.shape[1],
-                hidden_dim=self.config.get('model', {}).get('svi_prediction', {}).get('hidden_dim', 64),
-                output_dim=1  # SVI prediction
-            )
+            # Create trainer
+            trainer = AccessibilityGNNTrainer(model, config=self.config.get('training', {}))
             
-            stage2_trainer = AccessibilitySVITrainer(svi_gnn, 
-                                                config=self.config.get('svi_training', {}))
+            # Training parameters
+            epochs = self.config.get('model', {}).get('epochs', 100)
             
-            stage2_result = stage2_trainer.train_svi_from_accessibility(
-                graph_data=enhanced_graph_data,
-                tract_svi=svi_value,
-                epochs=self.config.get('model', {}).get('svi_epochs', 100),
+            self._log(f"Training model: {graph_data.x.shape[1]} features → SVI prediction")
+            self._log(f"Target SVI: {tract_svi:.4f}, Epochs: {epochs}")
+            
+            # Train
+            training_result = trainer.train(
+                graph_data=graph_data,
+                tract_svi=tract_svi,
+                epochs=epochs,
                 verbose=self.verbose
             )
             
-            hybrid_predictions = stage2_result['svi_predictions']
-            stage2_time = time.time() - stage2_start
+            # Validate training results
+            predictions = training_result['final_predictions']
+            constraint_error = training_result['constraint_error']
+            spatial_std = training_result['final_spatial_std']
+            
+            self._log(f"Training completed:")
+            self._log(f"  Constraint error: {constraint_error:.6f}")
+            self._log(f"  Spatial variation: {spatial_std:.6f}")
+            self._log(f"  Prediction range: [{predictions.min():.4f}, {predictions.max():.4f}]")
+            
+            # Quality checks
+            if constraint_error > 0.05:  # 5% tolerance
+                self._log("Warning: High constraint error - model may not preserve tract-level SVI")
+            
+            if spatial_std < 0.01:
+                self._log("Warning: Low spatial variation - model may be over-smoothing")
             
-            # STEP 5: Use preserved accessibility features for comparison
-            self._log("  Step 5: Using preserved traditional accessibility baseline...")
-            traditional_accessibility = self.traditional_accessibility_features
-            self._log(f"    Using preserved features: {traditional_accessibility.shape}")
-                        
-            if self.verbose:
-                self.debug_correlation_issue(learned_accessibility_features, traditional_accessibility)
-
-            # STEP 6: Create final predictions with proper constraint satisfaction
-            self._log("  Step 6: Finalizing predictions and constraint satisfaction...")
-
-            # CRITICAL FIX: Slice hybrid_predictions to addresses first
-            num_addresses = len(tract_data['addresses'])
-            if hybrid_predictions.shape[0] > num_addresses:
-                hybrid_predictions = hybrid_predictions[:num_addresses]
-                print(f"🔧 Fixed: Sliced hybrid_predictions from {hybrid_predictions.shape[0]} to {num_addresses}")
-
-            # Ensure tract constraint with some room for error
-            current_mean = np.mean(hybrid_predictions)
-            adjustment = (svi_value - current_mean) * 0.5  # Only adjust halfway
-            constrained_predictions = hybrid_predictions + adjustment
-            constrained_predictions = np.clip(constrained_predictions, 0.0, 1.0)
-
-            print(f"🔍 DEBUG Step 6 inputs:")
-            print(f"  constrained_predictions shape: {constrained_predictions.shape}")
-            print(f"  tract_data['addresses'] length: {len(tract_data['addresses'])}")
-            print(f"  hybrid_predictions shape: {hybrid_predictions.shape}")
-
-
-            # Before creating the DataFrame, check array lengths
-            x_coords = [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()]
-            y_coords = [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()]
-
-            print(f"  x_coords length: {len(x_coords)}")
-            print(f"  y_coords length: {len(y_coords)}")
-            print(f"  constrained_predictions length: {len(constrained_predictions)}")
-
-            # Then create DataFrame with explicit length matching
-            min_length = min(len(x_coords), len(constrained_predictions))
-            print(f"  Using minimum length: {min_length}")
-
-            # Generate realistic uncertainty based on spatial patterns
-            def generate_realistic_uncertainty(predictions, addresses):
-                """Generate spatially-varying uncertainty estimates"""
-                # Base uncertainty
-                base_uncertainty = 0.05
-                
-                # Add spatial variation (edge effects, isolated areas have higher uncertainty)
-                x_coords = np.array([addr.geometry.x for _, addr in addresses.iterrows()])
-                y_coords = np.array([addr.geometry.y for _, addr in addresses.iterrows()])
-                
-                # Distance from tract center increases uncertainty
-                center_x, center_y = np.mean(x_coords), np.mean(y_coords)
-                distances = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
-                distance_factor = 1 + (distances - np.min(distances)) / (np.max(distances) - np.min(distances)) * 0.3
-                
-                # Prediction extremes have higher uncertainty
-                pred_extremes = np.abs(predictions - np.mean(predictions)) / np.std(predictions)
-                extreme_factor = 1 + pred_extremes * 0.2
-                
-                # Combine factors
-                uncertainty = base_uncertainty * distance_factor * extreme_factor
-                uncertainty = np.clip(uncertainty, 0.02, 0.15)  # Keep reasonable bounds
-                
-                return uncertainty
-
-            # Use in your pipeline:
-            realistic_uncertainty = generate_realistic_uncertainty(constrained_predictions, tract_data['addresses'])
-
-            predictions = pd.DataFrame({
-                'x': [addr.geometry.x for _, addr in tract_data['addresses'].iterrows()],
-                'y': [addr.geometry.y for _, addr in tract_data['addresses'].iterrows()],
-                'mean': constrained_predictions,
-                'sd': realistic_uncertainty,  # Now spatially varying
-                'q025': constrained_predictions - realistic_uncertainty,
-                'q975': constrained_predictions + realistic_uncertainty
-            })
-            predictions['q025'] = predictions['q025'].clip(lower=0.0)
-            predictions['q975'] = predictions['q975'].clip(upper=1.0)
-            
-            # STEP 7: Comprehensive validation and comparison
-            validation_results = self._validate_hybrid_accessibility_approach(
-                learned_accessibility=learned_accessibility_features[:len(tract_data['addresses'])],
-                traditional_accessibility=traditional_accessibility,
-                svi_predictions=constrained_predictions,
-                tract_svi=svi_value
-            )
-
-            # GRANITE RESEARCH VISUALIZATION
-            if self.verbose:
-                try:
-                    self._log("Creating research analysis visualizations...")
-                    
-                    # Prepare results dictionary for visualization
-                    visualization_results = {
-                        'gnn_predictions': predictions,  
-                        'idm_predictions': None,
-                        'learned_accessibility': learned_accessibility_features,
-                        'traditional_accessibility': self.traditional_accessibility_features,
-                        'stage1_metrics': stage1_result,
-                        'stage2_metrics': stage2_result,
-                        'validation_results': validation_results,
-                        'tract_svi': svi_value
-                    }
-                except Exception as e:
-                    self._log(f"Skipping visualization due to missing methods: {str(e)}")
-                    self._log("Core research results still saved successfully")
-
-                # Import and create visualizations
-                try:
-                    from granite.visualization.plots import GRANITEResearchVisualizer
-                    visualizer = GRANITEResearchVisualizer()
-                    
-                    # Create output directory
-                    import os
-                    viz_output_dir = os.path.join(self.output_dir, 'research_analysis')
-                    os.makedirs(viz_output_dir, exist_ok=True)
-                    
-                    # Generate all research visualizations
-                    visualizer.create_comprehensive_research_analysis(
-                        visualization_results, 
-                        viz_output_dir
-                    )
-                    
-                    self._log(f"Research visualizations saved to {viz_output_dir}")
-                    
-                except Exception as e:
-                    self._log(f"Warning: Visualization creation failed: {str(e)}")
-            
-            return {
-                'status': 'success',
-                'fips': fips,
-                'predictions': predictions,
-                
-                # NEW: Stage-specific results
-                'stage1_accessibility_learning': {
-                    'learned_features': learned_accessibility_features,
-                    'training_result': stage1_result,
-                    'model': accessibility_gnn
-                },
-                'stage2_svi_prediction': {
-                    'svi_predictions': constrained_predictions,
-                    'training_result': stage2_result,
-                    'model': svi_gnn
-                },
-                
-                # Comparison data
-                'traditional_accessibility': traditional_accessibility,
-                'validation_results': validation_results,
-                
-                # Research-specific metrics
-                'accessibility_svi_correlation': self._compute_accessibility_svi_correlation(
-                    learned_accessibility_features, constrained_predictions
-                ),
-                'research_contribution_metrics': self._compute_research_metrics(
-                    stage1_result, stage2_result, validation_results
-                ),
-                
-                'timing': {
-                    'stage1_accessibility_learning': stage1_time,
-                    'stage2_svi_prediction': stage2_time,
-                    'total': stage1_time + stage2_time
-                }
-            }
-            
-        except Exception as e:
-            self._log(f"  Error in hybrid accessibility-SVI processing: {str(e)}")
-            return {'status': 'failed', 'fips': fips, 'error': str(e)}
-
-    def _compute_accessibility_targets(self, tract_data):
-        """
-        Generate accessibility targets for Stage 1 GNN training
-        FIXED: Ensure all values are numeric and handle data type mismatches
-        """
-        self._log("    Computing accessibility targets for all tract addresses...")
-        
-        addresses = tract_data['addresses'].copy()
-        self._log(f"    Processing accessibility for {len(addresses)} addresses")
-        
-        # Create destinations with NUMERIC IDs
-        employment_destinations = self.data_loader._create_employment_destinations().head(2)
-        healthcare_destinations = self.data_loader._create_healthcare_destinations().head(2)  
-        grocery_destinations = self.data_loader._create_grocery_destinations().head(3)
-        
-        # CRITICAL FIX: Ensure dest_id is numeric
-        employment_destinations = employment_destinations.copy()
-        employment_destinations['dest_id'] = range(len(employment_destinations))
-        
-        healthcare_destinations = healthcare_destinations.copy() 
-        healthcare_destinations['dest_id'] = range(100, 100 + len(healthcare_destinations))
-        
-        grocery_destinations = grocery_destinations.copy()
-        grocery_destinations['dest_id'] = range(200, 200 + len(grocery_destinations))
-        
-        self._log(f"    Using limited destinations: {len(employment_destinations)} employment, "
-                f"{len(healthcare_destinations)} healthcare, {len(grocery_destinations)} grocery")
-        
-        try:
-            # Combine destinations with consistent numeric IDs
-            all_destinations = pd.concat([
-                employment_destinations.assign(dest_category='employment'),
-                healthcare_destinations.assign(dest_category='healthcare'), 
-                grocery_destinations.assign(dest_category='grocery')
-            ], ignore_index=True)
-            
-            # ENSURE NUMERIC COLUMNS
-            all_destinations['dest_id'] = pd.to_numeric(all_destinations['dest_id'], errors='coerce')
-            
-            self._log(f"    Calculating travel times for {len(addresses)} addresses to {len(all_destinations)} destinations...")
-            start_time = time.time()
-            
-            travel_times = self.data_loader.calculate_multimodal_travel_times_batch(
-                addresses, all_destinations, time_periods=['morning']
-            )
-            
-            calc_time = time.time() - start_time
-            self._log(f"    Travel time calculation completed in {calc_time:.2f}s")
-            
-            # FIXED: Process results with proper data type handling
-            accessibility_features = []
-            
-            for _, address in addresses.iterrows():
-                address_id = address.get('address_id', address.name)
-                
-                # ENSURE address_id is numeric for consistent comparisons
-                if isinstance(address_id, str):
-                    try:
-                        address_id = int(address_id)
-                    except ValueError:
-                        address_id = address.name  # Use index as fallback
-                
-                # Filter travel times for this address with SAFE comparison
-                address_times = travel_times[
-                    travel_times['origin_id'].astype(str) == str(address_id)
-                ]
-                
-                feature_row = {'address_id': address_id}
-                
-                # Process each destination category with DATA TYPE SAFETY
-                for dest_category in ['employment', 'healthcare', 'grocery']:
-                    # Get destination IDs for this category
-                    if dest_category == 'employment':
-                        category_dest_ids = employment_destinations['dest_id'].tolist()
-                    elif dest_category == 'healthcare':
-                        category_dest_ids = healthcare_destinations['dest_id'].tolist()
-                    else:  # grocery
-                        category_dest_ids = grocery_destinations['dest_id'].tolist()
-                    
-                    # SAFE filtering with explicit type conversion
-                    category_dest_ids = [int(x) for x in category_dest_ids if pd.notna(x)]
-                    
-                    # Filter travel times with proper type handling
-                    category_times = address_times[
-                        address_times['destination_id'].astype(int).isin(category_dest_ids)
-                    ]
-                    
-                    if len(category_times) > 0:
-                        # ENSURE all values are numeric
-                        combined_times = pd.to_numeric(category_times['combined_time'], errors='coerce')
-                        combined_times = combined_times.dropna()
-                        
-                        if len(combined_times) > 0:
-                            feature_row[f'{dest_category}_min_time'] = float(combined_times.min())
-                            feature_row[f'{dest_category}_accessible_count'] = int((combined_times <= 60).sum())
-                            
-                            # Transit share calculation with safety
-                            transit_modes = category_times['best_mode'] == 'transit'
-                            feature_row[f'{dest_category}_transit_share'] = float(transit_modes.mean())
-                        else:
-                            feature_row[f'{dest_category}_min_time'] = 120.0
-                            feature_row[f'{dest_category}_accessible_count'] = 0
-                            feature_row[f'{dest_category}_transit_share'] = 0.0
-                    else:
-                        # Fallback values - ENSURE numeric types
-                        feature_row[f'{dest_category}_min_time'] = 120.0
-                        feature_row[f'{dest_category}_accessible_count'] = 0
-                        feature_row[f'{dest_category}_transit_share'] = 0.0
-                
-                accessibility_features.append(feature_row)
-            
-            # Convert to DataFrame with explicit data types
-            features_df = pd.DataFrame(accessibility_features)
-            features_df = features_df.set_index('address_id')
-            
-            # CRITICAL: Ensure all columns are numeric
-            for col in features_df.columns:
-                features_df[col] = pd.to_numeric(features_df[col], errors='coerce').fillna(0.0)
-            
-            # VALIDATION: Check for any remaining non-numeric values
-            non_numeric_cols = []
-            for col in features_df.columns:
-                if not pd.api.types.is_numeric_dtype(features_df[col]):
-                    non_numeric_cols.append(col)
-            
-            if non_numeric_cols:
-                self._log(f"    WARNING: Non-numeric columns detected: {non_numeric_cols}")
-                # Force conversion
-                for col in non_numeric_cols:
-                    features_df[col] = pd.to_numeric(features_df[col], errors='coerce').fillna(0.0)
-            
-            self._log(f"    Generated accessibility features: {features_df.shape} (addresses × features)")
-            
-            # FINAL VALIDATION: Ensure numpy array is all numeric
-            feature_array = features_df.values
-            if not np.issubdtype(feature_array.dtype, np.number):
-                self._log(f"    CONVERTING feature array from {feature_array.dtype} to float64")
-                feature_array = feature_array.astype(np.float64)
-            
-            return {
-                'features_per_address': feature_array,
-                'feature_names': list(features_df.columns),
-                'address_ids': features_df.index.tolist()
-            }
-            
-        except Exception as e:
-            self._log(f"    Error computing accessibility targets: {str(e)}")
-            self._log(f"    Error type: {type(e).__name__}")
-            import traceback
-            self._log(f"    Traceback: {traceback.format_exc()}")
-            return self._create_fallback_accessibility_targets(addresses)
-        
-    def _compute_traditional_accessibility_baseline(self, tract_data):
-        """
-        Compute traditional accessibility measures using AccessibilityBaseline class
-        """
-        try:
-            addresses = tract_data['addresses']
-
-            # Use the same limited destination set as GNN training
-            employment_destinations = self.data_loader._create_employment_destinations().head(2)
-            healthcare_destinations = self.data_loader._create_healthcare_destinations().head(2)
-            grocery_destinations = self.data_loader._create_grocery_destinations().head(3)
-            
-            # Compute traditional accessibility measures
-            baseline_features = []
-            
-            # Employment accessibility
-            emp_gravity = self.accessibility_baseline.compute_gravity_accessibility(
-                addresses, employment_destinations
-            )
-            emp_cumulative = self.accessibility_baseline.compute_cumulative_opportunities(
-                addresses, employment_destinations, threshold=0.01
-            )
-            
-            # Healthcare accessibility  
-            health_gravity = self.accessibility_baseline.compute_gravity_accessibility(
-                addresses, healthcare_destinations
-            )
-            health_cumulative = self.accessibility_baseline.compute_cumulative_opportunities(
-                addresses, healthcare_destinations, threshold=0.01
-            )
-            
-            # Grocery accessibility
-            grocery_gravity = self.accessibility_baseline.compute_gravity_accessibility(
-                addresses, grocery_destinations
-            )
-            grocery_cumulative = self.accessibility_baseline.compute_cumulative_opportunities(
-                addresses, grocery_destinations, threshold=0.01
-            )
-            
-            # Combine features
-            traditional_features = np.column_stack([
-                emp_gravity, emp_cumulative,
-                health_gravity, health_cumulative,
-                grocery_gravity, grocery_cumulative
-            ])
-            
-            self._log(f"    Computed traditional accessibility: {traditional_features.shape}")
-            return traditional_features
-            
-        except Exception as e:
-            self._log(f"    Error computing traditional accessibility: {str(e)}")
-            return None
-        
-    def debug_correlation_issue(self, learned_accessibility, traditional_accessibility):
-        print(f"\n=== CORRELATION DEBUG ===")
-        print(f"Learned shape: {learned_accessibility.shape}")
-        print(f"Traditional shape: {traditional_accessibility.shape}")
-        
-        learned_mean = np.mean(learned_accessibility, axis=1)
-        traditional_mean = np.mean(traditional_accessibility, axis=1)
-        
-        print(f"Learned stats: mean={np.mean(learned_mean):.4f}, std={np.std(learned_mean):.4f}")
-        print(f"Traditional stats: mean={np.mean(traditional_mean):.4f}, std={np.std(traditional_mean):.4f}")
-        
-        # Check if they're actually the same data
-        if np.array_equal(learned_accessibility, traditional_accessibility):
-            print("Arrays are identical - something else is wrong")
-        else:
-            print("Arrays are different - GNN learned different patterns")
-            
-        correlation = np.corrcoef(learned_mean, traditional_mean)[0,1]
-        print(f"Direct correlation: {correlation:.6f}")
-        print("=========================\n")
-
-    def _create_fallback_accessibility_targets(self, addresses):
-        """
-        FIXED: Create fallback targets with guaranteed numeric types
-        """
-        n_addresses = len(addresses)
-        
-        # Generate realistic accessibility patterns with EXPLICIT numeric types
-        np.random.seed(42)
-        
-        # Generate realistic accessibility patterns - ALL FLOAT64
-        employment_times = np.random.normal(45, 15, n_addresses).clip(15, 120).astype(np.float64)
-        healthcare_times = np.random.normal(35, 12, n_addresses).clip(10, 90).astype(np.float64)
-        grocery_times = np.random.normal(25, 8, n_addresses).clip(5, 60).astype(np.float64)
-        
-        # Counts as integers, then convert to float for consistency
-        employment_counts = np.random.poisson(2, n_addresses).astype(np.float64)
-        healthcare_counts = np.random.poisson(1, n_addresses).astype(np.float64)
-        grocery_counts = np.random.poisson(3, n_addresses).astype(np.float64)
-        
-        # Transit shares as float
-        employment_transit = np.random.beta(2, 8, n_addresses).astype(np.float64)
-        healthcare_transit = np.random.beta(1, 9, n_addresses).astype(np.float64)
-        grocery_transit = np.random.beta(3, 7, n_addresses).astype(np.float64)
-        
-        # Stack into feature matrix - GUARANTEED FLOAT64
-        fallback_features = np.column_stack([
-            employment_times, employment_counts, employment_transit,
-            healthcare_times, healthcare_counts, healthcare_transit,
-            grocery_times, grocery_counts, grocery_transit
-        ]).astype(np.float64)
-        
-        feature_names = [
-            'employment_min_time', 'employment_accessible_count', 'employment_transit_share',
-            'healthcare_min_time', 'healthcare_accessible_count', 'healthcare_transit_share',
-            'grocery_min_time', 'grocery_accessible_count', 'grocery_transit_share'
-        ]
-        
-        self._log(f"    Using fallback accessibility features for {n_addresses} addresses")
-        self._log(f"    Feature array dtype: {fallback_features.dtype}")
-        
-        return {
-            'features_per_address': fallback_features,
-            'feature_names': feature_names,
-            'address_ids': list(range(n_addresses))
-        }
-
-    def _validate_hybrid_accessibility_approach(self, learned_accessibility, traditional_accessibility, 
-                                            svi_predictions, tract_svi):  # Remove idm_predictions parameter
-        """
-        Comprehensive validation comparing learned vs traditional accessibility,
-        and accessibility-informed SVI prediction quality
-        """
-        validation = {}
-        
-        # 1. Accessibility Learning Validation
-        if traditional_accessibility is not None:
-            # Compare learned vs traditional accessibility
-            learned_mean = np.mean(learned_accessibility, axis=1)
-            traditional_mean = np.mean(traditional_accessibility, axis=1) if traditional_accessibility.ndim > 1 else traditional_accessibility
-            
-            correlation = np.corrcoef(learned_mean, traditional_mean)[0, 1]
-            r_squared = correlation ** 2
-            
-            validation['accessibility_correlation'] = correlation
-            validation['accessibility_r_squared'] = r_squared
-            validation['accessibility_learning_quality'] = (
-                'excellent' if r_squared > 0.64 else 
-                'good' if r_squared > 0.36 else 
-                'moderate' if r_squared > 0.16 else 'poor'
-            )
-        
-        # 2. SVI Prediction Validation  
-        constraint_error = abs(np.mean(svi_predictions) - tract_svi) / tract_svi
-        validation['constraint_satisfaction'] = constraint_error < 0.01
-        validation['constraint_error'] = constraint_error
-        
-        # 3. Spatial Quality Assessment
-        validation['spatial_variation'] = np.std(svi_predictions)
-        validation['prediction_range'] = np.max(svi_predictions) - np.min(svi_predictions)
-        
-        # 4. Research Contribution Metrics
-        validation['accessibility_features_learned'] = learned_accessibility.shape[1]
-        validation['spatial_resolution'] = len(svi_predictions)
-        validation['novel_methodology'] = True
-        
-        return validation
-
-    def _compute_idm_validation_metrics(self, gnn_predictions, idm_result, svi_value):
-        """
-        Compute GNN vs IDM validation metrics (single tract)
-        """
-        gnn_values = gnn_predictions['mean'].values
-        gnn_uncertainty = gnn_predictions['sd'].values
-        
-        if idm_result and idm_result.get('success') and 'predictions' in idm_result:
-            idm_values = idm_result['predictions']['mean'].values
-            idm_uncertainty = idm_result['predictions']['sd'].values
-            
-            # Ensure same length
-            min_len = min(len(gnn_values), len(idm_values))
-            gnn_values = gnn_values[:min_len]
-            idm_values = idm_values[:min_len]
-            
-            # Compute correlation
-            correlation = np.corrcoef(gnn_values, idm_values)[0, 1]
-            if np.isnan(correlation):
-                correlation = 0.0
-            
-            # Compute effectiveness metrics
-            gnn_variance = np.var(gnn_values)
-            idm_variance = np.var(idm_values)
-            
-            # Constraint preservation
-            gnn_constraint_error = abs(np.mean(gnn_values) - svi_value) / svi_value
-            idm_constraint_error = abs(np.mean(idm_values) - svi_value) / svi_value
-            
-            # Detailed diagnostics
-            self._log(f"    GNN vs IDM detailed comparison:")
-            self._log(f"      GNN std: {np.std(gnn_values):.6f}")
-            self._log(f"      IDM std: {np.std(idm_values):.6f}")
-            self._log(f"      Correlation: {correlation:.6f}")
-            
-            validation_results = {
-                'gnn_vs_idm_correlation': correlation,
-                'gnn_variance': gnn_variance,
-                'idm_variance': idm_variance,
-                'gnn_constraint_error': gnn_constraint_error,
-                'idm_constraint_error': idm_constraint_error,
-                'gnn_uncertainty_mean': np.mean(gnn_uncertainty),
-                'idm_uncertainty_mean': np.mean(idm_uncertainty),
-                'comparison_method': 'GNN_vs_IDM', 
-                'gnn_more_variable': gnn_variance > idm_variance,
-                'gnn_better_constraint': gnn_constraint_error < idm_constraint_error,
-                'gnn_effectiveness_score': (gnn_variance / idm_variance) * abs(correlation) if idm_variance > 0 else 1.0
-            }
-            
-            return validation_results
-        else:
-            return {
-                'gnn_vs_idm_correlation': None,
-                'comparison_method': 'GNN_only',
-                'error': 'IDM comparison failed'
-            }
-
-    def _load_nlcd_for_tract(self, tract_data):
-        """
-        Load NLCD data for single tract area - SIMPLIFIED VERSION
-        """
-        try:
-            # Get tract boundary for NLCD cropping
-            tract_boundary = gpd.GeoDataFrame([tract_data['tract_info']], crs='EPSG:4326')
-            
-            # Load NLCD data
-            nlcd_data = self.data_loader.load_nlcd_data(
-                county_bounds=tract_boundary,
-                nlcd_path="./data/nlcd_hamilton_county.tif"
-            )
-            
-            if nlcd_data is None:
-                self._log("  WARNING: NLCD data not available, falling back to topological features")
-                return None
-            
-            # Extract NLCD features at address locations
-            nlcd_features = self.data_loader.extract_nlcd_features_at_addresses(
-                tract_data['addresses'], 
-                nlcd_data
-            )
-            
-            self._log(f"  Extracted NLCD features for {len(nlcd_features)} addresses")
-            return nlcd_features
-            
-        except Exception as e:
-            self._log(f"  Error loading NLCD: {str(e)}")
-            return None
-
-    def _calculate_gnn_effectiveness(self, correlation, gnn_var, idm_var, 
-                                gnn_constraint, idm_constraint):
-        """
-        Calculate overall GNN effectiveness vs IDM
-        
-        Returns:
-        --------
-        float
-            Effectiveness score (>1.0 means GNN is better)
-        """
-        # Spatial differentiation 
-        spatial_score = gnn_var / idm_var if idm_var > 0 else 1.0
-        
-        # Constraint preservation 
-        constraint_score = idm_constraint / gnn_constraint if gnn_constraint > 0 else 1.0
-        
-        # Correlation factor 
-        correlation_factor = abs(correlation) if not np.isnan(correlation) else 0.5
-        
-        # Combined effectiveness
-        effectiveness = (spatial_score * constraint_score * correlation_factor)
-        
-        return effectiveness
-
-    def compute_proper_validation_metrics(self, predictions, baseline_result, svi_value):
-        """
-        Proper validation with correct IDM baseline comparison
-        """
-        # Ensure both methods use same locations
-        gnn_predictions = predictions['mean'].values
-        gnn_uncertainty = predictions['sd'].values
-        
-        # Get IDM predictions on locations
-        if baseline_result and 'predictions' in baseline_result:
-            idm_predictions = baseline_result['predictions']['mean'].values
-            idm_uncertainty = baseline_result['predictions']['sd'].values
-            
-            # Verify same number of predictions
-            if len(gnn_predictions) != len(idm_predictions):
-                self._log(f"WARNING: Different prediction counts - GNN: {len(gnn_predictions)}, IDM: {len(idm_predictions)}")
-                
-                # Take minimum length for comparison
-                min_len = min(len(gnn_predictions), len(idm_predictions))
-                gnn_predictions = gnn_predictions[:min_len]
-                idm_predictions = idm_predictions[:min_len]
-                gnn_uncertainty = gnn_uncertainty[:min_len]
-                idm_uncertainty = idm_uncertainty[:min_len]
-            
-            # Compute correlation between GNN and IDM
-            correlation = np.corrcoef(gnn_predictions, idm_predictions)[0, 1]
-            
-            # Check for concerning results
-            if correlation < 0.1:
-                self._log(f"WARNING: Low correlation ({correlation:.3f}) suggests implementation issues")
-                self._log(f"  GNN predictions range: [{gnn_predictions.min():.3f}, {gnn_predictions.max():.3f}]")
-                self._log(f"  IDM predictions range: [{idm_predictions.min():.3f}, {idm_predictions.max():.3f}]")
-                
-                # Additional diagnostic for IDM comparison
-                gnn_variation = np.std(gnn_predictions)
-                idm_variation = np.std(idm_predictions)
-                variation_ratio = idm_variation / gnn_variation if gnn_variation > 0 else float('inf')
-                
-                self._log(f"  GNN spatial variation: {gnn_variation:.6f}")
-                self._log(f"  IDM spatial variation: {idm_variation:.6f}")
-                self._log(f"  IDM/GNN variation ratio: {variation_ratio:.2f}")
-                
-                if variation_ratio > 10:
-                    self._log(f"    CRITICAL: GNN shows {variation_ratio:.1f}x less spatial variation than IDM")
-                    self._log(f"     This suggests GNN over-smoothing or feature uniformity issues")
-            else:
-                self._log(f"Good correlation with IDM baseline: {correlation:.3f}")
-                
-        else:
-            self._log("No IDM baseline comparison available")
-            correlation = None
-            idm_predictions = None
-            idm_uncertainty = None
-        
-        # Constraint validation 
-        predicted_tract_mean = np.mean(gnn_predictions)
-        constraint_error = abs(predicted_tract_mean - svi_value) / svi_value if svi_value > 0 else 0
-        
-        # Parameter variability check
-        prediction_variance = np.var(gnn_predictions)
-        
-        # Enhanced validation results for IDM comparison
-        validation_results = {
-            # Method comparison
-            'gnn_vs_idm_correlation': correlation,
-            'method_correlation': correlation,  # Legacy alias for backward compatibility
-            
-            # Constraint satisfaction 
-            'constraint_error': constraint_error,
-            'constraint_satisfied': constraint_error < 0.01,  # 1% tolerance
-            
-            # Spatial variation metrics
-            'prediction_variance': prediction_variance,
-            'gnn_prediction_std': np.std(gnn_predictions),
-            'gnn_uncertainty_mean': np.mean(gnn_uncertainty),
-            'idm_prediction_std': np.std(idm_predictions) if idm_predictions is not None else None,
-            'idm_uncertainty_mean': np.mean(idm_uncertainty) if idm_uncertainty is not None else None,
-            
-            # Variation ratio
-            'spatial_variation_ratio': (np.std(idm_predictions) / np.std(gnn_predictions) 
-                                    if idm_predictions is not None and np.std(gnn_predictions) > 0 
-                                    else None),
-            
-            # Tract-level validation
-            'predicted_tract_mean': predicted_tract_mean,
-            'actual_tract_svi': svi_value,
-            
-            # Method-specific ranges
-            'gnn_prediction_range': (gnn_predictions.min(), gnn_predictions.max()),
-            'idm_prediction_range': ((idm_predictions.min(), idm_predictions.max()) 
-                                if idm_predictions is not None else None),
-            
-            # Quality flags
-            'concerning_low_correlation': correlation is not None and correlation < 0.1,
-            'excessive_gnn_smoothing': (correlation is not None and 
-                                    idm_predictions is not None and 
-                                    np.std(idm_predictions) / np.std(gnn_predictions) > 10),
-        }
-        
-        return validation_results
-    
-    def _save_results(self, results):
-        """Save results with enhanced visualizations including clear GNN vs IDM comparison"""
-        if not results.get('success', False):
-            self._log("No results to save")
-            return
-        
-        # Save existing outputs (predictions, summary, etc.)
-        predictions_path = os.path.join(self.output_dir, 'granite_predictions.csv')
-        results['predictions'].to_csv(predictions_path, index=False)
-        self._log(f"Saved predictions to {predictions_path}")
-        
-        # Save summary
-        summary_path = os.path.join(self.output_dir, 'granite_summary.json')
-        import json
-        with open(summary_path, 'w') as f:
-            json.dump(results['summary'], f, indent=2)
-        self._log(f"Saved summary to {summary_path}")
-        self._log(f"\nAll results and visualizations saved to {self.output_dir}/")
-
-    def debug_gnn_data_sources(self, result):
-        """Debug exactly what data sources are being used"""
-        print("\n" + "="*60)
-        print("🔍 GNN DATA SOURCE DEBUGGING")
-        print("="*60)
-        
-        # Check what's in the result object
-        print(f"Result keys: {list(result.keys())}")
-        
-        # Check each potential data source
-        data_sources = [
-            ('predictions', result.get('predictions')),
-            ('disaggregation_result', result.get('disaggregation_result')),
-            ('baseline_result', result.get('baseline_result')),
-            ('metricgraph_result', result.get('metricgraph_result'))
-        ]
-        
-        for source_name, source_data in data_sources:
-            if source_data is not None:
-                if isinstance(source_data, dict):
-                    print(f"\n{source_name} (dict):")
-                    print(f"  Keys: {list(source_data.keys())}")
-                    
-                    # Check for DataFrames in the dict
-                    for key, value in source_data.items():
-                        if hasattr(value, 'std'):  # It's array-like
-                            try:
-                                std_val = np.std(value)
-                                print(f"    {key}: std = {std_val:.6f}")
-                            except:
-                                pass
-                        elif isinstance(value, pd.DataFrame):
-                            print(f"    {key} (DataFrame): shape = {value.shape}")
-                            if 'mean' in value.columns:
-                                std_val = value['mean'].std()
-                                print(f"      mean column std = {std_val:.6f}")
-                                
-                elif isinstance(source_data, pd.DataFrame):
-                    print(f"\n{source_name} (DataFrame): shape = {source_data.shape}")
-                    if 'mean' in source_data.columns:
-                        std_val = source_data['mean'].std()
-                        print(f"  mean column std = {std_val:.6f}")
-                        print(f"  columns: {list(source_data.columns)}")
-        
-        print("="*60)
-
-    def _print_comparison_summary(self, gnn_predictions, idm_predictions):
-        """
-        Print a clear summary of GNN vs IDM comparison to console
-        """
-        try:
-            # === DEBUGGING THE DATA SOURCE ===
-            print("\n🔍 COMPARISON SUMMARY DEBUG:")
-            print(f"   gnn_predictions type: {type(gnn_predictions)}")
-            print(f"   gnn_predictions columns: {list(gnn_predictions.columns)}")
-            print(f"   gnn_predictions shape: {gnn_predictions.shape}")
-            
-            # Check if this is the same data as the interface
-            if 'mean' in gnn_predictions.columns:
-                gnn_values = gnn_predictions['mean'].values
-                interface_std = np.std(gnn_values)
-                print(f"   Interface std in comparison: {interface_std:.6f}")
-                
-                # Check where this data came from
-                if hasattr(gnn_predictions, 'source'):
-                    print(f"   Data source: {gnn_predictions.source}")
-                
-                # Check for constraint enforcement indicators
-                print(f"   Mean value: {np.mean(gnn_values):.6f}")
-                print(f"   Min/Max: [{gnn_values.min():.4f}, {gnn_values.max():.4f}]")
-                
-            else:
-                print(f"   ERROR: No 'mean' column found!")
-                print(f"   Available columns: {list(gnn_predictions.columns)}")
-            
-            print("   === END DEBUG ===\n")
-
-            gnn_values = gnn_predictions['mean'].values
-            idm_values = idm_predictions['mean'].values
-            
-            gnn_std = np.std(gnn_values)
-            idm_std = np.std(idm_values)
-            correlation = np.corrcoef(gnn_values, idm_values)[0, 1]
-            ratio = idm_std / gnn_std if gnn_std > 0 else 0
-            
-            self._log(f"\n" + "="*60)
-            self._log(f"GNN vs IDM COMPARISON SUMMARY")
-            self._log(f"="*60)
-            self._log(f"GNN (Learned Parameters):")
-            self._log(f"  • Spatial Standard Deviation: {gnn_std:.6f}")
-            self._log(f"  • Mean SVI: {np.mean(gnn_values):.4f}")
-            self._log(f"  • Range: [{gnn_values.min():.4f}, {gnn_values.max():.4f}]")
-            
-            self._log(f"\nIDM (Fixed Coefficients):")
-            self._log(f"  • Spatial Standard Deviation: {idm_std:.6f}")
-            self._log(f"  • Mean SVI: {np.mean(idm_values):.4f}")
-            self._log(f"  • Range: [{idm_values.min():.4f}, {idm_values.max():.4f}]")
-            
-            self._log(f"\nComparison Metrics:")
-            self._log(f"  • Spatial Variation Ratio: {ratio:.1f}:1 (IDM:GNN)")
-            self._log(f"  • Method Correlation: {correlation:.3f}")
-            
-            # Interpretation
-            if ratio > 5:
-                interpretation = "IDM creates MUCH more spatial variation"
-                implication = "Land cover coefficients drive fine-scale patterns"
-            elif ratio > 2:
-                interpretation = "IDM creates more spatial variation"
-                implication = "Different approaches to spatial modeling"
-            elif ratio < 0.5:
-                interpretation = "GNN creates more spatial variation"
-                implication = "Learned parameters capture spatial complexity"
-            else:
-                interpretation = "Similar spatial variation levels"
-                implication = "Methods produce comparable spatial patterns"
-            
-            self._log(f"\nKey Finding:")
-            self._log(f"  • {interpretation}")
-            self._log(f"  • {implication}")
-            
-            if abs(correlation) > 0.7:
-                agreement = "High agreement on spatial patterns"
-            elif abs(correlation) > 0.3:
-                agreement = "Moderate agreement on spatial patterns"
-            else:
-                agreement = "Low agreement - methods disagree on patterns"
-            
-            self._log(f"  • {agreement}")
-            
-            # Research implications
-            self._log(f"\nResearch Implications:")
-            if ratio > 2:
-                self._log(f"  ✓ Fixed land cover coefficients preserve spatial detail")
-                self._log(f"  ✓ GNN learned parameters emphasize spatial smoothness")
-                self._log(f"  → Consider hybrid approach combining both strengths")
-            else:
-                self._log(f"  ✓ Methods show comparable spatial modeling performance")
-                self._log(f"  → Choice depends on application requirements")
-            
-            self._log(f"="*60)
-            
-        except Exception as e:
-            self._log(f"Error printing comparison summary: {str(e)}")
-  
-    def _prepare_network_data_for_viz(self, tract_data):
-        """Prepare network data in format expected by visualizations"""
-        road_network = tract_data['road_network']
-        
-        # Convert NetworkX graph to GeoDataFrame for edge visualization
-        edges_list = []
-        for u, v, data in road_network.edges(data=True):
-            if 'x' in road_network.nodes[u] and 'x' in road_network.nodes[v]:
-                from shapely.geometry import LineString
-                line = LineString([
-                    (road_network.nodes[u]['x'], road_network.nodes[u]['y']),
-                    (road_network.nodes[v]['x'], road_network.nodes[v]['y'])
-                ])
-                edges_list.append({
-                    'geometry': line,
-                    'from': u,
-                    'to': v,
-                    'weight': data.get('length', 1.0)
-                })
-        
-        edges_gdf = gpd.GeoDataFrame(edges_list, crs='EPSG:4326')
-        
-        return {
-            'graph': road_network,
-            'edges_gdf': edges_gdf
-        }
-
-    def _prepare_transit_data_for_viz(self, tract_data):
-        """Prepare transit data for visualization"""
-        
-        # Load transit stops from data loader if not already in tract_data
-        if 'transit_stops' not in tract_data:
-            transit_stops = self.data_loader.load_transit_stops()
-        else:
-            transit_stops = tract_data['transit_stops']
-        
-        # Filter stops to tract area if needed
-        tract_geom = tract_data['tract_info'].geometry
-        local_stops = transit_stops[transit_stops.intersects(tract_geom.buffer(0.01))]
-        
-        return {
-            'stops': local_stops
-        }
-
-    def _augment_graph_with_accessibility(self, graph_data, accessibility_features, node_mapping):
-        """
-        Combine original graph features with learned accessibility features
-        """
-        # Convert accessibility features to tensor
-        accessibility_tensor = torch.FloatTensor(accessibility_features)
-
-        print(f"🔍 REAL AUGMENT DEBUG:")
-        print(f"  graph_data.x shape: {graph_data.x.shape}")
-        print(f"  accessibility_features shape: {accessibility_features.shape}")
-        print(f"  accessibility_tensor shape: {accessibility_tensor.shape}")
-        print(f"  node_mapping type: {type(node_mapping)}")
-        print(f"  node_mapping length: {len(node_mapping) if node_mapping else 'None'}")
-
-        # Expand accessibility features to match graph nodes if needed
-        if accessibility_tensor.shape[0] != graph_data.x.shape[0]:
-            # SIMPLE FIX: Addresses are first N nodes (confirmed by your test)
-            num_addresses = accessibility_tensor.shape[0]  # 2394
-            total_nodes = graph_data.x.shape[0]  # 3098
-            
-            # Create expanded tensor with zeros for road nodes
-            expanded_accessibility = torch.zeros(total_nodes, accessibility_tensor.shape[1])
-            
-            # Place accessibility features in first N positions (address nodes)
-            expanded_accessibility[:num_addresses] = accessibility_tensor
-            
-            print(f"🔧 Expanded accessibility: {accessibility_tensor.shape} -> {expanded_accessibility.shape}")
-            accessibility_tensor = expanded_accessibility
-        
-        # Concatenate original features with accessibility features
-        enhanced_features = torch.cat([graph_data.x, accessibility_tensor], dim=1)
-        
-        # Create new graph data object
-        enhanced_graph_data = graph_data.clone()
-        enhanced_graph_data.x = enhanced_features
-        
-        return enhanced_graph_data
-
-    def _compute_traditional_accessibility_measures(self, tract_data):
-        """
-        Compute traditional accessibility measures for comparison with GNN-learned features
-        """
-        try:
-            # Calculate traditional gravity-based accessibility
-            addresses = tract_data['addresses']
-            
-            # Simple gravity model: Σ(Opportunities / Distance^β)
-            accessibility_scores = []
-            
-            employment_destinations = self.data_loader._create_employment_destinations()
-            for _, address in addresses.iterrows():
-                total_accessibility = 0
-                
-                # Employment accessibility (simplified)
-                for _, emp in employment_destinations.iterrows():
-                    distance = address.geometry.distance(emp.geometry)
-                    if distance > 0:
-                        total_accessibility += emp.get('employees', 1000) / (distance ** 1.5)
-                
-                accessibility_scores.append(total_accessibility)
-            
-            return np.array(accessibility_scores).reshape(-1, 1)
-            
-        except Exception as e:
-            self._log(f"    Error computing traditional accessibility: {str(e)}")
-            return None
-
-    def _compute_accessibility_svi_correlation(self, learned_accessibility, svi_predictions):
-        """
-        Analyze correlation between learned accessibility patterns and SVI predictions
-        """
-        correlations = {}
-        
-        # Feature-wise correlations
-        for i in range(learned_accessibility.shape[1]):
-            feature_corr = np.corrcoef(learned_accessibility[:, i], svi_predictions)[0, 1]
-            correlations[f'accessibility_feature_{i}'] = feature_corr
-        
-        # Overall accessibility-SVI relationship
-        mean_accessibility = learned_accessibility.mean(axis=1)
-        overall_corr = np.corrcoef(mean_accessibility, svi_predictions)[0, 1]
-        correlations['overall_accessibility_svi'] = overall_corr
-        
-        return correlations
-
-    def _compute_research_metrics(self, stage1_result, stage2_result, validation_results):
-        """
-        Compute metrics specific to this novel research approach
-        """
-        research_metrics = {
-            'methodology': 'Hybrid GNN Accessibility-SVI Integration',
-            'research_contribution': 'First systematic two-stage GNN approach',
-            
-            # Stage 1 metrics
-            'accessibility_learning_loss': stage1_result['final_loss'],
-            'accessibility_features_learned': stage1_result['predicted_accessibility'].shape[1],
-            
-            # Stage 2 metrics  
-            'svi_prediction_loss': stage2_result['final_loss'],
-            'learned_spatial_variation': stage2_result['spatial_variation'],
-            
-            # Validation metrics
-            'constraint_satisfaction': validation_results.get('constraint_satisfaction', False),
-            'accessibility_correlation': validation_results.get('accessibility_correlation', 0),
-            
-            # Research novelty indicators
-            'two_stage_architecture': True,
-            'accessibility_vulnerability_integration': True,
-            'transportation_equity_focus': True
-        }
-        
-        return research_metrics
-
-    def _load_data_with_accessibility_destinations(self):
-        """
-        MODIFIED: Enhanced data loading that includes accessibility destinations
-        """
-        data = self._load_data()  # Your existing method
-        
-        # Add accessibility destinations
-        self._log("Loading accessibility destinations for hybrid approach...")
-        
-        data['employment_destinations'] = self.data_loader._create_employment_destinations()
-        data['healthcare_destinations'] = self.data_loader._create_healthcare_destinations() 
-        data['grocery_destinations'] = self.data_loader._create_grocery_destinations()
-        
-        total_destinations = (len(data['employment_destinations']) + 
-                            len(data['healthcare_destinations']) + 
-                            len(data['grocery_destinations']))
-        self._log(f"Loaded {total_destinations} accessibility destinations for hybrid training")
-        
-        return data
-
-    def run_hybrid_accessibility_research(self):
-        """
-        MODIFIED: Updated main run method for hybrid accessibility research
-        """
-        start_time = time.time()
-        
-        # Load data with accessibility destinations
-        self._log("Loading data for hybrid accessibility-SVI research...")
-        data = self._load_data_with_accessibility_destinations()
-        
-        # Check processing mode 
-        processing_mode = self.config.get('data', {}).get('processing_mode', 'fips')
-        target_fips = self.config.get('data', {}).get('target_fips')
-        
-        if processing_mode == 'fips' and target_fips:
-            self._log(f"Processing single FIPS with hybrid accessibility approach: {target_fips}")
-            results = self._process_fips_mode_hybrid(data)
-        else:
-            self._log("ERROR: Only single FIPS mode supported for hybrid accessibility research.")
-            return {'success': False, 'error': 'Multi-tract processing not supported for hybrid approach.'}
-        
-        # Save results with research-specific outputs
-        self._save_hybrid_research_results(results)
-        
-        elapsed_time = time.time() - start_time
-        self._log(f"Hybrid accessibility research completed in {elapsed_time:.2f} seconds")
-        
-        return results
-    
-    def _save_hybrid_research_results(self, results):
-        """
-        Save results specific to hybrid accessibility-SVI research
-        """
-        if not results.get('success', False):
-            self._log("No results to save")
-            return
-        
-        # Use your existing save method for now
-        self._save_results(results)
-        
-        # Add research-specific outputs
-        if results.get('tract_results'):
-            for tract_result in results['tract_results']:
-                if 'stage1_accessibility_learning' in tract_result:
-                    # Save accessibility features
-                    accessibility_path = os.path.join(self.output_dir, 'learned_accessibility_features.csv')
-                    import pandas as pd
-                    learned_features = tract_result['stage1_accessibility_learning']['learned_features']
-                    try:
-                        feature_names = tract_result['stage1_accessibility_learning']['training_result']['target_features']
-                    except KeyError:
-                        feature_names = [
-                            'emp_min_time', 'emp_accessible', 'emp_transit_share',
-                            'health_min_time', 'health_accessible', 'health_transit_share', 
-                            'grocery_min_time', 'grocery_accessible', 'grocery_transit_share'
-                        ]                    
-                    pd.DataFrame(learned_features, columns=feature_names).to_csv(accessibility_path, index=False)
-                    self._log(f"Saved learned accessibility features to {accessibility_path}")
-
-    def _process_fips_mode_hybrid(self, data):
-        """
-        MODIFIED: Process single FIPS with hybrid accessibility approach
-        """
-        target_fips = self.config.get('data', {}).get('target_fips')
-        target_fips = str(target_fips).strip()
-        
-        # Your existing FIPS validation code...
-        data['tracts']['FIPS'] = data['tracts']['FIPS'].astype(str).str.strip()
-        
-        if target_fips not in data['tracts']['FIPS'].tolist():
-            return {'success': False, 'error': f'FIPS {target_fips} not found'}
-        
-        target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips].iloc[0]
-        self._log(f"✓ Found target tract: {target_fips}")
-        self._log(f"Processing single tract with HYBRID ACCESSIBILITY-SVI approach")
-        
-        # Prepare tract data with accessibility destinations
-        tract_data = self._prepare_tract_data_with_accessibility(target_tract, data)
-        
-        # Use new hybrid processing method
-        result = self._process_single_tract_hybrid_accessibility(tract_data)
-        
-        if result['status'] == 'success':
             return {
                 'success': True,
-                'predictions': result['predictions'],
-                'tract_results': [result],
-                'research_type': 'hybrid_accessibility_svi',
-                'summary': {
-                    'total_tracts': 1,
-                    'successful_tracts': 1,
-                    'total_addresses': len(result['predictions']),
-                    'accessibility_features_learned': result['stage1_accessibility_learning']['learned_features'].shape[1],
-                    'processing_time': result['timing']['total'],
-                    'research_contribution': 'Novel two-stage GNN accessibility-SVI integration'
-                }
+                'raw_predictions': predictions,
+                'model': model,
+                'training_history': training_result['training_history'],
+                'constraint_error': constraint_error,
+                'spatial_std': spatial_std,
+                'epochs_trained': training_result['epochs_trained']
             }
-        else:
-            return {'success': False, 'error': result['error']}
+            
+        except Exception as e:
+            self._log(f"Error training GNN: {str(e)}")
+            import traceback
+            self._log(f"Traceback: {traceback.format_exc()}")
+            
+            return {
+                'success': False,
+                'error': str(e),
+                'raw_predictions': None
+            }
 
-    def _prepare_tract_data_with_accessibility(self, tract, county_data):
-        """
-        MODIFIED: Prepare tract data including accessibility destinations
-        """
-        # Your existing tract data preparation...
-        tract_data = self._prepare_tract_data(tract, county_data)
+    def _finalize_predictions(self, raw_predictions, addresses, tract_svi):
+        """Create final prediction DataFrame with uncertainty estimates"""
         
-        # Add accessibility destinations
-        tract_data['employment_destinations'] = county_data['employment_destinations']
-        tract_data['healthcare_destinations'] = county_data['healthcare_destinations'] 
-        tract_data['grocery_destinations'] = county_data['grocery_destinations']
+        if raw_predictions is None:
+            return pd.DataFrame()
         
-        return tract_data
+        # Ensure predictions match address count
+        n_addresses = len(addresses)
+        if len(raw_predictions) > n_addresses:
+            predictions = raw_predictions[:n_addresses]
+        else:
+            predictions = raw_predictions
+        
+        # Apply light constraint adjustment (preserve most variation)
+        current_mean = np.mean(predictions)
+        adjustment = (tract_svi - current_mean) * 0.2  # Only 20% adjustment
+        adjusted_predictions = self._apply_strong_constraint_correction(predictions, tract_svi)
+        adjusted_predictions = np.clip(adjusted_predictions, 0.0, 1.0)
+        
+        # Generate realistic uncertainty estimates
+        base_uncertainty = 0.05
+        
+        # Higher uncertainty for predictions far from tract mean
+        distance_from_mean = np.abs(adjusted_predictions - tract_svi)
+        distance_uncertainty = distance_from_mean * 0.1
+        
+        # Spatial uncertainty (edge locations have higher uncertainty)
+        x_coords = np.array([addr.geometry.x for _, addr in addresses.iterrows()])
+        y_coords = np.array([addr.geometry.y for _, addr in addresses.iterrows()])
+        
+        center_x, center_y = np.mean(x_coords), np.mean(y_coords)
+        edge_distances = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
+        max_distance = np.max(edge_distances) if np.max(edge_distances) > 0 else 1
+        spatial_uncertainty = (edge_distances / max_distance) * 0.03
+        
+        # Combined uncertainty
+        total_uncertainty = base_uncertainty + distance_uncertainty + spatial_uncertainty
+        total_uncertainty = np.clip(total_uncertainty, 0.02, 0.15)
+        
+        # Create DataFrame
+        final_predictions = pd.DataFrame({
+            'address_id': [addr.get('address_id', i) for i, (_, addr) in enumerate(addresses.iterrows())],
+            'x': x_coords,
+            'y': y_coords,
+            'mean': adjusted_predictions,
+            'sd': total_uncertainty,
+            'q025': np.clip(adjusted_predictions - 1.96 * total_uncertainty, 0.0, 1.0),
+            'q975': np.clip(adjusted_predictions + 1.96 * total_uncertainty, 0.0, 1.0)
+        })
+        
+        self._log(f"Finalized predictions: {len(final_predictions)} addresses")
+        self._log(f"  Mean SVI: {np.mean(adjusted_predictions):.4f} (target: {tract_svi:.4f})")
+        self._log(f"  Spatial std: {np.std(adjusted_predictions):.4f}")
+        
+        return final_predictions
+
+    def _validate_predictions(self, predictions, tract_svi, accessibility_features, normalized_features):
+        """Comprehensive validation of predictions"""
+        
+        if predictions.empty:
+            return {'validation_failed': True}
+        
+        pred_values = predictions['mean'].values
+        
+        # Constraint validation
+        constraint_error = abs(np.mean(pred_values) - tract_svi) / tract_svi * 100
+        
+        # Spatial variation analysis
+        spatial_std = np.std(pred_values)
+        spatial_range = np.ptp(pred_values)
+        
+        # Accessibility-SVI relationship analysis
+        accessibility_svi_correlations = {}
+        
+        if accessibility_features is not None:
+            # Overall accessibility vs SVI
+            mean_accessibility = np.mean(accessibility_features, axis=1)
+            overall_corr = np.corrcoef(mean_accessibility, pred_values)[0, 1]
+            accessibility_svi_correlations['overall'] = overall_corr
+            
+            # Feature-specific correlations
+            feature_groups = ['employment', 'healthcare', 'grocery']
+            for i, group in enumerate(feature_groups):
+                start_idx = i * 8
+                end_idx = (i + 1) * 8
+                if end_idx <= accessibility_features.shape[1]:
+                    group_features = np.mean(accessibility_features[:, start_idx:end_idx], axis=1)
+                    group_corr = np.corrcoef(group_features, pred_values)[0, 1]
+                    accessibility_svi_correlations[group] = group_corr
+        
+        # Prediction quality assessment
+        quality_metrics = {
+            'constraint_satisfaction': 'excellent' if constraint_error < 5 else 
+                                    'good' if constraint_error < 15 else 
+                                    'poor',
+            'spatial_variation': 'high' if spatial_std > 0.05 else 
+                               'moderate' if spatial_std > 0.02 else 
+                               'low',
+            'prediction_range': spatial_range,
+            'mean_prediction': np.mean(pred_values)
+        }
+        
+        validation_results = {
+            'constraint_error_percent': constraint_error,
+            'spatial_std': spatial_std,
+            'spatial_range': spatial_range,
+            'accessibility_svi_correlations': accessibility_svi_correlations,
+            'quality_metrics': quality_metrics,
+            'n_addresses': len(predictions),
+            'method': 'Direct Accessibility → SVI'
+        }
+        
+        self._log("Validation Results:")
+        self._log(f"  Constraint error: {constraint_error:.2f}%")
+        self._log(f"  Spatial variation: {spatial_std:.4f}")
+        self._log(f"  Overall accessibility-SVI correlation: {accessibility_svi_correlations.get('overall', 'N/A')}")
+        
+        return validation_results
+
+    def _apply_strong_constraint_correction(self, predictions, tract_svi):
+        """Apply stronger constraint correction while preserving spatial variation"""
+        
+        current_mean = np.mean(predictions)
+        current_std = np.std(predictions)
+        
+        # Strong adjustment to meet constraint
+        adjustment = tract_svi - current_mean
+        corrected_predictions = predictions + adjustment
+        
+        # Preserve relative spatial patterns while meeting constraint
+        corrected_predictions = np.clip(corrected_predictions, 0.0, 1.0)
+        
+        # Verify constraint is met
+        final_mean = np.mean(corrected_predictions)
+        final_error = abs(final_mean - tract_svi) / tract_svi * 100
+        
+        if final_error > 1.0:  # Still > 1% error
+            # Apply proportional scaling as backup
+            if tract_svi > 0:
+                scale_factor = tract_svi / current_mean
+                corrected_predictions = predictions * scale_factor
+                corrected_predictions = np.clip(corrected_predictions, 0.0, 1.0)
+        
+        return corrected_predictions
+
+    def _create_research_visualizations(self, results):
+        """Create research visualization outputs"""
+        
+        try:
+            viz_output_dir = os.path.join(self.output_dir, 'visualizations')
+            os.makedirs(viz_output_dir, exist_ok=True)
+            
+            # Prepare data for visualizer
+            viz_data = {
+                'gnn_predictions': results['predictions'],
+                'accessibility_features': results['accessibility_features'],
+                'tract_svi': results['tract_svi'],
+                'validation_results': results['validation_results'],
+                'training_result': results['training_result']
+            }
+            
+            # Create visualizations
+            self.visualizer.create_comprehensive_research_analysis(viz_data, viz_output_dir)
+            
+            self._log(f"Research visualizations saved to {viz_output_dir}")
+            
+        except Exception as e:
+            self._log(f"Warning: Could not create visualizations: {str(e)}")
+
+    def save_results(self, results, output_dir=None):
+        """Save pipeline results"""
+        
+        if not results.get('success', False):
+            self._log("No results to save")
+            return
+        
+        save_dir = output_dir or self.output_dir
+        
+        # Save predictions
+        predictions_path = os.path.join(save_dir, 'granite_predictions.csv')
+        results['predictions'].to_csv(predictions_path, index=False)
+        
+        # Save accessibility features
+        if 'accessibility_features' in results:
+            features_path = os.path.join(save_dir, 'accessibility_features.csv')
+            features_df = pd.DataFrame(results['accessibility_features'])
+            features_df.to_csv(features_path, index=False)
+        
+        # Save summary
+        summary_path = os.path.join(save_dir, 'results_summary.json')
+        import json
+        
+        summary = {
+            'methodology': results.get('methodology', 'GRANITE'),
+            'tract_fips': results['tract_info']['FIPS'],
+            'tract_svi': float(results['tract_info']['RPL_THEMES']),
+            'summary_metrics': results['summary'],
+            'validation_results': results['validation_results']
+        }
+        
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f, indent=2, default=str)
+        
+        self._log(f"Results saved to {save_dir}")

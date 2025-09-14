@@ -1,6 +1,6 @@
 """
 Streamlined Data Loaders for Simplified GRANITE
-Focus on robust accessibility feature computation
+Focus on robust accessibility feature computation with road network graphs
 """
 import os
 import numpy as np
@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore')
 class DataLoader:
     """
     Streamlined data loader focused on accessibility feature computation
-    Simplifies the original DataLoader for the direct accessibility → SVI approach
+    Uses road network topology for graph creation instead of simple KNN
     """
     
     def __init__(self, data_dir: str = './data', config: dict = None):
@@ -36,7 +36,6 @@ class DataLoader:
             timestamp = datetime.now().strftime("%H:%M:%S")
             print(f"[{timestamp}] AccessibilityLoader: {message}")
 
-    # Core data loading methods (simplified from original)
     def load_census_tracts(self, state_fips: str = '47', county_fips: str = '065') -> gpd.GeoDataFrame:
         """Load census tract geometries"""
         self._log(f"Loading census tracts for {state_fips}-{county_fips}...")
@@ -149,34 +148,56 @@ class DataLoader:
                 })
         
         return pd.DataFrame(results)
-    
-    def create_road_network_graph(self, addresses, state_fips='47', county_fips='065'):
+
+    def create_spatial_accessibility_graph(self, addresses, accessibility_features, 
+                                        state_fips='47', county_fips='065'):
         """
         Create graph based on actual road network connectivity
+        Falls back to geographic proximity when road network is unavailable
+        """
+        import torch
+        from torch_geometric.data import Data
         
-        Args:
-            addresses: GeoDataFrame of addresses
-            state_fips: State FIPS code
-            county_fips: County FIPS code
-            
-        Returns:
-            PyTorch Geometric Data object with road network edges
+        n_addresses = len(addresses)
+        self._log(f"Creating road network graph for {n_addresses} addresses...")
+        
+        # Load road network
+        roads = self.load_road_network(state_fips=state_fips, county_fips=county_fips)
+        
+        if len(roads) > 0:
+            # Primary approach: Road network-based connectivity
+            edge_index, edge_weight = self._create_road_network_graph(addresses, roads)
+        else:
+            self._log("No road network available, using geographic connectivity")
+            edge_index, edge_weight = self._create_geographic_fallback_graph(addresses)
+        
+        # Node features are the accessibility features
+        node_features = torch.FloatTensor(accessibility_features)
+        
+        # Create graph data
+        graph_data = Data(
+            x=node_features,
+            edge_index=edge_index,
+            edge_attr=edge_weight
+        )
+        
+        self._log(f"Created graph: {n_addresses} nodes, {edge_index.shape[1]//2} undirected edges")
+        
+        return graph_data
+
+    def _create_road_network_graph(self, addresses, roads):
+        """
+        Create graph based on actual road network connectivity
+        Integrates road network topology with geographic fallback
         """
         import torch
         from sklearn.neighbors import NearestNeighbors
         
         n_addresses = len(addresses)
         
-        # Load road network
-        roads = self.load_road_network(state_fips=state_fips, county_fips=county_fips)
-        
-        if len(roads) > 0:
-            # Method 1: Road network-based connectivity
-            road_graph, address_to_road_mapping = self._create_road_connectivity(addresses, roads)
-            network_edges = self._extract_network_edges(road_graph, address_to_road_mapping)
-        else:
-            self._log("No road network available, using geographic connectivity only")
-            network_edges = []
+        # Method 1: Road network-based connectivity
+        road_graph, address_to_road_mapping = self._create_road_connectivity(addresses, roads)
+        network_edges = self._extract_network_edges(road_graph, address_to_road_mapping)
         
         # Method 2: Geographic proximity (for disconnected areas)
         geographic_edges = self._create_geographic_edges(addresses)
@@ -211,7 +232,6 @@ class DataLoader:
         network_count = sum(1 for t in edge_types if t == 'network')
         geographic_count = sum(1 for t in edge_types if t == 'geographic')
         
-        self._log(f"Created road network graph: {n_addresses} nodes, {len(edge_list)//2} undirected edges")
         self._log(f"  Network edges: {network_count//2}")
         self._log(f"  Geographic edges: {geographic_count//2}")
         
@@ -271,7 +291,6 @@ class DataLoader:
             if distances[i] < 500:  # Within 500m of a road
                 nearest_road_node = tuple(road_nodes[indices[i][0]])
                 address_to_road_mapping[i] = nearest_road_node
-            # else: address not connected to road network
         
         self._log(f"Mapped {len(address_to_road_mapping)}/{len(addresses)} addresses to road network")
         
@@ -279,8 +298,8 @@ class DataLoader:
 
     def _extract_network_edges(self, road_graph, address_to_road_mapping):
         """
-        EFFICIENT: Extract address-to-address edges via road network connectivity
-        Uses distance limits and local connectivity instead of all-pairs shortest paths
+        Extract address-to-address edges via road network connectivity
+        Uses distance limits and local connectivity for efficiency
         """
         import networkx as nx
         from sklearn.neighbors import NearestNeighbors
@@ -296,8 +315,7 @@ class DataLoader:
         
         self._log(f"Computing network connectivity for {len(road_connected_addresses)} road-connected addresses...")
         
-        # OPTIMIZATION 1: Use geographic proximity to limit road network queries
-        # Only compute road distances for geographically nearby addresses
+        # Use geographic proximity to limit road network queries
         address_coords = []
         for addr_idx in road_connected_addresses:
             road_node = address_to_road_mapping[addr_idx]
@@ -305,17 +323,17 @@ class DataLoader:
         
         address_coords = np.array(address_coords)
         
-        # Find geographic neighbors (much faster than road network pathfinding)
-        max_neighbors = min(20, len(road_connected_addresses) - 1)  # Limit to 20 neighbors max
+        # Find geographic neighbors
+        max_neighbors = min(20, len(road_connected_addresses) - 1)
         nbrs = NearestNeighbors(n_neighbors=max_neighbors, metric='euclidean').fit(address_coords)
         distances, indices = nbrs.kneighbors(address_coords)
         
-        # OPTIMIZATION 2: Only compute road paths for geographic neighbors
+        # Only compute road paths for geographic neighbors
         for i, addr1_idx in enumerate(road_connected_addresses):
             road_node1 = address_to_road_mapping[addr1_idx]
             
-            # Check only geographic neighbors, not all addresses
-            for j_idx in range(1, min(10, len(indices[i]))):  # Limit to top 10 neighbors
+            # Check only geographic neighbors
+            for j_idx in range(1, min(10, len(indices[i]))):
                 j = indices[i][j_idx]
                 addr2_idx = road_connected_addresses[j]
                 road_node2 = address_to_road_mapping[addr2_idx]
@@ -324,17 +342,21 @@ class DataLoader:
                 if road_node1 == road_node2:
                     continue
                 
-                # Geographic distance check (convert degrees to meters approximately)
+                # Geographic distance check
                 geo_distance = distances[i][j_idx] * 111000  # rough conversion to meters
                 
                 # Only compute road path for nearby addresses (within 1km)
                 if geo_distance < 1000:
                     try:
-                        # OPTIMIZATION 3: Use cutoff to limit search depth
+                        # Compute shortest path length without cutoff parameter
                         path_length = nx.shortest_path_length(
                             road_graph, road_node1, road_node2, 
-                            weight='length', cutoff=1500  # Don't search beyond 1.5km
+                            weight='length'
                         )
+                        
+                        # Apply manual cutoff check
+                        if path_length > 1500:  # Don't use paths longer than 1.5km
+                            continue
                         
                         # Weight inversely proportional to road distance
                         weight = 1.0 / (1.0 + path_length / 500.0)
@@ -348,7 +370,7 @@ class DataLoader:
                         })
                         
                     except (nx.NetworkXNoPath, nx.NetworkXError):
-                        # No road connection or search exceeded cutoff
+                        # No road connection
                         continue
             
             # Progress update every 100 addresses
@@ -359,7 +381,7 @@ class DataLoader:
         return network_edges
 
     def _create_geographic_edges(self, addresses, max_neighbors=6):
-        """Create edges based on geographic proximity"""
+        """Create edges based on geographic proximity as fallback"""
         from sklearn.neighbors import NearestNeighbors
         import numpy as np
         
@@ -368,7 +390,7 @@ class DataLoader:
         
         # Find geographic neighbors
         k_neighbors = min(max_neighbors, n_addresses - 1)
-        nbrs = NearestNeighbors(n_neighbors=k_neighbors + 1).fit(coords)  # +1 because includes self
+        nbrs = NearestNeighbors(n_neighbors=k_neighbors + 1).fit(coords)
         distances, indices = nbrs.kneighbors(coords)
         
         geographic_edges = []
@@ -381,7 +403,7 @@ class DataLoader:
                 
                 # Only connect nearby addresses (within 1km)
                 if distance_m < 1000:
-                    weight = np.exp(-distance_m / 300.0)  # Exponential decay, 300m characteristic distance
+                    weight = np.exp(-distance_m / 300.0)  # Exponential decay
                     
                     geographic_edges.append({
                         'from': i,
@@ -394,10 +416,8 @@ class DataLoader:
         return geographic_edges
 
     def _create_fallback_edges(self, n_addresses):
-        """Create minimal connectivity as fallback"""
+        """Create minimal connectivity as absolute fallback"""
         import torch
-        from sklearn.neighbors import NearestNeighbors
-        import numpy as np
         
         # Create simple ring connectivity as absolute fallback
         edge_list = []
@@ -413,26 +433,15 @@ class DataLoader:
         
         return edge_index, edge_weight
 
-    # Replace the entire road network approach with this simple, robust method:
-
-    def create_spatial_accessibility_graph(self, addresses, accessibility_features, 
-                                        state_fips='47', county_fips='065'):
+    def _create_geographic_fallback_graph(self, addresses):
         """
-        Create graph based on geographic proximity (simple and robust)
-        
-        For spatial GNNs, local neighborhood connectivity is what matters,
-        not exact road network pathfinding.
+        Fallback to geographic connectivity when no road network is available
         """
         import torch
-        from torch_geometric.data import Data
         from sklearn.neighbors import NearestNeighbors
         import numpy as np
         
         n_addresses = len(addresses)
-        
-        self._log(f"Creating spatial graph for {n_addresses} addresses...")
-        
-        # Use simple geographic connectivity
         coords = np.array([[addr.geometry.x, addr.geometry.y] for _, addr in addresses.iterrows()])
         
         # Adaptive number of neighbors based on density
@@ -477,39 +486,12 @@ class DataLoader:
         edge_index = torch.LongTensor(edge_list).t().contiguous()
         edge_weight = torch.FloatTensor(edge_weights)
         
-        # Node features are the accessibility features
-        node_features = torch.FloatTensor(accessibility_features)
-        
-        # Create graph data
-        graph_data = Data(
-            x=node_features,
-            edge_index=edge_index,
-            edge_attr=edge_weight
-        )
-        
-        self._log(f"Created spatial graph: {n_addresses} nodes, {len(edge_list)//2} edges")
-        self._log(f"  Average neighbors per node: {len(edge_list)/n_addresses:.1f}")
-        
-        return graph_data
+        return edge_index, edge_weight
 
     def load_road_network(self, roads_file: Optional[str] = None, 
                         state_fips: str = '47', county_fips: str = '065') -> gpd.GeoDataFrame:
         """
         Load road network data
-        
-        Parameters:
-        -----------
-        roads_file : str, optional
-            Path to roads shapefile
-        state_fips : str
-            State FIPS code
-        county_fips : str
-            County FIPS code
-            
-        Returns:
-        --------
-        gpd.GeoDataFrame
-            Road network geometries
         """
         self._log("Loading road network...")
         
@@ -530,7 +512,7 @@ class DataLoader:
                 else:
                     url = f"https://www2.census.gov/geo/tiger/TIGER2023/ROADS/"
                     self._log(f"Road file not found. Please download from: {url}")
-                    self._log("Returning empty road network - accessibility will be limited")
+                    self._log("Returning empty road network - will use geographic fallback")
                     return gpd.GeoDataFrame(geometry=[])
             
             # Ensure CRS
@@ -541,9 +523,9 @@ class DataLoader:
             
         except Exception as e:
             self._log(f"Error loading roads: {str(e)}")
-            # Return empty GeoDataFrame
             return gpd.GeoDataFrame(geometry=[])
 
+    # Rest of the methods remain the same as in your new file...
     def load_address_points(self, state_fips: str = '47', county_fips: str = '065') -> gpd.GeoDataFrame:
         """Load real Chattanooga address points (simplified)"""
         
@@ -760,13 +742,9 @@ class DataLoader:
         self._log(f"Created {len(grocery_gdf)} grocery destinations")
         return grocery_gdf
 
-    # Simplified travel time computation
     def compute_accessibility_features(self, addresses: gpd.GeoDataFrame) -> np.ndarray:
         """
         Compute comprehensive accessibility features for all addresses
-        
-        This is the main method called by the pipeline
-        Returns matrix: [n_addresses, n_features]
         """
         self._log(f"Computing accessibility features for {len(addresses)} addresses...")
         
@@ -808,7 +786,6 @@ class DataLoader:
                                      destinations: gpd.GeoDataFrame) -> pd.DataFrame:
         """
         Simplified travel time calculation using distance approximation
-        More reliable than complex multi-modal routing for this use case
         """
         results = []
         
@@ -829,7 +806,6 @@ class DataLoader:
                 drive_time = distance_km / 30.0 * 60  # 30 km/h average urban speed → minutes
                 
                 # Simple transit time estimation
-                # Transit is competitive for distances 2-15km, poor outside this range
                 if 2 <= distance_km <= 15:
                     transit_base_time = distance_km / 15.0 * 60  # 15 km/h average transit speed
                     transit_wait_time = 10  # Average wait time
@@ -959,124 +935,3 @@ class DataLoader:
             ])
         
         return np.array(derived, dtype=np.float64)
-
-    def create_accessibility_baseline_comparison(self, addresses: gpd.GeoDataFrame) -> Dict:
-        """
-        Create baseline accessibility measures for comparison with GNN predictions
-        
-        Returns traditional accessibility metrics computed using same destinations
-        """
-        self._log("Computing baseline accessibility metrics for comparison...")
-        
-        # Use same destinations as main analysis
-        destinations = {
-            'employment': self.create_employment_destinations(),
-            'healthcare': self.create_healthcare_destinations(),
-            'grocery': self.create_grocery_destinations()
-        }
-        
-        baseline_results = {}
-        
-        for dest_type, dest_gdf in destinations.items():
-            # Simple gravity model
-            gravity_scores = self._compute_gravity_accessibility(addresses, dest_gdf)
-            
-            # Cumulative opportunities within thresholds
-            opportunities_30min = self._compute_cumulative_opportunities(addresses, dest_gdf, threshold_minutes=30)
-            opportunities_60min = self._compute_cumulative_opportunities(addresses, dest_gdf, threshold_minutes=60)
-            
-            baseline_results[dest_type] = {
-                'gravity_scores': gravity_scores,
-                'opportunities_30min': opportunities_30min,
-                'opportunities_60min': opportunities_60min
-            }
-        
-        return baseline_results
-
-    def _compute_gravity_accessibility(self, addresses: gpd.GeoDataFrame, 
-                                     destinations: gpd.GeoDataFrame) -> np.ndarray:
-        """Traditional gravity model accessibility"""
-        
-        gravity_scores = []
-        
-        for _, address in addresses.iterrows():
-            addr_point = address.geometry
-            gravity_score = 0
-            
-            for _, destination in destinations.iterrows():
-                dest_point = destination.geometry
-                distance_deg = addr_point.distance(dest_point)
-                distance_km = distance_deg * 111
-                
-                if distance_km > 0:
-                    # Simple gravity: attraction / distance^2
-                    attraction = destination.get('employees', destination.get('beds', 100))
-                    gravity_score += attraction / (distance_km ** 1.5)
-            
-            gravity_scores.append(gravity_score)
-        
-        return np.array(gravity_scores)
-
-    def _compute_cumulative_opportunities(self, addresses: gpd.GeoDataFrame,
-                                        destinations: gpd.GeoDataFrame,
-                                        threshold_minutes: float = 30) -> np.ndarray:
-        """Count destinations within time threshold"""
-        
-        opportunity_counts = []
-        
-        # Convert time threshold to approximate distance threshold
-        threshold_km = threshold_minutes / 60 * 30  # Assume 30 km/h average speed
-        threshold_deg = threshold_km / 111  # Convert to degrees
-        
-        for _, address in addresses.iterrows():
-            addr_point = address.geometry
-            count = 0
-            
-            for _, destination in destinations.iterrows():
-                dest_point = destination.geometry
-                distance_deg = addr_point.distance(dest_point)
-                
-                if distance_deg <= threshold_deg:
-                    count += 1
-            
-            opportunity_counts.append(count)
-        
-        return np.array(opportunity_counts)
-
-
-# Convenience functions for backward compatibility
-def load_tract_accessibility_data(fips_code: str, data_dir: str = './data', config: dict = None) -> Dict:
-    """
-    Load all accessibility data for a single tract
-    
-    Main function called by the simplified pipeline
-    """
-    loader = DataLoader(data_dir=data_dir, config=config)
-    
-    # Load tract addresses
-    addresses = loader.get_addresses_for_tract(fips_code)
-    
-    if len(addresses) == 0:
-        raise ValueError(f"No addresses found for tract {fips_code}")
-    
-    # Compute accessibility features
-    accessibility_features = loader.compute_accessibility_features(addresses)
-    
-    # Load tract info and SVI
-    state_fips = fips_code[:2]
-    county_fips = fips_code[2:5]
-    
-    tracts = loader.load_census_tracts(state_fips, county_fips)
-    county_name = loader._get_county_name(state_fips, county_fips)
-    svi_data = loader.load_svi_data(state_fips, county_name)
-    
-    tract_info = tracts[tracts['FIPS'] == fips_code].iloc[0]
-    tract_svi = svi_data[svi_data['FIPS'] == fips_code]['RPL_THEMES'].iloc[0]
-    
-    return {
-        'addresses': addresses,
-        'accessibility_features': accessibility_features,
-        'tract_info': tract_info,
-        'tract_svi': tract_svi,
-        'feature_shape': accessibility_features.shape
-    }

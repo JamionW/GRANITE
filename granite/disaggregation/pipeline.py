@@ -13,6 +13,7 @@ warnings.filterwarnings('ignore')
 
 from ..data.loaders import DataLoader
 from ..visualization.plots import GRANITEResearchVisualizer
+from ..evaluation.spatial_diagnostics import SpatialLearningDiagnostics
 
 class GRANITEPipeline:
     """
@@ -416,31 +417,35 @@ class GRANITEPipeline:
                 verbose=self.verbose
             )
             
-            # Validate training results
+            # STORE RAW PREDICTIONS for diagnostics
             predictions = training_result['final_predictions']
-            constraint_error = training_result['constraint_error']
-            spatial_std = training_result['final_spatial_std']
+            self._stored_raw_predictions = predictions.copy()  # Store a copy for diagnostics
+            
+            # Calculate constraint error on RAW predictions
+            raw_constraint_error = abs(np.mean(predictions) - tract_svi) / tract_svi
+            spatial_std = np.std(predictions)
             
             self._log(f"Training completed:")
-            self._log(f"  Constraint error: {constraint_error:.6f}")
-            self._log(f"  Spatial variation: {spatial_std:.6f}")
-            self._log(f"  Prediction range: [{predictions.min():.4f}, {predictions.max():.4f}]")
+            self._log(f"  RAW constraint error: {raw_constraint_error:.6f}")
+            self._log(f"  RAW spatial variation: {spatial_std:.6f}")
+            self._log(f"  RAW prediction range: [{predictions.min():.4f}, {predictions.max():.4f}]")
+            self._log(f"  RAW prediction mean: {np.mean(predictions):.4f} (target: {tract_svi:.4f})")
             
-            # Quality checks
-            if constraint_error > 0.05:  # 5% tolerance
-                self._log("Warning: High constraint error - model may not preserve tract-level SVI")
+            # Quality checks on RAW predictions
+            if raw_constraint_error > 0.5:  # 50% tolerance for raw predictions
+                self._log("Warning: Very high RAW constraint error - model struggling to learn target scale")
             
-            if spatial_std < 0.01:
-                self._log("Warning: Low spatial variation - model may be over-smoothing")
+            if spatial_std < 0.005:
+                self._log("Warning: Very low RAW spatial variation - model may be predicting constant values")
             
             return {
                 'success': True,
                 'raw_predictions': predictions,
                 'model': model,
-                'training_history': training_result['training_history'],
-                'constraint_error': constraint_error,
+                'training_history': training_result.get('training_history', []),
+                'raw_constraint_error': raw_constraint_error,
                 'spatial_std': spatial_std,
-                'epochs_trained': training_result['epochs_trained']
+                'epochs_trained': training_result.get('epochs_trained', epochs)
             }
             
         except Exception as e:
@@ -455,7 +460,7 @@ class GRANITEPipeline:
             }
 
     def _finalize_predictions(self, raw_predictions, addresses, tract_svi):
-        """Create final prediction DataFrame with uncertainty estimates"""
+        """Create final prediction DataFrame with transparent constraint handling"""
         
         if raw_predictions is None:
             return pd.DataFrame()
@@ -467,8 +472,16 @@ class GRANITEPipeline:
         else:
             predictions = raw_predictions
         
-        # Simple, direct constraint correction
+        # Calculate constraint error BEFORE correction
         current_mean = np.mean(predictions)
+        pre_correction_error = abs(current_mean - tract_svi) / tract_svi * 100
+        
+        self._log(f"Pre-correction analysis:")
+        self._log(f"  Raw mean: {current_mean:.4f}")
+        self._log(f"  Target: {tract_svi:.4f}")  
+        self._log(f"  Pre-correction constraint error: {pre_correction_error:.2f}%")
+        
+        # Apply constraint correction
         adjustment = tract_svi - current_mean
         adjusted_predictions = predictions + adjustment
         adjusted_predictions = np.clip(adjusted_predictions, 0.0, 1.0)
@@ -477,13 +490,23 @@ class GRANITEPipeline:
         final_mean = np.mean(adjusted_predictions)
         final_error = abs(final_mean - tract_svi) / tract_svi * 100
         
-        self._log(f"Constraint correction: raw_mean={current_mean:.4f}, target={tract_svi:.4f}, final_mean={final_mean:.4f}, error={final_error:.2f}%")
+        self._log(f"Post-correction analysis:")
+        self._log(f"  Adjustment applied: {adjustment:.4f}")
+        self._log(f"  Final mean: {final_mean:.4f}")
+        self._log(f"  Post-correction constraint error: {final_error:.2f}%")
+        
+        # Assess if correction is reasonable
+        if abs(adjustment) > 0.1:  # More than 10% of SVI scale
+            self._log(f"WARNING: Large adjustment ({adjustment:.4f}) suggests model is not learning appropriate scale")
+        
+        if pre_correction_error > 50:  # More than 50% error
+            self._log(f"WARNING: Very high pre-correction error suggests fundamental model issues")
         
         # Extract coordinates
         x_coords = np.array([addr.geometry.x for _, addr in addresses.iterrows()])
         y_coords = np.array([addr.geometry.y for _, addr in addresses.iterrows()])
         
-        # Generate uncertainty estimates
+        # Generate uncertainty estimates (same as before)
         base_uncertainty = 0.05
         distance_from_mean = np.abs(adjusted_predictions - tract_svi)
         distance_uncertainty = distance_from_mean * 0.1
@@ -506,35 +529,75 @@ class GRANITEPipeline:
             'mean': adjusted_predictions,
             'sd': total_uncertainty,
             'q025': np.clip(adjusted_predictions - 1.96 * total_uncertainty, 0.0, 1.0),
-            'q975': np.clip(adjusted_predictions + 1.96 * total_uncertainty, 0.0, 1.0)
+            'q975': np.clip(adjusted_predictions + 1.96 * total_uncertainty, 0.0, 1.0),
+            'raw_prediction': predictions,  # NEW: Include raw predictions for reference
+            'adjustment': adjustment  # NEW: Show the adjustment applied
         })
         
         self._log(f"Finalized predictions: {len(final_predictions)} addresses")
-        self._log(f"  Mean SVI: {np.mean(adjusted_predictions):.4f} (target: {tract_svi:.4f})")
-        self._log(f"  Spatial std: {np.std(adjusted_predictions):.4f}")
+        self._log(f"  Final spatial std: {np.std(adjusted_predictions):.4f}")
         
         return final_predictions
 
     def _validate_predictions(self, predictions, tract_svi, accessibility_features, normalized_features):
-        """Comprehensive validation of predictions"""
+        """Enhanced validation with spatial learning diagnostics"""
         
         if predictions.empty:
             return {'validation_failed': True}
         
         pred_values = predictions['mean'].values
         
-        # Constraint validation
+        # Get coordinates for spatial analysis
+        x_coords = predictions['x'].values
+        y_coords = predictions['y'].values
+        coordinates = np.column_stack([x_coords, y_coords])
+        
+        # Initialize diagnostics
+        diagnostics = SpatialLearningDiagnostics(verbose=self.verbose)
+        
+        # CRITICAL: Get raw predictions before any adjustment
+        raw_predictions = self._get_raw_predictions_for_diagnostics()
+        
+        if raw_predictions is not None:
+            self._log("Running spatial learning diagnostics on RAW predictions...")
+            
+            # Run comprehensive diagnostics
+            diagnostic_results = diagnostics.comprehensive_evaluation(
+                raw_predictions=raw_predictions,
+                accessibility_features=accessibility_features,
+                coordinates=coordinates, 
+                target_svi=tract_svi
+            )
+            
+            # Print detailed report
+            verdict = diagnostics.print_diagnostic_report(diagnostic_results)
+            
+            # Store diagnostic results
+            diagnostic_summary = {
+                'spatial_autocorrelation': diagnostic_results['spatial_autocorrelation'],
+                'accessibility_correlation': diagnostic_results['accessibility_correlations']['overall'],
+                'learning_quality_score': diagnostic_results['quality_assessment']['learning_quality'],
+                'verdict': verdict,
+                'mean_bias': diagnostic_results['quality_assessment']['mean_bias'],
+                'has_spatial_structure': diagnostic_results['quality_assessment']['has_spatial_structure'],
+                'meaningful_accessibility_relationship': diagnostic_results['quality_assessment']['meaningful_accessibility_relationship']
+            }
+        else:
+            self._log("Warning: Could not access raw predictions for diagnostics")
+            diagnostic_summary = {'error': 'Raw predictions not available'}
+        
+        # Standard constraint validation on final predictions
         constraint_error = abs(np.mean(pred_values) - tract_svi) / tract_svi * 100
         
         # Spatial variation analysis
         spatial_std = np.std(pred_values)
         spatial_range = np.ptp(pred_values)
         
-        # Accessibility-SVI relationship analysis
+        # Accessibility-SVI relationship analysis (on final predictions)
         accessibility_svi_correlations = {}
         
         if accessibility_features is not None:
-            # Overall accessibility vs SVI
+            # Overall accessibility vs final SVI predictions
             mean_accessibility = np.mean(accessibility_features, axis=1)
             overall_corr = np.corrcoef(mean_accessibility, pred_values)[0, 1]
             accessibility_svi_correlations['overall'] = overall_corr
@@ -555,8 +618,8 @@ class GRANITEPipeline:
                                     'good' if constraint_error < 15 else 
                                     'poor',
             'spatial_variation': 'high' if spatial_std > 0.05 else 
-                               'moderate' if spatial_std > 0.02 else 
-                               'low',
+                            'moderate' if spatial_std > 0.02 else 
+                            'low',
             'prediction_range': spatial_range,
             'mean_prediction': np.mean(pred_values)
         }
@@ -568,15 +631,27 @@ class GRANITEPipeline:
             'accessibility_svi_correlations': accessibility_svi_correlations,
             'quality_metrics': quality_metrics,
             'n_addresses': len(predictions),
-            'method': 'Direct Accessibility → SVI'
+            'method': 'Direct Accessibility → SVI',
+            'spatial_diagnostics': diagnostic_summary  # NEW: Include diagnostics
         }
         
-        self._log("Validation Results:")
-        self._log(f"  Constraint error: {constraint_error:.2f}%")
-        self._log(f"  Spatial variation: {spatial_std:.4f}")
-        self._log(f"  Overall accessibility-SVI correlation: {accessibility_svi_correlations.get('overall', 'N/A')}")
+        self._log("Standard Validation Results:")
+        self._log(f"  Final constraint error: {constraint_error:.2f}%")
+        self._log(f"  Final spatial variation: {spatial_std:.4f}")
+        self._log(f"  Final accessibility-SVI correlation: {accessibility_svi_correlations.get('overall', 'N/A')}")
         
         return validation_results
+    
+    def _get_raw_predictions_for_diagnostics(self):
+        """
+        Get the raw predictions before any constraint correction
+        This should be called during training to store the raw predictions
+        """
+        if hasattr(self, '_stored_raw_predictions'):
+            return self._stored_raw_predictions
+        else:
+            self._log("Warning: Raw predictions not stored during training")
+            return None
 
     def _apply_strong_constraint_correction(self, predictions, tract_svi):
         """Apply stronger constraint correction while preserving spatial variation"""

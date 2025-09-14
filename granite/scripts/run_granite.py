@@ -1,83 +1,91 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
-Command-line entry point for GRANITE framework
-
-This module provides the main() function that serves as the entry point
-for the 'granite' command.
+Updated command-line interface for simplified GRANITE
 """
 import os
 import sys
 import argparse
 import yaml
 from datetime import datetime
-from typing import Dict, List, Optional
 
-# Add parent directory to path for imports
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-
-from granite.disaggregation.pipeline import GRANITEPipeline
-from granite.data.loaders import DataLoader
-
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='GRANITE Accessibility Research')
-    parser.add_argument('--fips', type=str, help='Target FIPS code')
-    parser.add_argument('--epochs', type=int, default=50, help='Training epochs')
-    parser.add_argument('--output', type=str, default='./output', help='Output directory')
-    parser.add_argument('--verbose', action='store_true', help='Verbose logging')
-    parser.add_argument('--config', type=str, default='config.yaml', help='Config file path')
-    return parser.parse_args()
-
-def load_config(config_path: str) -> dict:
-    """Load configuration from YAML file"""
-    try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        print(f"Warning: Config file {config_path} not found, using defaults")
-        return {}
-    except yaml.YAMLError as e:
-        print(f"Error parsing config file {config_path}: {e}")
-        return {}
+# Add your project path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def main():
-    args = parse_arguments()
+    parser = argparse.ArgumentParser(description='GRANITE Simplified: Accessibility → SVI')
+    parser.add_argument('--fips', type=str, required=True, help='Target FIPS code (e.g., 47065010100)')
+    parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
+    parser.add_argument('--output', type=str, default='./output', help='Output directory')
+    parser.add_argument('--verbose', action='store_true', help='Verbose logging')
+    parser.add_argument('--config', type=str, default=None, help='Config file path')
     
-    # Load base config from YAML file
-    config = load_config(args.config)
+    args = parser.parse_args()
     
-    # Override/merge with command line arguments
-    if args.fips:
-        if 'data' not in config:
-            config['data'] = {}
-        config['data']['target_fips'] = args.fips
-        config['data']['processing_mode'] = 'fips'
+    # Load configuration
+    config = {
+        'data': {
+            'target_fips': args.fips,
+            'state_fips': args.fips[:2],
+            'county_fips': args.fips[2:5]
+        },
+        'model': {
+            'epochs': args.epochs,
+            'hidden_dim': 64,
+            'dropout': 0.3
+        },
+        'training': {
+            'learning_rate': 0.001,
+            'weight_decay': 1e-4
+        },
+        'processing': {
+            'verbose': args.verbose
+        }
+    }
     
-    # Override epochs if provided (for both stages)
-    if args.epochs != 50:  # Only override if not default
-        if 'model' not in config:
-            config['model'] = {}
-        config['model']['accessibility_epochs'] = args.epochs
-        config['model']['svi_epochs'] = args.epochs
+    # Override with config file if provided
+    if args.config and os.path.exists(args.config):
+        with open(args.config, 'r') as f:
+            file_config = yaml.safe_load(f)
+            config.update(file_config)
     
-    # Set processing options
-    if 'processing' not in config:
-        config['processing'] = {}
-    config['processing']['verbose'] = args.verbose
+    print(f"\n{'='*60}")
+    print(f"GRANITE Simplified: Accessibility → SVI Prediction")
+    print(f"{'='*60}")
+    print(f"Target FIPS: {args.fips}")
+    print(f"Epochs: {args.epochs}")
+    print(f"Output: {args.output}")
+    print(f"{'='*60}\n")
     
-    print(f"Using config: FIPS={config.get('data', {}).get('target_fips')}, "
-          f"Epochs={config.get('model', {}).get('accessibility_epochs', 50)}")
+    # Run the simplified pipeline
+    from granite.disaggregation.pipeline import GRANITEPipeline
     
     pipeline = GRANITEPipeline(config, output_dir=args.output)
     results = pipeline.run()
     
     if results.get('success', False):
-        print(f"Analysis completed successfully!")
-        print(f"Processed {results['summary']['total_addresses']} addresses")
+        print(f"\n{'='*60}")
+        print(f"SUCCESS: Analysis completed!")
+        print(f"{'='*60}")
+        print(f"Addresses processed: {results['summary']['addresses_processed']}")
+        print(f"Accessibility features: {results['summary']['accessibility_features']}")
+        print(f"Spatial variation: {results['summary']['spatial_variation']:.4f}")
+        print(f"Constraint error: {results['summary']['constraint_error']:.2f}%")
+        print(f"Training epochs: {results['summary']['training_epochs']}")
+        
+        # Save results
+        pipeline.save_results(results)
+        print(f"\nResults saved to: {args.output}")
+        
+        # Print validation summary if available
+        if 'validation_results' in results:
+            val = results['validation_results']
+            print(f"\nValidation Results:")
+            print(f"  Constraint satisfaction: {val['quality_metrics']['constraint_satisfaction']}")
+            print(f"  Spatial variation: {val['quality_metrics']['spatial_variation']}")
+            if 'accessibility_svi_correlations' in val:
+                corr = val['accessibility_svi_correlations'].get('overall', 'N/A')
+                print(f"  Accessibility-SVI correlation: {corr}")
     else:
-        print(f"Analysis failed: {results.get('error', 'Unknown error')}")
+        print(f"\nERROR: {results.get('error', 'Unknown error')}")
         return 1
     
     return 0

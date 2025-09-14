@@ -10,9 +10,6 @@ from torch_geometric.data import Data
 import numpy as np
 
 class AccessibilitySVIGNN(nn.Module):
-    """
-    FIXED: Single-stage GNN with correct tensor dimensions
-    """
     def __init__(self, accessibility_features_dim, hidden_dim=64, dropout=0.5):  # Increased dropout
         super(AccessibilitySVIGNN, self).__init__()
         
@@ -75,7 +72,7 @@ class AccessibilitySVIGNN(nn.Module):
 
 class AccessibilityGNNTrainer:
     """
-    Simplified trainer for accessibility → SVI prediction
+    Trainer for accessibility → SVI prediction
     
     Includes anti-bias mechanisms:
     1. Balanced loss function
@@ -131,7 +128,7 @@ class AccessibilityGNNTrainer:
 
             bias_detected = self._detect_systematic_bias(svi_predictions, graph_data.x, epoch)
             
-            # Stronger constraint enforcement
+            # Constraint enforcement
             predicted_mean = svi_predictions.mean()
             constraint_loss = F.mse_loss(predicted_mean.unsqueeze(0), target_svi)
             
@@ -139,14 +136,13 @@ class AccessibilityGNNTrainer:
             spatial_std = svi_predictions.std()
             variation_loss = F.relu(0.02 - spatial_std)
             
-            # Prediction bounds enforcement
+            # Prediction bounds
             extreme_penalty = torch.mean(F.relu(svi_predictions - 1.0)) + torch.mean(F.relu(-svi_predictions))
             
             if len(svi_predictions) > 10:
-                overall_accessibility = torch.mean(graph_data.x, dim=1)
-                correlation = torch.corrcoef(torch.stack([overall_accessibility, svi_predictions]))[0,1]
-                bias_penalty = torch.abs(correlation) * 0.5  # Penalize strong correlations
-                total_loss = 2.0 * constraint_loss + 0.3 * variation_loss + 0.1 * extreme_penalty + bias_penalty
+                total_loss = 2.0 * constraint_loss + 0.3 * variation_loss + 0.1 * extreme_penalty
+            else:
+                total_loss = constraint_loss + variation_loss + extreme_penalty
             
             # Backward pass
             total_loss.backward()
@@ -169,7 +165,7 @@ class AccessibilityGNNTrainer:
             else:
                 patience_counter += 1
                 
-            if patience_counter >= 20:  # Early stopping
+            if patience_counter >= 20:
                 if verbose:
                     print(f"Early stopping at epoch {epoch}")
                 break
@@ -213,88 +209,6 @@ class AccessibilityGNNTrainer:
                 return True
         
         return False
-
-def create_accessibility_graph(addresses, accessibility_features, road_network=None, k_neighbors=8):
-    """
-    Create graph based on accessibility patterns rather than just spatial proximity
-    
-    Args:
-        addresses: GeoDataFrame of addresses
-        accessibility_features: Array [n_addresses, n_features]
-        road_network: Optional road network for additional edges
-        k_neighbors: Number of accessibility-based neighbors per node
-        
-    Returns:
-        PyTorch Geometric Data object
-    """
-    from sklearn.neighbors import NearestNeighbors
-    from scipy.spatial.distance import cdist
-    import torch
-    
-    n_addresses = len(addresses)
-    
-    # Method 1: Accessibility-based edges (primary)
-    accessibility_neighbors = NearestNeighbors(
-        n_neighbors=min(k_neighbors, n_addresses-1), 
-        metric='cosine'  # Cosine similarity for accessibility patterns
-    )
-    accessibility_neighbors.fit(accessibility_features)
-    
-    # Find k-nearest neighbors based on accessibility similarity
-    _, indices = accessibility_neighbors.kneighbors(accessibility_features)
-    
-    edge_list = []
-    edge_weights = []
-    
-    for i in range(n_addresses):
-        for j in indices[i]:
-            if i != j:
-                # Calculate accessibility similarity weight
-                similarity = 1 - cdist([accessibility_features[i]], 
-                                     [accessibility_features[j]], 
-                                     metric='cosine')[0][0]
-                edge_list.append([i, j])
-                edge_weights.append(similarity)
-    
-    # Method 2: Spatial edges (secondary, for spatial smoothing)
-    if len(addresses) > 0:
-        coords = np.array([[addr.geometry.x, addr.geometry.y] for _, addr in addresses.iterrows()])
-        
-        spatial_neighbors = NearestNeighbors(n_neighbors=min(4, n_addresses-1))
-        spatial_neighbors.fit(coords)
-        
-        _, spatial_indices = spatial_neighbors.kneighbors(coords)
-        
-        for i in range(n_addresses):
-            for j in spatial_indices[i]:
-                if i != j:
-                    # Add spatial edge with lower weight
-                    distance = np.linalg.norm(coords[i] - coords[j])
-                    spatial_weight = np.exp(-distance * 100)  # Exponential decay
-                    edge_list.append([i, j])
-                    edge_weights.append(spatial_weight * 0.3)  # Reduced weight for spatial
-    
-    # Convert to tensors
-    if edge_list:
-        edge_index = torch.LongTensor(edge_list).t().contiguous()
-        edge_weight = torch.FloatTensor(edge_weights)
-    else:
-        # Fallback: fully connected graph
-        edge_index = torch.LongTensor([[i, j] for i in range(n_addresses) 
-                                     for j in range(n_addresses) if i != j]).t().contiguous()
-        edge_weight = torch.ones(edge_index.shape[1])
-    
-    # Node features are the accessibility features
-    node_features = torch.FloatTensor(accessibility_features)
-    
-    # Create graph data
-    graph_data = Data(
-        x=node_features,
-        edge_index=edge_index,
-        edge_attr=edge_weight
-    )
-    
-    return graph_data
 
 def normalize_accessibility_features(features):
     """

@@ -14,6 +14,7 @@ warnings.filterwarnings('ignore')
 from ..data.loaders import DataLoader
 from ..visualization.plots import GRANITEResearchVisualizer
 from ..evaluation.spatial_diagnostics import SpatialLearningDiagnostics
+from ..evaluation.accessibility_validator import validate_granite_accessibility_features, integrate_with_spatial_diagnostics
 
 class GRANITEPipeline:
     """
@@ -139,6 +140,9 @@ class GRANITEPipeline:
         if accessibility_features is None:
             return {'success': False, 'error': 'Failed to compute accessibility features'}
         
+        # Generate feature names (you need this defined)
+        feature_names = self._generate_feature_names(accessibility_features.shape[1])
+        
         # Step 2: Build accessibility-based graph
         from ..models.gnn import normalize_accessibility_features
 
@@ -169,10 +173,43 @@ class GRANITEPipeline:
             tract_svi
         )
         
-        # Step 5: Validation and comparison
+        # Step 5a: Run accessibility feature validation FIRST
+        self._log("Running accessibility feature validation...")
+        try:
+            access_validation_results, access_validator = validate_granite_accessibility_features(
+                addresses=tract_addresses,
+                accessibility_features=accessibility_features,
+                destinations={
+                    'employment': data['employment_destinations'],
+                    'healthcare': data['healthcare_destinations'], 
+                    'grocery': data['grocery_destinations']
+                },
+                feature_names=feature_names,
+                tract_svi=tract_svi,
+                output_dir=os.path.join(self.output_dir, 'accessibility_validation')
+            )
+        except Exception as e:
+            self._log(f"Warning: Accessibility validation failed: {str(e)}")
+            access_validation_results = {'error': str(e)}
+        
+        # Step 5b: Run spatial diagnostics (modified to return results)
         validation_results = self._validate_predictions(
             final_predictions, tract_svi, accessibility_features, normalized_features
         )
+        
+        # Step 5c: Integrate results if both successful
+        if 'error' not in access_validation_results and 'spatial_diagnostics' in validation_results:
+            try:
+                integrated_results = integrate_with_spatial_diagnostics(
+                    spatial_diagnostics_results=validation_results['spatial_diagnostics'],
+                    accessibility_validation_results=access_validation_results
+                )
+                validation_results['integrated_analysis'] = integrated_results
+            except Exception as e:
+                self._log(f"Warning: Integration failed: {str(e)}")
+        
+        # Store accessibility validation results
+        validation_results['accessibility_validation'] = access_validation_results
         
         # Save results and create visualizations
         if self.verbose:
@@ -200,6 +237,35 @@ class GRANITEPipeline:
                 'training_epochs': training_result.get('epochs_trained', 0)
             }
         }
+    
+    def _generate_feature_names(self, n_features):
+        """Generate feature names based on GRANITE structure"""
+        base_features = []
+        
+        # Employment, healthcare, grocery features (8 each)
+        for dest_type in ['employment', 'healthcare', 'grocery']:
+            base_features.extend([
+                f'{dest_type}_min_time',
+                f'{dest_type}_mean_time', 
+                f'{dest_type}_90th_time',
+                f'{dest_type}_count_30min',
+                f'{dest_type}_count_60min',
+                f'{dest_type}_count_90min',
+                f'{dest_type}_transit_share',
+                f'{dest_type}_accessibility_score'
+            ])
+        
+        # Derived features (4)
+        derived_features = [
+            'total_accessibility',
+            'accessibility_diversity',
+            'avg_transit_dependence', 
+            'time_efficiency'
+        ]
+        
+        # Return appropriate subset
+        all_features = base_features + derived_features
+        return all_features[:n_features]
 
     def _compute_accessibility_features(self, addresses, data):
         """
@@ -580,11 +646,13 @@ class GRANITEPipeline:
                 'verdict': verdict,
                 'mean_bias': diagnostic_results['quality_assessment']['mean_bias'],
                 'has_spatial_structure': diagnostic_results['quality_assessment']['has_spatial_structure'],
-                'meaningful_accessibility_relationship': diagnostic_results['quality_assessment']['meaningful_accessibility_relationship']
+                'meaningful_accessibility_relationship': diagnostic_results['quality_assessment']['meaningful_accessibility_relationship'],
+                'full_results': diagnostic_results  # Include full results for integration
             }
         else:
             self._log("Warning: Could not access raw predictions for diagnostics")
             diagnostic_summary = {'error': 'Raw predictions not available'}
+            diagnostic_results = {}
         
         # Standard constraint validation on final predictions
         constraint_error = abs(np.mean(pred_values) - tract_svi) / tract_svi * 100
@@ -632,7 +700,7 @@ class GRANITEPipeline:
             'quality_metrics': quality_metrics,
             'n_addresses': len(predictions),
             'method': 'Direct Accessibility → SVI',
-            'spatial_diagnostics': diagnostic_summary  # NEW: Include diagnostics
+            'spatial_diagnostics': diagnostic_summary  # RETURN this for integration
         }
         
         self._log("Standard Validation Results:")

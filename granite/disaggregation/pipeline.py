@@ -239,28 +239,30 @@ class GRANITEPipeline:
         }
     
     def _generate_feature_names(self, n_features):
-        """Generate feature names based on GRANITE structure"""
-        base_features = []
+        """UPDATED: Generate feature names for intra-tract accessibility analysis"""
         
-        # Employment, healthcare, grocery features (8 each)
+        # Base features (10 per destination type)
+        base_features = []
         for dest_type in ['employment', 'healthcare', 'grocery']:
             base_features.extend([
                 f'{dest_type}_min_time',
                 f'{dest_type}_mean_time', 
-                f'{dest_type}_90th_time',
-                f'{dest_type}_count_30min',
-                f'{dest_type}_count_60min',
-                f'{dest_type}_count_90min',
-                f'{dest_type}_transit_share',
-                f'{dest_type}_accessibility_score'
+                f'{dest_type}_median_time',
+                f'{dest_type}_count_5min',
+                f'{dest_type}_count_10min',
+                f'{dest_type}_count_15min',
+                f'{dest_type}_drive_advantage',
+                f'{dest_type}_concentration',
+                f'{dest_type}_time_range',
+                f'{dest_type}_percentile'
             ])
         
         # Derived features (4)
         derived_features = [
-            'total_accessibility',
-            'accessibility_diversity',
-            'avg_transit_dependence', 
-            'time_efficiency'
+            'local_accessibility_index',
+            'modal_flexibility',
+            'accessibility_equity', 
+            'geographic_advantage'
         ]
         
         # Return appropriate subset
@@ -269,17 +271,14 @@ class GRANITEPipeline:
 
     def _compute_accessibility_features(self, addresses, data):
         """
-        Compute comprehensive accessibility features for addresses
-        
-        Features:
-        - Travel times to employment, healthcare, grocery (min, mean, 90th percentile)
-        - Destination counts within time thresholds (30, 60, 90 minutes)
-        - Transit accessibility scores
-        - Multi-modal accessibility balance
+        REPLACED: Compute accessibility features with enhanced validation
         """
-        self._log("Computing accessibility features...")
+        self._log("Computing enhanced accessibility features...")
         
         try:
+            # Use the enhanced computer from data loader
+            accessibility_computer = self.data_loader.accessibility_computer
+            
             # Prepare destinations dictionary
             destinations = {
                 'employment': data['employment_destinations'],
@@ -287,62 +286,100 @@ class GRANITEPipeline:
                 'grocery': data['grocery_destinations']
             }
             
-            # Calculate travel times for all destination types
+            # Validate destinations first
+            for dest_type, dest_gdf in destinations.items():
+                if dest_gdf is None or len(dest_gdf) == 0:
+                    self._log(f"ERROR: No {dest_type} destinations available")
+                    return None
+                self._log(f"  {dest_type}: {len(dest_gdf)} destinations")
+            
+            # Calculate features for all destination types
             all_features = []
             feature_names = []
             
             for dest_type, dest_gdf in destinations.items():
-                if dest_gdf is None or len(dest_gdf) == 0:
-                    self._log(f"Warning: No {dest_type} destinations available")
-                    continue
+                self._log(f"  Processing {dest_type} accessibility...")
                 
-                self._log(f"  Calculating {dest_type} accessibility...")
-                
-                # Add destination metadata
+                # Ensure destination metadata
                 dest_gdf = dest_gdf.copy()
                 dest_gdf['dest_type'] = dest_type
                 if 'dest_id' not in dest_gdf.columns:
                     dest_gdf['dest_id'] = range(len(dest_gdf))
                 
-                # Calculate travel times
-                travel_times = self.data_loader.calculate_multimodal_travel_times_batch(
-                    addresses, dest_gdf, time_periods=['morning']
+                # Calculate enhanced travel times
+                travel_times = accessibility_computer.calculate_realistic_travel_times(
+                    origins=addresses,
+                    destinations=dest_gdf,
+                    time_period='morning'
                 )
                 
-                # Extract features for this destination type
-                dest_features = self._extract_accessibility_features(
-                    addresses, travel_times, dest_type
+                # Debug: Show sample travel times
+                if self.verbose and len(travel_times) > 0:
+                    sample = travel_times.head(3)
+                    self._log(f"  Sample {dest_type} travel times:")
+                    for _, row in sample.iterrows():
+                        self._log(f"    Origin {row['origin_id']} -> Dest {row['destination_id']}: "
+                                 f"{row['combined_time']:.1f}min ({row['best_mode']})")
+                
+                # Extract enhanced features
+                dest_features = accessibility_computer.extract_enhanced_accessibility_features(
+                    addresses=addresses,
+                    travel_times=travel_times,
+                    dest_type=dest_type
                 )
                 
                 all_features.append(dest_features)
                 feature_names.extend([
-                    f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_90th_time',
-                    f'{dest_type}_count_30min', f'{dest_type}_count_60min', f'{dest_type}_count_90min',
-                    f'{dest_type}_transit_share', f'{dest_type}_accessibility_score'
+                    f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_median_time',
+                    f'{dest_type}_count_5min', f'{dest_type}_count_10min', f'{dest_type}_count_15min',
+                    f'{dest_type}_drive_advantage', f'{dest_type}_concentration',
+                    f'{dest_type}_time_range', f'{dest_type}_percentile'
                 ])
             
             if not all_features:
-                self._log("Error: No accessibility features could be computed")
+                self._log("ERROR: No accessibility features could be computed")
                 return None
             
             # Combine all features
             accessibility_matrix = np.column_stack(all_features)
+            self._log(f"Base accessibility features: {accessibility_matrix.shape}")
             
-            self._log(f"Computed accessibility features: {accessibility_matrix.shape}")
-            self._log(f"Feature names: {feature_names}")
-            
-            # Add derived features
-            derived_features = self._compute_derived_accessibility_features(accessibility_matrix)
+            # Add enhanced derived features
+            derived_features = accessibility_computer.compute_enhanced_derived_features(accessibility_matrix)
             final_features = np.column_stack([accessibility_matrix, derived_features])
+
+            complete_feature_names = feature_names + [
+                'local_accessibility_index', 'modal_flexibility', 
+                'accessibility_equity', 'geographic_advantage'
+            ]
+            
+            self._log(f"Feature names: {complete_feature_names}")
             
             self._log(f"Final feature matrix: {final_features.shape}")
+            
+            # Critical validation
+            zero_var_count = np.sum(np.std(final_features, axis=0) < 1e-8)
+            if zero_var_count > 0:
+                self._log(f"CRITICAL ERROR: {zero_var_count} features still have zero variance!")
+                
+                # Debug zero variance features
+                for i in range(final_features.shape[1]):
+                    if np.std(final_features[:, i]) < 1e-8:
+                        feature_name = feature_names[i] if i < len(feature_names) else f"derived_{i-len(feature_names)}"
+                        unique_vals = len(np.unique(final_features[:, i]))
+                        self._log(f"  {feature_name}: {unique_vals} unique values, std={np.std(final_features[:, i]):.8f}")
+                
+                return None
+            else:
+                self._log("✓ All features have proper variance")
             
             return final_features
             
         except Exception as e:
-            self._log(f"Error computing accessibility features: {str(e)}")
+            self._log(f"ERROR in enhanced accessibility computation: {str(e)}")
             import traceback
             self._log(f"Traceback: {traceback.format_exc()}")
+            return None
 
     def _extract_accessibility_features(self, addresses, travel_times, dest_type):
         """Extract 8 accessibility features for one destination type"""

@@ -13,6 +13,8 @@ from typing import List, Dict, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
+from .enhanced_accessibility import EnhancedAccessibilityComputer
+
 class DataLoader:
     """
     Streamlined data loader focused on accessibility feature computation
@@ -23,6 +25,9 @@ class DataLoader:
         self.data_dir = data_dir
         self.config = config or {}
         self.verbose = config.get('processing', {}).get('verbose', False) if config else False
+        
+        # Initialize enhanced accessibility computer
+        self.accessibility_computer = EnhancedAccessibilityComputer(verbose=self.verbose)
         
         # Simplified caching
         self._address_cache = None
@@ -101,53 +106,21 @@ class DataLoader:
                                             destinations: gpd.GeoDataFrame,
                                             time_periods: list = ['morning']) -> pd.DataFrame:
         """
-        Network-based travel time calculation for accessibility analysis
+        FIXED: Network-based travel time calculation using enhanced computation
         """
-        from geopy.distance import geodesic
+        self._log("Using enhanced accessibility computation...")
         
-        results = []
+        # Use the first time period (enhanced computer handles time-of-day effects)
+        time_period = time_periods[0] if time_periods else 'morning'
         
-        for orig_idx, origin in origins.iterrows():
-            orig_id = origin.get('address_id', orig_idx)
-            orig_coord = (origin.geometry.y, origin.geometry.x)
-            
-            for dest_idx, destination in destinations.iterrows():
-                dest_id = destination.get('dest_id', dest_idx)
-                dest_coord = (destination.geometry.y, destination.geometry.x)
-                
-                # Use geodesic distance with network factor
-                straight_distance = geodesic(orig_coord, dest_coord).kilometers
-                network_distance = straight_distance * 1.3  # Network routing factor
-                
-                # Calculate multi-modal times
-                walk_time = network_distance / 5.0 * 60  # 5 km/h walking
-                drive_time = network_distance / 25.0 * 60  # 25 km/h urban driving
-                
-                # Transit time estimation
-                if 1 <= network_distance <= 15:
-                    transit_base = network_distance / 12.0 * 60  # 12 km/h transit
-                    transit_wait = 8  # Average wait time
-                    transit_time = transit_base + transit_wait
-                else:
-                    transit_time = walk_time * 1.2
-                
-                # Best mode
-                times = {'walk': walk_time, 'drive': drive_time, 'transit': transit_time}
-                best_mode = min(times.keys(), key=lambda k: times[k])
-                combined_time = times[best_mode]
-                
-                results.append({
-                    'origin_id': orig_id,
-                    'destination_id': dest_id,
-                    'destination_type': destination.get('dest_type', 'unknown'),
-                    'walk_time': walk_time,
-                    'drive_time': drive_time,
-                    'transit_time': transit_time,
-                    'combined_time': combined_time,
-                    'best_mode': best_mode
-                })
+        # Use enhanced computation with proper variability
+        travel_times = self.accessibility_computer.calculate_realistic_travel_times(
+            origins=origins,
+            destinations=destinations, 
+            time_period=time_period
+        )
         
-        return pd.DataFrame(results)
+        return travel_times
 
     def create_spatial_accessibility_graph(self, addresses, accessibility_features, 
                                         state_fips='47', county_fips='065'):

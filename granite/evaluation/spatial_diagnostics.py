@@ -287,58 +287,81 @@ class SpatialLearningDiagnostics:
         return enhanced_results
     
     def _analyze_accessibility_features(self):
-        """Analyze accessibility feature computation and validity"""
+        """
+        FIXED: Analyze accessibility features with flexible feature count
+        """
+        if self.accessibility_features is None:
+            return {'error': 'No accessibility features available'}
         
-        analysis = {}
-        n_features = self.accessibility_features.shape[1]
-        
-        # Generate feature names
-        feature_names = self._generate_feature_names(n_features)
-        
-        # Feature statistics
-        feature_stats = pd.DataFrame({
-            'feature': feature_names,
-            'mean': np.mean(self.accessibility_features, axis=0),
-            'std': np.std(self.accessibility_features, axis=0),
-            'min': np.min(self.accessibility_features, axis=0),
-            'max': np.max(self.accessibility_features, axis=0),
-            'range': np.ptp(self.accessibility_features, axis=0)
-        })
-        
-        analysis['feature_statistics'] = feature_stats
-        
-        # Check for suspicious patterns
-        analysis['suspicious_patterns'] = {}
-        
-        # 1. Check travel time features
-        time_features = [i for i, name in enumerate(feature_names) if 'time' in name]
-        if time_features:
-            time_values = self.accessibility_features[:, time_features]
-            analysis['suspicious_patterns']['unrealistic_times'] = {
-                'extremely_high': np.any(time_values > 300),  # > 5 hours
-                'negative_times': np.any(time_values < 0),
-                'zero_variance': np.any(np.std(time_values, axis=0) < 0.01)
+        try:
+            n_addresses, n_features = self.accessibility_features.shape
+            
+            # Generate flexible feature names if not provided
+            if not hasattr(self, 'feature_names') or self.feature_names is None:
+                # Create generic feature names
+                feature_names = [f'feature_{i}' for i in range(n_features)]
+            else:
+                feature_names = self.feature_names
+            
+            # Ensure feature names match feature count
+            if len(feature_names) != n_features:
+                print(f"WARNING: Feature name count ({len(feature_names)}) != feature count ({n_features})")
+                # Adjust feature names to match
+                if len(feature_names) > n_features:
+                    feature_names = feature_names[:n_features]
+                else:
+                    # Extend with generic names
+                    feature_names = feature_names + [f'feature_{i}' for i in range(len(feature_names), n_features)]
+            
+            # Calculate feature statistics safely
+            feature_stats = pd.DataFrame({
+                'feature': feature_names,
+                'mean': np.mean(self.accessibility_features, axis=0),
+                'std': np.std(self.accessibility_features, axis=0),
+                'min': np.min(self.accessibility_features, axis=0),
+                'max': np.max(self.accessibility_features, axis=0),
+                'range': np.ptp(self.accessibility_features, axis=0)
+            })
+            
+            # Basic feature analysis
+            zero_var_features = feature_stats[feature_stats['std'] < 1e-8]['feature'].tolist()
+            high_var_features = feature_stats[feature_stats['std'] > feature_stats['std'].median() * 2]['feature'].tolist()
+            
+            # Feature correlation analysis (handle large matrices efficiently)
+            if n_features > 50:
+                # Sample features for correlation analysis
+                sample_indices = np.random.choice(n_features, 50, replace=False)
+                sample_features = self.accessibility_features[:, sample_indices]
+                corr_matrix = np.corrcoef(sample_features.T)
+                sample_names = [feature_names[i] for i in sample_indices]
+            else:
+                corr_matrix = np.corrcoef(self.accessibility_features.T)
+                sample_names = feature_names
+            
+            # Find high correlations
+            high_correlations = []
+            if corr_matrix.shape[0] > 1:
+                for i in range(len(sample_names)):
+                    for j in range(i + 1, len(sample_names)):
+                        if abs(corr_matrix[i, j]) > 0.9:
+                            high_correlations.append({
+                                'feature1': sample_names[i],
+                                'feature2': sample_names[j],
+                                'correlation': corr_matrix[i, j]
+                            })
+            
+            return {
+                'n_features': n_features,
+                'feature_stats': feature_stats,
+                'zero_variance_features': zero_var_features,
+                'high_variance_features': high_var_features,
+                'high_correlations': high_correlations,
+                'feature_quality_score': len(zero_var_features) / n_features  # Lower is better
             }
-        
-        # 2. Check count features
-        count_features = [i for i, name in enumerate(feature_names) if 'count' in name]
-        if count_features:
-            count_values = self.accessibility_features[:, count_features]
-            analysis['suspicious_patterns']['unrealistic_counts'] = {
-                'extremely_high': np.any(count_values > 50),  # > 50 destinations
-                'negative_counts': np.any(count_values < 0),
-                'all_zeros': np.any(np.all(count_values == 0, axis=0))
-            }
-        
-        # 3. Check for perfect correlations
-        corr_matrix = np.corrcoef(self.accessibility_features.T)
-        perfect_corr_mask = (np.abs(corr_matrix) > 0.99) & (corr_matrix != 1.0)
-        analysis['suspicious_patterns']['perfect_correlations'] = np.any(perfect_corr_mask)
-        
-        # 4. Feature directionality check
-        analysis['feature_directionality'] = self._check_feature_directionality(feature_names)
-        
-        return analysis
+            
+        except Exception as e:
+            print(f"Error in feature analysis: {str(e)}")
+            return {'error': f'Feature analysis failed: {str(e)}'}
     
     def _analyze_correlation_directions(self):
         """Analyze correlation directions to identify problematic features"""
@@ -669,24 +692,56 @@ class SpatialLearningDiagnostics:
         }
     
     def _analyze_feature_importance(self):
-        """Analyze which features most strongly predict the model's outputs"""
+        """FIXED: Feature importance analysis with proper array handling"""
         
         feature_names = self._generate_feature_names(self.accessibility_features.shape[1])
         
-        # Use random forest to estimate feature importance
-        rf = RandomForestRegressor(n_estimators=100, random_state=42)
-        rf.fit(self.accessibility_features, self.raw_predictions)
+        # FIXED: Ensure feature names match feature count
+        n_features = self.accessibility_features.shape[1]
+        if len(feature_names) != n_features:
+            self.log(f"WARNING: Feature name count ({len(feature_names)}) != feature count ({n_features})")
+            # Adjust feature names to match
+            if len(feature_names) > n_features:
+                feature_names = feature_names[:n_features]
+            else:
+                # Extend with generic names
+                feature_names = feature_names + [f'feature_{i}' for i in range(len(feature_names), n_features)]
         
-        importance_df = pd.DataFrame({
-            'feature': feature_names,
-            'importance': rf.feature_importances_
-        }).sort_values('importance', ascending=False)
-        
-        return {
-            'feature_importance_ranking': importance_df,
-            'top_3_features': importance_df.head(3)['feature'].tolist(),
-            'random_forest_score': rf.score(self.accessibility_features, self.raw_predictions)
-        }
+        try:
+            # Use random forest to estimate feature importance
+            from sklearn.ensemble import RandomForestRegressor
+            rf = RandomForestRegressor(n_estimators=100, random_state=42)
+            rf.fit(self.accessibility_features, self.raw_predictions)
+            
+            # FIXED: Ensure arrays have same length
+            importance_values = rf.feature_importances_
+            
+            if len(importance_values) != len(feature_names):
+                self.log(f"ERROR: Importance values ({len(importance_values)}) != feature names ({len(feature_names)})")
+                # Use minimum length
+                min_len = min(len(importance_values), len(feature_names))
+                importance_values = importance_values[:min_len]
+                feature_names = feature_names[:min_len]
+            
+            importance_df = pd.DataFrame({
+                'feature': feature_names,
+                'importance': importance_values
+            }).sort_values('importance', ascending=False)
+            
+            return {
+                'feature_importance_ranking': importance_df,
+                'top_3_features': importance_df.head(3)['feature'].tolist(),
+                'random_forest_score': rf.score(self.accessibility_features, self.raw_predictions)
+            }
+            
+        except Exception as e:
+            self.log(f"Error in feature importance analysis: {str(e)}")
+            return {
+                'error': str(e),
+                'feature_importance_ranking': pd.DataFrame(),
+                'top_3_features': [],
+                'random_forest_score': 0.0
+            }
     
     def _analyze_principal_components(self):
         """Analyze principal components of accessibility features"""

@@ -291,22 +291,25 @@ class SpatialLearningDiagnostics:
         FIXED: Analyze accessibility features with flexible feature count
         """
         if self.accessibility_features is None:
-            return {'error': 'No accessibility features available'}
+            return {
+                'error': 'No accessibility features available',
+                'suspicious_patterns': {}
+            }
         
         try:
             n_addresses, n_features = self.accessibility_features.shape
             
             # Generate flexible feature names if not provided
             if not hasattr(self, 'feature_names') or self.feature_names is None:
-                # Create generic feature names
+                # Create generic feature names to match actual feature count
                 feature_names = [f'feature_{i}' for i in range(n_features)]
             else:
                 feature_names = self.feature_names
             
             # Ensure feature names match feature count
             if len(feature_names) != n_features:
-                print(f"WARNING: Feature name count ({len(feature_names)}) != feature count ({n_features})")
-                # Adjust feature names to match
+                self._log(f"WARNING: Feature name count ({len(feature_names)}) != feature count ({n_features})")
+                # Adjust feature names to match actual features
                 if len(feature_names) > n_features:
                     feature_names = feature_names[:n_features]
                 else:
@@ -350,18 +353,78 @@ class SpatialLearningDiagnostics:
                                 'correlation': corr_matrix[i, j]
                             })
             
+            # CRITICAL: Create suspicious_patterns analysis
+            suspicious_patterns = {}
+            
+            # Check travel time features
+            time_features = [i for i, name in enumerate(feature_names) if 'time' in name.lower()]
+            if time_features:
+                time_values = self.accessibility_features[:, time_features]
+                suspicious_patterns['unrealistic_times'] = {
+                    'extremely_high': bool(np.any(time_values > 300)),  # > 5 hours
+                    'negative_times': bool(np.any(time_values < 0)),
+                    'zero_variance': bool(np.any(np.std(time_values, axis=0) < 0.01))
+                }
+            else:
+                suspicious_patterns['unrealistic_times'] = {
+                    'extremely_high': False,
+                    'negative_times': False,
+                    'zero_variance': False
+                }
+            
+            # Check count features
+            count_features = [i for i, name in enumerate(feature_names) if 'count' in name.lower()]
+            if count_features:
+                count_values = self.accessibility_features[:, count_features]
+                suspicious_patterns['unrealistic_counts'] = {
+                    'extremely_high': bool(np.any(count_values > 50)),  # > 50 destinations
+                    'negative_counts': bool(np.any(count_values < 0)),
+                    'all_zeros': bool(np.any(np.all(count_values == 0, axis=0)))
+                }
+            else:
+                suspicious_patterns['unrealistic_counts'] = {
+                    'extremely_high': False,
+                    'negative_counts': False,
+                    'all_zeros': False
+                }
+            
+            # Check for perfect correlations
+            if corr_matrix.shape[0] > 1:
+                perfect_corr_mask = (np.abs(corr_matrix) > 0.99) & (corr_matrix != 1.0)
+                suspicious_patterns['perfect_correlations'] = bool(np.any(perfect_corr_mask))
+            else:
+                suspicious_patterns['perfect_correlations'] = False
+            
+            # Check for negative accessibility values
+            suspicious_patterns['negative_accessibility'] = bool(np.any(self.accessibility_features < 0))
+            
             return {
                 'n_features': n_features,
                 'feature_stats': feature_stats,
                 'zero_variance_features': zero_var_features,
                 'high_variance_features': high_var_features,
                 'high_correlations': high_correlations,
-                'feature_quality_score': len(zero_var_features) / n_features  # Lower is better
+                'suspicious_patterns': suspicious_patterns,  # This key is required by downstream code
+                'feature_quality_score': len(zero_var_features) / n_features if n_features > 0 else 0  # Lower is better
             }
             
         except Exception as e:
-            print(f"Error in feature analysis: {str(e)}")
-            return {'error': f'Feature analysis failed: {str(e)}'}
+            self._log(f"Error in feature analysis: {str(e)}")
+            return {
+                'error': f'Feature analysis failed: {str(e)}',
+                'suspicious_patterns': {
+                    'unrealistic_times': {'extremely_high': False, 'negative_times': False, 'zero_variance': False},
+                    'unrealistic_counts': {'extremely_high': False, 'negative_counts': False, 'all_zeros': False},
+                    'perfect_correlations': False,
+                    'negative_accessibility': False
+                },
+                'n_features': 0,
+                'feature_stats': pd.DataFrame(),
+                'zero_variance_features': [],
+                'high_variance_features': [],
+                'high_correlations': [],
+                'feature_quality_score': 1.0
+            }
     
     def _analyze_correlation_directions(self):
         """Analyze correlation directions to identify problematic features"""
@@ -699,7 +762,7 @@ class SpatialLearningDiagnostics:
         # FIXED: Ensure feature names match feature count
         n_features = self.accessibility_features.shape[1]
         if len(feature_names) != n_features:
-            self.log(f"WARNING: Feature name count ({len(feature_names)}) != feature count ({n_features})")
+            self._log(f"WARNING: Feature name count ({len(feature_names)}) != feature count ({n_features})")
             # Adjust feature names to match
             if len(feature_names) > n_features:
                 feature_names = feature_names[:n_features]

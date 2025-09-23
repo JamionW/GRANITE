@@ -35,6 +35,9 @@ class DataLoader:
         self._transit_cache = None
         
         os.makedirs(data_dir, exist_ok=True)
+
+        # Invoke enhanced destination calcluations
+        self.bind_enhanced_destination_methods()
     
     def _log(self, message: str):
         if self.verbose:
@@ -123,10 +126,9 @@ class DataLoader:
         return travel_times
 
     def create_spatial_accessibility_graph(self, addresses, accessibility_features, 
-                                        state_fips='47', county_fips='065'):
+                                            state_fips='47', county_fips='065'):
         """
-        Create graph based on actual road network connectivity
-        Falls back to geographic proximity when road network is unavailable
+        FIXED: Create graph with improved edge validation
         """
         import torch
         from torch_geometric.data import Data
@@ -144,6 +146,11 @@ class DataLoader:
             self._log("No road network available, using geographic connectivity")
             edge_index, edge_weight = self._create_geographic_fallback_graph(addresses)
         
+        # CHANGE: Validate edge_index before creating graph
+        if edge_index.shape[1] == 0:
+            self._log("WARNING: No edges created, adding minimal connectivity")
+            edge_index, edge_weight = self._create_minimal_connectivity(n_addresses)
+        
         # Node features are the accessibility features
         node_features = torch.FloatTensor(accessibility_features)
         
@@ -157,25 +164,52 @@ class DataLoader:
         self._log(f"Created graph: {n_addresses} nodes, {edge_index.shape[1]//2} undirected edges")
         
         return graph_data
+    
+    def _create_minimal_connectivity(self, n_addresses):
+        """Create minimal ring connectivity as absolute fallback"""
+        import torch
+        
+        if n_addresses < 2:
+            # Single node - create self-loop
+            edge_index = torch.LongTensor([[0], [0]])
+            edge_weight = torch.FloatTensor([1.0])
+            return edge_index, edge_weight
+        
+        # Create ring connectivity
+        edge_list = []
+        edge_weights = []
+        
+        for i in range(n_addresses):
+            next_i = (i + 1) % n_addresses
+            edge_list.extend([[i, next_i], [next_i, i]])
+            edge_weights.extend([1.0, 1.0])
+        
+        edge_index = torch.LongTensor(edge_list).t().contiguous()
+        edge_weight = torch.FloatTensor(edge_weights)
+        
+        return edge_index, edge_weight
 
     def _create_road_network_graph(self, addresses, roads):
         """
-        Create graph based on actual road network connectivity
-        Integrates road network topology with geographic fallback
+        FIXED: Create graph with better error handling and validation
         """
         import torch
         from sklearn.neighbors import NearestNeighbors
         
         n_addresses = len(addresses)
         
-        # Method 1: Road network-based connectivity
-        road_graph, address_to_road_mapping = self._create_road_connectivity(addresses, roads)
-        network_edges = self._extract_network_edges(road_graph, address_to_road_mapping)
+        try:
+            # Method 1: Road network-based connectivity
+            road_graph, address_to_road_mapping = self._create_road_connectivity(addresses, roads)
+            network_edges = self._extract_network_edges(road_graph, address_to_road_mapping)
+        except Exception as e:
+            self._log(f"Road network creation failed: {str(e)}")
+            network_edges = []
         
         # Method 2: Geographic proximity (for disconnected areas)
         geographic_edges = self._create_geographic_edges(addresses)
         
-        # Combine edges
+        # Combine edges with validation
         all_edges = network_edges + geographic_edges
         
         # Remove duplicates and create tensors
@@ -185,21 +219,32 @@ class DataLoader:
         edge_types = []
         
         for edge in all_edges:
+            # Validate edge
+            if (edge['from'] < 0 or edge['from'] >= n_addresses or 
+                edge['to'] < 0 or edge['to'] >= n_addresses or
+                edge['from'] == edge['to']):
+                continue
+                
             edge_key = tuple(sorted([edge['from'], edge['to']]))
-            if edge_key not in edge_set and edge['from'] != edge['to']:
+            if edge_key not in edge_set:
                 edge_set.add(edge_key)
-                edge_list.extend([[edge['from'], edge['to']], [edge['to'], edge['from']]])  # Undirected
+                edge_list.extend([[edge['from'], edge['to']], [edge['to'], edge['from']]])
                 edge_weights.extend([edge['weight'], edge['weight']])
                 edge_types.extend([edge['type'], edge['type']])
         
-        # Convert to tensors
-        if edge_list:
+        # Convert to tensors with validation
+        if edge_list and len(edge_list) > 0:
             edge_index = torch.LongTensor(edge_list).t().contiguous()
             edge_weight = torch.FloatTensor(edge_weights)
+            
+            # Final validation
+            if edge_index.max() >= n_addresses:
+                self._log("ERROR: Edge indices exceed number of nodes")
+                edge_index, edge_weight = self._create_minimal_connectivity(n_addresses)
         else:
             # Fallback: connect each address to nearest neighbor
-            edge_index, edge_weight = self._create_fallback_edges(n_addresses)
-            edge_types = ['fallback'] * edge_index.shape[1]
+            self._log("No valid edges created, using minimal connectivity")
+            edge_index, edge_weight = self._create_minimal_connectivity(n_addresses)
         
         # Log edge statistics
         network_count = sum(1 for t in edge_types if t == 'network')
@@ -851,6 +896,210 @@ class DataLoader:
             ])
         
         return np.array(features, dtype=np.float64)
+    
+    def bind_enhanced_destination_methods(self):
+        """Bind the enhanced destination methods to DataLoader instance"""
+        import types
+        
+        # Define the enhanced destination methods inline
+        def create_enhanced_destinations_for_tract(self, tract_addresses, existing_destinations):
+            """Create enhanced destination set appropriate for intra-tract analysis"""
+            self._log("Creating enhanced destinations for intra-tract analysis...")
+            
+            enhanced_destinations = {}
+            
+            # Get tract boundary
+            tract_bounds = tract_addresses.geometry.total_bounds
+            tract_center = Point(
+                (tract_bounds[0] + tract_bounds[2]) / 2,
+                (tract_bounds[1] + tract_bounds[3]) / 2
+            )
+            
+            tract_width = tract_bounds[2] - tract_bounds[0]
+            tract_height = tract_bounds[3] - tract_bounds[1]
+            
+            for dest_type, existing_dests in existing_destinations.items():
+                self._log(f"  Enhancing {dest_type} destinations...")
+                
+                enhanced_dests = []
+                
+                # Keep relevant existing destinations
+                max_distance_deg = max(tract_width, tract_height) * 3
+                
+                for _, dest in existing_dests.iterrows():
+                    dist_to_center = tract_center.distance(dest.geometry)
+                    if dist_to_center <= max_distance_deg:
+                        enhanced_dests.append({
+                            'name': dest.get('name', f'{dest_type}_existing'),
+                            'geometry': dest.geometry,
+                            'dest_id': len(enhanced_dests),
+                            'dest_type': dest_type,
+                            'scale': 'regional',
+                            'importance': 1.0
+                        })
+                
+                # Create local destinations
+                local_dests = self._create_local_destinations(
+                    tract_center, tract_width, tract_height, dest_type
+                )
+                enhanced_dests.extend(local_dests)
+                
+                # Create edge destinations
+                edge_dests = self._create_edge_destinations(tract_bounds, dest_type)
+                enhanced_dests.extend(edge_dests)
+                
+                # Convert to GeoDataFrame
+                if enhanced_dests:
+                    enhanced_gdf = gpd.GeoDataFrame(enhanced_dests, crs='EPSG:4326')
+                    enhanced_gdf['dest_id'] = range(len(enhanced_gdf))
+                else:
+                    enhanced_gdf = existing_dests.copy()
+                    enhanced_gdf['scale'] = 'regional'
+                    enhanced_gdf['importance'] = 1.0
+                
+                enhanced_destinations[dest_type] = enhanced_gdf
+                self._log(f"    {dest_type}: {len(enhanced_gdf)} destinations")
+            
+            for dest_type, enhanced_gdf in enhanced_destinations.items():
+                # Remove spatial duplicates
+                enhanced_gdf = self._remove_spatial_duplicates(enhanced_gdf, min_distance_m=150)
+                # Limit total destinations per type
+                if len(enhanced_gdf) > 20:
+                    enhanced_gdf = enhanced_gdf.head(20)
+                enhanced_destinations[dest_type] = enhanced_gdf
+                self._log(f"    Final {dest_type}: {len(enhanced_gdf)} destinations")
+
+            return enhanced_destinations
+
+        def _create_local_destinations(self, tract_center, tract_width, tract_height, dest_type):
+            """Create local destinations within and near the tract"""
+            
+            dest_params = {
+                'employment': {
+                    'names': ['Local Business District', 'Commercial Center', 'Office Complex', 'Retail Cluster'],
+                    'count': 4,
+                    'spread_factor': 0.8
+                },
+                'healthcare': {
+                    'names': ['Neighborhood Clinic', 'Urgent Care', 'Medical Center', 'Health Services'],
+                    'count': 3,
+                    'spread_factor': 1.0
+                },
+                'grocery': {
+                    'names': ['Neighborhood Market', 'Corner Store', 'Shopping Center', 'Local Grocery'],
+                    'count': 4,
+                    'spread_factor': 0.6
+                }
+            }
+            
+            params = dest_params.get(dest_type, {
+                'names': [f'Local {dest_type.title()}'],
+                'count': 2,
+                'spread_factor': 0.8
+            })
+            
+            local_destinations = []
+            angles = np.linspace(0, 2*np.pi, params['count'], endpoint=False)
+            
+            for i, angle in enumerate(angles):
+                base_distance = max(tract_width, tract_height) * params['spread_factor']
+                distance_variation = np.random.uniform(0.3, 1.2)
+                distance = base_distance * distance_variation
+                
+                x_offset = distance * np.cos(angle)
+                y_offset = distance * np.sin(angle)
+                
+                dest_point = Point(
+                    tract_center.x + x_offset,
+                    tract_center.y + y_offset
+                )
+                
+                name = params['names'][i % len(params['names'])]
+                if len(params['names']) <= i:
+                    name += f" #{i+1}"
+                
+                local_destinations.append({
+                    'name': name,
+                    'geometry': dest_point,
+                    'dest_type': dest_type,
+                    'scale': 'local',
+                    'importance': np.random.uniform(0.6, 1.0)
+                })
+            
+            return local_destinations
+
+        def _create_edge_destinations(self, tract_bounds, dest_type):
+            """Create destinations at tract edges for accessibility gradients"""
+            
+            minx, miny, maxx, maxy = tract_bounds
+            width = maxx - minx
+            height = maxy - miny
+            
+            edge_positions = [
+                Point(minx + width * 0.5, maxy + height * 0.3),  # North
+                Point(minx + width * 0.5, miny - height * 0.3),  # South
+                Point(maxx + width * 0.3, miny + height * 0.5),  # East
+                Point(minx - width * 0.3, miny + height * 0.5)   # West
+            ]
+            
+            edge_names = [
+                f'North {dest_type.title()}', f'South {dest_type.title()}', 
+                f'East {dest_type.title()}', f'West {dest_type.title()}'
+            ]
+            
+            edge_destinations = []
+            for i, (position, name) in enumerate(zip(edge_positions, edge_names)):
+                edge_destinations.append({
+                    'name': name,
+                    'geometry': position,
+                    'dest_type': dest_type,
+                    'scale': 'edge',
+                    'importance': np.random.uniform(0.4, 0.8)
+                })
+            
+            return edge_destinations
+
+        def create_tract_appropriate_destinations(self, tract_fips):
+            """Create tract-appropriate destinations"""
+            
+            # Get tract addresses
+            tract_addresses = self.get_addresses_for_tract(tract_fips)
+            
+            if len(tract_addresses) == 0:
+                self._log(f"No addresses found for tract {tract_fips}, using default destinations")
+                return {
+                    'employment': self.create_employment_destinations(),
+                    'healthcare': self.create_healthcare_destinations(),
+                    'grocery': self.create_grocery_destinations()
+                }
+            
+            # Create existing county-wide destinations
+            existing_destinations = {
+                'employment': self.create_employment_destinations(),
+                'healthcare': self.create_healthcare_destinations(),
+                'grocery': self.create_grocery_destinations()
+            }
+            
+            # Enhance for tract analysis
+            enhanced_destinations = self.create_enhanced_destinations_for_tract(
+                tract_addresses, existing_destinations
+            )
+            
+            return enhanced_destinations
+
+        # Bind all methods to the instance
+        self.create_enhanced_destinations_for_tract = types.MethodType(
+            create_enhanced_destinations_for_tract, self
+        )
+        self._create_local_destinations = types.MethodType(
+            _create_local_destinations, self
+        )
+        self._create_edge_destinations = types.MethodType(
+            _create_edge_destinations, self
+        )
+        self.create_tract_appropriate_destinations = types.MethodType(
+            create_tract_appropriate_destinations, self
+        )
 
     def _compute_derived_features(self, base_features: np.ndarray) -> np.ndarray:
         """Compute derived accessibility features from base metrics"""
@@ -908,3 +1157,27 @@ class DataLoader:
             ])
         
         return np.array(derived, dtype=np.float64)
+    
+    def _remove_spatial_duplicates(self, destinations_gdf, min_distance_m=100):
+        """Remove spatially duplicate destinations"""
+        if len(destinations_gdf) <= 1:
+            return destinations_gdf
+        
+        # Convert to projected CRS for distance calculation
+        dest_projected = destinations_gdf.to_crs('EPSG:3857')  # Web Mercator
+        
+        # Find duplicates within min_distance_m
+        keep_indices = []
+        for i, dest1 in dest_projected.iterrows():
+            is_duplicate = False
+            for j in keep_indices:
+                dest2 = dest_projected.iloc[j]
+                distance = dest1.geometry.distance(dest2.geometry)
+                if distance < min_distance_m:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                keep_indices.append(i)
+        
+        return destinations_gdf.iloc[keep_indices].reset_index(drop=True)

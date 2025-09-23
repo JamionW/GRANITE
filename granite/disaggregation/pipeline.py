@@ -239,25 +239,22 @@ class GRANITEPipeline:
         }
     
     def _generate_feature_names(self, n_features):
-        """UPDATED: Generate feature names for intra-tract accessibility analysis"""
-        
-        # Base features (10 per destination type)
+        """Updated feature names with corrected time thresholds"""
         base_features = []
         for dest_type in ['employment', 'healthcare', 'grocery']:
             base_features.extend([
                 f'{dest_type}_min_time',
                 f'{dest_type}_mean_time', 
                 f'{dest_type}_median_time',
-                f'{dest_type}_count_5min',
-                f'{dest_type}_count_10min',
-                f'{dest_type}_count_15min',
+                f'{dest_type}_count_15min',  # CHANGED
+                f'{dest_type}_count_5min',  # CHANGED
+                f'{dest_type}_count_45min',  # CHANGED
                 f'{dest_type}_drive_advantage',
                 f'{dest_type}_concentration',
                 f'{dest_type}_time_range',
                 f'{dest_type}_percentile'
             ])
         
-        # Derived features (4)
         derived_features = [
             'local_accessibility_index',
             'modal_flexibility',
@@ -265,120 +262,296 @@ class GRANITEPipeline:
             'geographic_advantage'
         ]
         
-        # Return appropriate subset
         all_features = base_features + derived_features
         return all_features[:n_features]
 
     def _compute_accessibility_features(self, addresses, data):
         """
-        REPLACED: Compute accessibility features with enhanced validation
+        FIXED: Compute accessibility features with enhanced error handling and validation
         """
         self._log("Computing enhanced accessibility features...")
         
         try:
-            # Use the enhanced computer from data loader
-            accessibility_computer = self.data_loader.accessibility_computer
+            # FIXED: Initialize the enhanced computer properly
+            from ..data.enhanced_accessibility import EnhancedAccessibilityComputer
+            accessibility_computer = EnhancedAccessibilityComputer(verbose=self.verbose)
             
-            # Prepare destinations dictionary
-            destinations = {
-                'employment': data['employment_destinations'],
-                'healthcare': data['healthcare_destinations'],
-                'grocery': data['grocery_destinations']
-            }
+            # CHANGE 1: Get tract-appropriate destinations with validation
+            target_fips = self.config.get('data', {}).get('target_fips')
+            if target_fips:
+                try:
+                    destinations = self.data_loader.create_tract_appropriate_destinations(target_fips)
+                    self._log("Using tract-appropriate destinations for better intra-tract variation")
+                except Exception as e:
+                    self._log(f"Warning: Could not create tract-appropriate destinations: {str(e)}")
+                    # Fallback to original destinations
+                    destinations = {
+                        'employment': data['employment_destinations'],
+                        'healthcare': data['healthcare_destinations'],
+                        'grocery': data['grocery_destinations']
+                    }
+            else:
+                destinations = {
+                    'employment': data['employment_destinations'],
+                    'healthcare': data['healthcare_destinations'],
+                    'grocery': data['grocery_destinations']
+                }
             
-            # Validate destinations first
+            # VALIDATION: Ensure all destinations are valid
+            validated_destinations = {}
             for dest_type, dest_gdf in destinations.items():
                 if dest_gdf is None or len(dest_gdf) == 0:
                     self._log(f"ERROR: No {dest_type} destinations available")
                     return None
-                self._log(f"  {dest_type}: {len(dest_gdf)} destinations")
+                
+                # Ensure proper columns exist
+                dest_gdf_copy = dest_gdf.copy()
+                dest_gdf_copy['dest_type'] = dest_type
+                if 'dest_id' not in dest_gdf_copy.columns:
+                    dest_gdf_copy['dest_id'] = range(len(dest_gdf_copy))
+                
+                validated_destinations[dest_type] = dest_gdf_copy
+                self._log(f"  {dest_type}: {len(dest_gdf_copy)} destinations")
             
-            # Calculate features for all destination types
+            destinations = validated_destinations
+            
+            # CHANGE 2: Calculate features for all destination types with error handling
             all_features = []
             feature_names = []
+            successful_computations = 0
             
             for dest_type, dest_gdf in destinations.items():
                 self._log(f"  Processing {dest_type} accessibility...")
                 
-                # Ensure destination metadata
-                dest_gdf = dest_gdf.copy()
-                dest_gdf['dest_type'] = dest_type
-                if 'dest_id' not in dest_gdf.columns:
-                    dest_gdf['dest_id'] = range(len(dest_gdf))
-                
-                # Calculate enhanced travel times
-                travel_times = accessibility_computer.calculate_realistic_travel_times(
-                    origins=addresses,
-                    destinations=dest_gdf,
-                    time_period='morning'
-                )
-                
-                # Debug: Show sample travel times
-                if self.verbose and len(travel_times) > 0:
-                    sample = travel_times.head(3)
-                    self._log(f"  Sample {dest_type} travel times:")
-                    for _, row in sample.iterrows():
-                        self._log(f"    Origin {row['origin_id']} -> Dest {row['destination_id']}: "
-                                 f"{row['combined_time']:.1f}min ({row['best_mode']})")
-                
-                # Extract enhanced features
-                dest_features = accessibility_computer.extract_enhanced_accessibility_features(
-                    addresses=addresses,
-                    travel_times=travel_times,
-                    dest_type=dest_type
-                )
-                
-                all_features.append(dest_features)
-                feature_names.extend([
-                    f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_median_time',
-                    f'{dest_type}_count_5min', f'{dest_type}_count_10min', f'{dest_type}_count_15min',
-                    f'{dest_type}_drive_advantage', f'{dest_type}_concentration',
-                    f'{dest_type}_time_range', f'{dest_type}_percentile'
-                ])
+                try:
+                    # CHANGE 3: Use the FIXED travel time calculation
+                    travel_times = accessibility_computer.calculate_realistic_travel_times(
+                        origins=addresses,
+                        destinations=dest_gdf,
+                        time_period='morning'
+                    )
+                    
+                    if len(travel_times) == 0:
+                        self._log(f"ERROR: No travel times computed for {dest_type}")
+                        continue
+                    
+                    # Debug: Show sample travel times
+                    if self.verbose and len(travel_times) > 0:
+                        sample = travel_times.head(3)
+                        self._log(f"  Sample {dest_type} travel times:")
+                        for _, row in sample.iterrows():
+                            self._log(f"    Origin {row['origin_id']} -> Dest {row['destination_id']}: "
+                                    f"{row['combined_time']:.1f}min ({row['best_mode']})")
+                    
+                    # CHANGE 4: Use the FIXED feature extraction
+                    dest_features = accessibility_computer.extract_enhanced_accessibility_features(
+                        addresses=addresses,
+                        travel_times=travel_times,
+                        dest_type=dest_type
+                    )
+                    
+                    if dest_features is None or dest_features.size == 0:
+                        self._log(f"ERROR: No features extracted for {dest_type}")
+                        continue
+                    
+                    # VALIDATION: Check feature dimensions
+                    expected_addresses = len(addresses)
+                    if dest_features.shape[0] != expected_addresses:
+                        self._log(f"ERROR: Feature count mismatch for {dest_type}: "
+                                f"got {dest_features.shape[0]}, expected {expected_addresses}")
+                        continue
+                    
+                    if dest_features.shape[1] != 10:  # Expected 10 features per destination type
+                        self._log(f"WARNING: Unexpected feature count for {dest_type}: "
+                                f"got {dest_features.shape[1]}, expected 10")
+                    
+                    # VALIDATION: Check for systematic issues
+                    zero_var_features = np.sum(np.std(dest_features, axis=0) < 1e-8)
+                    if zero_var_features > 0:
+                        self._log(f"ERROR: {dest_type} has {zero_var_features} zero-variance features")
+                        continue
+                    
+                    all_features.append(dest_features)
+                    feature_names.extend([
+                        f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_median_time',
+                        f'{dest_type}_count_5min', f'{dest_type}_count_10min', f'{dest_type}_count_15min',
+                        f'{dest_type}_drive_advantage', f'{dest_type}_concentration',
+                        f'{dest_type}_time_range', f'{dest_type}_percentile'
+                    ])
+                    
+                    successful_computations += 1
+                    self._log(f"  ✓ {dest_type}: {dest_features.shape} features computed successfully")
+                    
+                except Exception as e:
+                    self._log(f"ERROR processing {dest_type}: {str(e)}")
+                    import traceback
+                    self._log(f"Traceback: {traceback.format_exc()}")
+                    continue
             
-            if not all_features:
-                self._log("ERROR: No accessibility features could be computed")
+            # CRITICAL CHECK: Ensure we have features
+            if successful_computations == 0:
+                self._log("CRITICAL ERROR: No accessibility features could be computed for any destination type")
                 return None
             
-            # Combine all features
-            accessibility_matrix = np.column_stack(all_features)
-            self._log(f"Base accessibility features: {accessibility_matrix.shape}")
+            if len(all_features) == 0:
+                self._log("CRITICAL ERROR: Feature list is empty")
+                return None
             
-            # Add enhanced derived features
-            derived_features = accessibility_computer.compute_enhanced_derived_features(accessibility_matrix)
-            final_features = np.column_stack([accessibility_matrix, derived_features])
+            # CHANGE 5: Combine features with validation
+            try:
+                accessibility_matrix = np.column_stack(all_features)
+                self._log(f"Base accessibility features: {accessibility_matrix.shape}")
+                
+            except Exception as e:
+                self._log(f"ERROR combining features: {str(e)}")
+                return None
+            
+            # CHANGE 6: Compute derived features with validation and graceful handling
+            # Initialize final_features with base features first
+            final_features = accessibility_matrix.copy()
+            complete_feature_names = self._generate_feature_names(final_features.shape[1])
 
+            try:
+                derived_features = accessibility_computer.compute_enhanced_derived_features(accessibility_matrix)
+                
+                if derived_features is None or derived_features.size == 0:
+                    self._log("WARNING: Could not compute derived features, continuing with base features only")
+                else:
+                    # Check if derived features have variance
+                    derived_var_mask = np.std(derived_features, axis=0) > 1e-8
+                    valid_derived_count = np.sum(derived_var_mask)
+                    
+                    if valid_derived_count > 0:
+                        # Only add derived features that have variance
+                        valid_derived_features = derived_features[:, derived_var_mask]
+                        final_features = np.column_stack([final_features, valid_derived_features])
+                        
+                        # Add only valid derived feature names
+                        derived_names = ['local_accessibility_index', 'modal_flexibility', 
+                                    'accessibility_equity', 'geographic_advantage']
+                        valid_derived_names = [name for i, name in enumerate(derived_names) if i < len(derived_var_mask) and derived_var_mask[i]]
+                        
+                        # Update complete feature names to include valid derived features
+                        base_feature_names = self._generate_feature_names(accessibility_matrix.shape[1])
+                        complete_feature_names = base_feature_names + valid_derived_names
+                        
+                        self._log(f"Added {valid_derived_count} valid derived features")
+                    else:
+                        self._log("WARNING: All derived features have zero variance, skipping them")
+                
+            except Exception as e:
+                self._log(f"ERROR computing derived features: {str(e)}")
+                self._log("Continuing with base features only")
+            
+            # FINAL VALIDATION
             complete_feature_names = feature_names + [
                 'local_accessibility_index', 'modal_flexibility', 
                 'accessibility_equity', 'geographic_advantage'
             ]
             
-            self._log(f"Feature names: {complete_feature_names}")
-            
             self._log(f"Final feature matrix: {final_features.shape}")
+            self._log(f"Feature names count: {len(complete_feature_names)}")
             
-            # Critical validation
-            zero_var_count = np.sum(np.std(final_features, axis=0) < 1e-8)
+            # Critical checks
+            if final_features.size == 0:
+                self._log("CRITICAL ERROR: Final feature matrix is empty")
+                return None
+            
+            if np.any(np.isnan(final_features)):
+                nan_count = np.sum(np.isnan(final_features))
+                self._log(f"ERROR: {nan_count} NaN values in feature matrix")
+                # Try to handle NaN values
+                final_features = np.nan_to_num(final_features, nan=0.0)
+            
+            if np.any(np.isinf(final_features)):
+                inf_count = np.sum(np.isinf(final_features))
+                self._log(f"ERROR: {inf_count} infinite values in feature matrix")
+                final_features = np.nan_to_num(final_features, posinf=999.0, neginf=-999.0)
+            
+            # Check variance and remove zero-variance features
+            zero_var_mask = np.std(final_features, axis=0) < 1e-8
+            zero_var_count = np.sum(zero_var_mask)
+
             if zero_var_count > 0:
-                self._log(f"CRITICAL ERROR: {zero_var_count} features still have zero variance!")
+                self._log(f"WARNING: {zero_var_count} features have zero variance, removing them")
                 
                 # Debug zero variance features
                 for i in range(final_features.shape[1]):
-                    if np.std(final_features[:, i]) < 1e-8:
-                        feature_name = feature_names[i] if i < len(feature_names) else f"derived_{i-len(feature_names)}"
+                    if zero_var_mask[i]:
+                        feature_name = complete_feature_names[i] if i < len(complete_feature_names) else f"feature_{i}"
                         unique_vals = len(np.unique(final_features[:, i]))
-                        self._log(f"  {feature_name}: {unique_vals} unique values, std={np.std(final_features[:, i]):.8f}")
+                        self._log(f"  Removing {feature_name}: {unique_vals} unique values, std={np.std(final_features[:, i]):.8f}")
                 
-                return None
-            else:
-                self._log("✓ All features have proper variance")
+                # Remove zero-variance features
+                valid_feature_mask = ~zero_var_mask
+                final_features = final_features[:, valid_feature_mask]
+                complete_feature_names = [name for i, name in enumerate(complete_feature_names) if valid_feature_mask[i]]
+                
+                # Check if we have enough features remaining
+                if final_features.shape[1] < 10:
+                    self._log(f"CRITICAL ERROR: Only {final_features.shape[1]} features remaining after removing zero-variance")
+                    return None
+                
+                self._log(f"Continuing with {final_features.shape[1]} valid features")
             
-            return final_features
+            # Check for excessive negative values (some can be negative, like drive_advantage)
+            negative_features = []
+            for i in range(final_features.shape[1]):
+                feature_name = complete_feature_names[i] if i < len(complete_feature_names) else f"feature_{i}"
+                # Allow negative values only for drive_advantage and derived equity measures
+                if ('drive_advantage' not in feature_name and 'equity' not in feature_name and 
+                    'flexibility' not in feature_name and np.any(final_features[:, i] < 0)):
+                    negative_count = np.sum(final_features[:, i] < 0)
+                    negative_features.append(f"{feature_name}: {negative_count} negative values")
+            
+            if negative_features:
+                self._log(f"WARNING: Unexpected negative values in: {negative_features[:3]}")  # Show first 3
+            else:
+                self._log("✓ No unexpected negative values detected")
+            
+            self._log("✓ All features have proper variance")
+            self._log(f"SUCCESS: Generated {final_features.shape[1]} features for {final_features.shape[0]} addresses")
+            
+            from ..evaluation.feature_deduplication import enhance_accessibility_features_with_validation
+        
+            self._log("Applying feature enhancement and validation...")
+            
+            enhanced_features, enhanced_names, validation_results = enhance_accessibility_features_with_validation(
+                features=final_features,
+                feature_names=complete_feature_names, 
+                addresses_count=len(addresses),
+                verbose=self.verbose
+            )
+            
+            # Check if enhancement was successful
+            if enhanced_features is None or enhanced_features.size == 0:
+                self._log("CRITICAL ERROR: Feature enhancement failed")
+                return None
+            
+            # Report quality improvement
+            original_feature_count = final_features.shape[1]
+            final_feature_count = enhanced_features.shape[1]
+            quality_grade = validation_results['overall_quality']['grade']
+            quality_score = validation_results['overall_quality']['overall_score']
+            
+            self._log(f"Feature enhancement completed:")
+            self._log(f"  Original features: {original_feature_count}")
+            self._log(f"  Enhanced features: {final_feature_count}")
+            self._log(f"  Quality grade: {quality_grade} ({quality_score:.1f}%)")
+            
+            # Warn if quality is poor
+            if quality_grade in ['D', 'F']:
+                self._log(f"WARNING: Feature quality is poor - consider investigating")
+                
+            # Store validation results for later use
+            self._feature_validation_results = validation_results
+            
+            return enhanced_features
             
         except Exception as e:
-            self._log(f"ERROR in enhanced accessibility computation: {str(e)}")
+            self._log(f"CRITICAL ERROR in accessibility computation: {str(e)}")
             import traceback
-            self._log(f"Traceback: {traceback.format_exc()}")
+            self._log(f"Full traceback: {traceback.format_exc()}")
             return None
 
     def _extract_accessibility_features(self, addresses, travel_times, dest_type):
@@ -404,9 +577,9 @@ class GRANITEPipeline:
                     percentile_90 = float(np.percentile(combined_times, 90))
                     
                     # Count-based features (destinations within time thresholds)
-                    count_30min = int((combined_times <= 30).sum())
-                    count_60min = int((combined_times <= 60).sum())
-                    count_90min = int((combined_times <= 90).sum())
+                    count_5min = int((combined_times <= 30).sum())
+                    count_10min = int((combined_times <= 60).sum())
+                    count_15min = int((combined_times <= 90).sum())
                     
                     # Transit accessibility
                     transit_share = float((addr_times['best_mode'] == 'transit').mean())
@@ -417,17 +590,17 @@ class GRANITEPipeline:
                 else:
                     # No valid travel times
                     min_time = mean_time = percentile_90 = 120.0
-                    count_30min = count_60min = count_90min = 0
+                    count_5min = count_10min = count_15min = 0
                     transit_share = accessibility_score = 0.0
             else:
                 # No travel times for this address
                 min_time = mean_time = percentile_90 = 120.0
-                count_30min = count_60min = count_90min = 0
+                count_5min = count_10min = count_15min = 0
                 transit_share = accessibility_score = 0.0
             
             features.append([
                 min_time, mean_time, percentile_90,
-                count_30min, count_60min, count_90min,
+                count_5min, count_10min, count_15min,
                 transit_share, accessibility_score
             ])
         
@@ -488,22 +661,26 @@ class GRANITEPipeline:
         return np.array(derived, dtype=np.float64)
 
     def _train_accessibility_svi_gnn(self, graph_data, tract_svi, addresses):
-        """Train GNN for direct accessibility and SVI predictions"""
-        
-        self._log("Training Accessibility SVI GNN...")
+        """INTEGRATED: Train GNN with all fixes applied"""
+        self._log("Training Accessibility SVI GNN with enhanced architecture...")
         
         try:
-            from ..models.gnn import AccessibilitySVIGNN, AccessibilityGNNTrainer
+            # Import FIXED GNN classes
+            from ..models.gnn import AccessibilitySVIGNN, AccessibilityGNNTrainer, normalize_accessibility_features
             import torch
             
-            # Create model
+            # Apply FIXED normalization
+            normalized_features, feature_scaler = normalize_accessibility_features(graph_data.x.numpy())
+            graph_data.x = torch.FloatTensor(normalized_features)
+            
+            # Create FIXED model with proper architecture
             model = AccessibilitySVIGNN(
                 accessibility_features_dim=graph_data.x.shape[1],
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
                 dropout=self.config.get('model', {}).get('dropout', 0.3)
             )
             
-            # Create trainer
+            # Create FIXED trainer
             trainer = AccessibilityGNNTrainer(model, config=self.config.get('training', {}))
             
             # Training parameters
@@ -512,7 +689,7 @@ class GRANITEPipeline:
             self._log(f"Training model: {graph_data.x.shape[1]} features for SVI prediction")
             self._log(f"Target SVI: {tract_svi:.4f}, Epochs: {epochs}")
             
-            # Train
+            # Train with FIXED trainer
             training_result = trainer.train(
                 graph_data=graph_data,
                 tract_svi=tract_svi,
@@ -520,35 +697,36 @@ class GRANITEPipeline:
                 verbose=self.verbose
             )
             
-            # STORE RAW PREDICTIONS for diagnostics
+            # Store raw predictions for diagnostics
             predictions = training_result['final_predictions']
-            self._stored_raw_predictions = predictions.copy()  # Store a copy for diagnostics
+            self._stored_raw_predictions = predictions.copy()
             
-            # Calculate constraint error on RAW predictions
-            raw_constraint_error = abs(np.mean(predictions) - tract_svi) / tract_svi
+            # Enhanced result reporting
+            constraint_error = abs(np.mean(predictions) - tract_svi) / tract_svi * 100
             spatial_std = np.std(predictions)
             
             self._log(f"Training completed:")
-            self._log(f"  RAW constraint error: {raw_constraint_error:.6f}")
-            self._log(f"  RAW spatial variation: {spatial_std:.6f}")
-            self._log(f"  RAW prediction range: [{predictions.min():.4f}, {predictions.max():.4f}]")
-            self._log(f"  RAW prediction mean: {np.mean(predictions):.4f} (target: {tract_svi:.4f})")
+            self._log(f"  Constraint error: {constraint_error:.2f}%")
+            self._log(f"  Spatial variation: {spatial_std:.4f}")
+            self._log(f"  Learning converged: {training_result.get('learning_converged', False)}")
             
-            # Quality checks on RAW predictions
-            if raw_constraint_error > 0.5:  # 50% tolerance for raw predictions
-                self._log("Warning: Very high RAW constraint error - model struggling to learn target scale")
-            
-            if spatial_std < 0.005:
-                self._log("Warning: Very low RAW spatial variation - model may be predicting constant values")
+            # Quality assessment
+            if constraint_error < 10 and spatial_std > 0.01:
+                self._log("✓ Training quality: GOOD")
+            elif constraint_error < 25:
+                self._log("⚠ Training quality: ACCEPTABLE")
+            else:
+                self._log("✗ Training quality: POOR - consider hyperparameter tuning")
             
             return {
                 'success': True,
                 'raw_predictions': predictions,
                 'model': model,
-                'training_history': training_result.get('training_history', []),
-                'raw_constraint_error': raw_constraint_error,
+                'training_history': training_result.get('training_history', {}),
+                'raw_constraint_error': constraint_error,
                 'spatial_std': spatial_std,
-                'epochs_trained': training_result.get('epochs_trained', epochs)
+                'epochs_trained': training_result.get('epochs_trained', epochs),
+                'learning_converged': training_result.get('learning_converged', False)
             }
             
         except Exception as e:

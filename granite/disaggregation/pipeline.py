@@ -172,6 +172,18 @@ class GRANITEPipeline:
             tract_addresses, 
             tract_svi
         )
+
+        if self.verbose:
+            self._log("Running accessibility-vulnerability debugging...")
+            debug_samples = self._debug_accessibility_vulnerability_relationship(
+                final_predictions, accessibility_features, tract_addresses
+            )
+            
+            direction_validation = self._validate_feature_directions(accessibility_features)
+            
+            correlation_diagnostic = self._create_accessibility_correlation_diagnostic(
+                final_predictions, accessibility_features
+            )
         
         # Step 5a: Run accessibility feature validation FIRST
         self._log("Running accessibility feature validation...")
@@ -696,6 +708,10 @@ class GRANITEPipeline:
                 epochs=epochs,
                 verbose=self.verbose
             )
+
+            # NEW: Store learned accessibility for validation
+            if 'learned_accessibility' in training_result:
+                self._learned_accessibility = training_result['learned_accessibility']
             
             # Store raw predictions for diagnostics
             predictions = training_result['final_predictions']
@@ -721,6 +737,7 @@ class GRANITEPipeline:
             return {
                 'success': True,
                 'raw_predictions': predictions,
+                'learned_accessibility': training_result.get('learned_accessibility'),
                 'model': model,
                 'training_history': training_result.get('training_history', {}),
                 'raw_constraint_error': constraint_error,
@@ -973,6 +990,8 @@ class GRANITEPipeline:
             viz_data = {
                 'gnn_predictions': results['predictions'],
                 'accessibility_features': results['accessibility_features'],
+                'learned_accessibility': results['training_result'].get('learned_accessibility'),  # NEW
+                'traditional_accessibility': results['accessibility_features'],  # For comparison
                 'tract_svi': results['tract_svi'],
                 'validation_results': results['validation_results'],
                 'training_result': results['training_result']
@@ -1021,3 +1040,195 @@ class GRANITEPipeline:
             json.dump(summary, f, indent=2, default=str)
         
         self._log(f"Results saved to {save_dir}")
+
+    def _debug_accessibility_vulnerability_relationship(self, final_predictions, accessibility_features, addresses):
+        """Programmatic debugging of accessibility-vulnerability patterns"""
+        
+        self._log("=== DEBUGGING ACCESSIBILITY-VULNERABILITY RELATIONSHIP ===")
+        
+        # Get predictions and features
+        predicted_svi = final_predictions['mean'].values
+        feature_names = self._generate_feature_names(accessibility_features.shape[1])
+        
+        # Find extreme cases for manual inspection
+        n_samples = min(10, len(predicted_svi))
+        
+        # Highest vulnerability addresses
+        high_vuln_indices = np.argsort(predicted_svi)[-n_samples:]
+        # Lowest vulnerability addresses  
+        low_vuln_indices = np.argsort(predicted_svi)[:n_samples]
+        
+        self._log("SAMPLE ANALYSIS:")
+        self._log("HIGH VULNERABILITY ADDRESSES (should have POOR accessibility):")
+        
+        for i, idx in enumerate(high_vuln_indices):
+            addr_id = addresses.iloc[idx].get('address_id', idx)
+            pred_svi = predicted_svi[idx]
+            
+            # Extract key accessibility metrics
+            emp_min_time = accessibility_features[idx, 0]  # employment min time
+            emp_count_5min = accessibility_features[idx, 3]  # employment count in 5min
+            health_min_time = accessibility_features[idx, 10]  # healthcare min time  
+            grocery_min_time = accessibility_features[idx, 20]  # grocery min time
+            
+            # Overall accessibility score (lower times = better access)
+            avg_min_time = (emp_min_time + health_min_time + grocery_min_time) / 3
+            
+            self._log(f"  Address {addr_id}: SVI={pred_svi:.3f}")
+            self._log(f"    Avg min travel time: {avg_min_time:.1f} min")
+            self._log(f"    Employment: {emp_min_time:.1f}min, {emp_count_5min} jobs in 5min")
+            self._log(f"    Healthcare: {health_min_time:.1f}min")
+            self._log(f"    Grocery: {grocery_min_time:.1f}min")
+            
+            # RED FLAG CHECK: If high vulnerability has very good accessibility
+            if avg_min_time < 6.0:  # Very good accessibility (< 6min average)
+                self._log(f"    🚨 RED FLAG: High vulnerability but excellent accessibility!")
+        
+        self._log("\nLOW VULNERABILITY ADDRESSES (should have GOOD accessibility):")
+        
+        for i, idx in enumerate(low_vuln_indices):
+            addr_id = addresses.iloc[idx].get('address_id', idx)
+            pred_svi = predicted_svi[idx]
+            
+            emp_min_time = accessibility_features[idx, 0]
+            emp_count_5min = accessibility_features[idx, 3]
+            health_min_time = accessibility_features[idx, 10]
+            grocery_min_time = accessibility_features[idx, 20]
+            
+            avg_min_time = (emp_min_time + health_min_time + grocery_min_time) / 3
+            
+            self._log(f"  Address {addr_id}: SVI={pred_svi:.3f}")
+            self._log(f"    Avg min travel time: {avg_min_time:.1f} min")
+            self._log(f"    Employment: {emp_min_time:.1f}min, {emp_count_5min} jobs in 5min")
+            self._log(f"    Healthcare: {health_min_time:.1f}min")  
+            self._log(f"    Grocery: {grocery_min_time:.1f}min")
+            
+            # RED FLAG CHECK: If low vulnerability has very poor accessibility
+            if avg_min_time > 12.0:  # Poor accessibility (> 12min average)
+                self._log(f"    🚨 RED FLAG: Low vulnerability but poor accessibility!")
+        
+        return {
+            'high_vuln_sample': high_vuln_indices,
+            'low_vuln_sample': low_vuln_indices
+        }
+    
+    def _validate_feature_directions(self, accessibility_features):
+        """Test if accessibility features have correct theoretical directions"""
+        
+        self._log("=== VALIDATING FEATURE DIRECTIONS ===")
+        
+        feature_names = self._generate_feature_names(accessibility_features.shape[1])
+        
+        # Create a synthetic "good accessibility" address vs "poor accessibility" address
+        # Good accessibility = low travel times, high destination counts
+        good_access_profile = []
+        poor_access_profile = []
+        
+        for i, feature_name in enumerate(feature_names):
+            if 'min_time' in feature_name or 'mean_time' in feature_name or 'median_time' in feature_name:
+                # Time features: lower = better accessibility
+                good_access_profile.append(3.0)   # 3 minutes - very good
+                poor_access_profile.append(15.0)  # 15 minutes - poor
+                
+            elif 'count' in feature_name:
+                # Count features: higher = better accessibility
+                good_access_profile.append(4.0)   # 4 destinations accessible
+                poor_access_profile.append(0.0)   # 0 destinations accessible
+                
+            elif 'drive_advantage' in feature_name:
+                # Drive advantage: higher = more car-dependent = worse accessibility for non-drivers
+                good_access_profile.append(0.2)   # Low car dependence
+                poor_access_profile.append(0.8)   # High car dependence
+                
+            else:
+                # Other features - use median values
+                median_val = np.median(accessibility_features[:, i])
+                good_access_profile.append(median_val * 1.2)  # Slightly above median
+                poor_access_profile.append(median_val * 0.8)  # Slightly below median
+        
+        # Test what your model would predict for these synthetic profiles
+        good_access_array = np.array(good_access_profile).reshape(1, -1)
+        poor_access_array = np.array(poor_access_profile).reshape(1, -1)
+        
+        self._log("THEORETICAL TEST:")
+        self._log("Good accessibility profile (should predict LOW vulnerability):")
+        for i, (name, val) in enumerate(zip(feature_names[:10], good_access_profile[:10])):  # Show first 10
+            self._log(f"  {name}: {val:.2f}")
+        
+        self._log("Poor accessibility profile (should predict HIGH vulnerability):")
+        for i, (name, val) in enumerate(zip(feature_names[:10], poor_access_profile[:10])):  # Show first 10
+            self._log(f"  {name}: {val:.2f}")
+        
+        # Calculate what the correlation SHOULD be if features are coded correctly
+        # This is a basic sanity check
+        time_features = [i for i, name in enumerate(feature_names) if 'time' in name]
+        count_features = [i for i, name in enumerate(feature_names) if 'count' in name]
+        
+        self._log("EXPECTED RELATIONSHIPS:")
+        self._log(f"Time features (indices {time_features[:3]}...): should correlate POSITIVELY with vulnerability")
+        self._log(f"Count features (indices {count_features[:3]}...): should correlate NEGATIVELY with vulnerability")
+        
+        return {
+            'good_access_profile': good_access_profile,
+            'poor_access_profile': poor_access_profile,
+            'time_features': time_features,
+            'count_features': count_features
+        }
+    
+    def _create_accessibility_correlation_diagnostic(self, final_predictions, accessibility_features):
+        """Create detailed correlation diagnostic"""
+        
+        self._log("=== ACCESSIBILITY CORRELATION DIAGNOSTIC ===")
+        
+        predicted_svi = final_predictions['mean'].values
+        feature_names = self._generate_feature_names(accessibility_features.shape[1])
+        
+        # Calculate correlation of each feature with predicted SVI
+        correlations = []
+        
+        for i, feature_name in enumerate(feature_names):
+            feature_values = accessibility_features[:, i]
+            corr = np.corrcoef(feature_values, predicted_svi)[0, 1]
+            
+            # Determine if correlation direction is theoretically correct
+            expected_direction = "POSITIVE" if any(word in feature_name for word in ['time', 'drive_advantage']) else "NEGATIVE"
+            actual_direction = "POSITIVE" if corr > 0 else "NEGATIVE"
+            is_correct = expected_direction == actual_direction
+            
+            correlations.append({
+                'feature': feature_name,
+                'correlation': corr,
+                'expected': expected_direction,
+                'actual': actual_direction,
+                'correct': is_correct,
+                'strength': 'Strong' if abs(corr) > 0.3 else 'Moderate' if abs(corr) > 0.1 else 'Weak'
+            })
+        
+        # Sort by absolute correlation strength
+        correlations.sort(key=lambda x: abs(x['correlation']), reverse=True)
+        
+        self._log("TOP CORRELATIONS (strongest to weakest):")
+        
+        correct_count = 0
+        for i, corr_info in enumerate(correlations[:15]):  # Show top 15
+            status = "✓" if corr_info['correct'] else "✗"
+            self._log(f"  {status} {corr_info['feature']}: r={corr_info['correlation']:.3f} "
+                    f"({corr_info['strength']}, expected {corr_info['expected']})")
+            
+            if corr_info['correct']:
+                correct_count += 1
+        
+        total_features = len(correlations)
+        correctness_rate = correct_count / total_features * 100
+        
+        self._log(f"\nOVERALL DIRECTIONAL CORRECTNESS: {correct_count}/{total_features} ({correctness_rate:.1f}%)")
+        
+        if correctness_rate < 60:
+            self._log("🚨 MAJOR ISSUE: Less than 60% of features have correct correlation direction!")
+            self._log("   This suggests systematic feature encoding problems.")
+        elif correctness_rate < 80:
+            self._log("⚠️  WARNING: Some features may be incorrectly encoded or model is learning confounding patterns")
+        else:
+            self._log("✓ Feature directions appear mostly correct")
+        
+        return correlations

@@ -342,6 +342,16 @@ class GRANITEPipeline:
                         destinations=dest_gdf,
                         time_period='morning'
                     )
+
+                    # NEW: Validate travel times before feature extraction
+                    if not accessibility_computer._validate_distance_time_relationship(travel_times):
+                        self._log(f"ERROR: Travel time validation failed for {dest_type}")
+                        continue
+                        
+                    # NEW: Validate destination counts
+                    if not accessibility_computer._validate_destination_counts_fixed(travel_times):
+                        self._log(f"ERROR: Destination count validation failed for {dest_type}")
+                        continue
                     
                     if len(travel_times) == 0:
                         self._log(f"ERROR: No travel times computed for {dest_type}")
@@ -413,6 +423,10 @@ class GRANITEPipeline:
             try:
                 accessibility_matrix = np.column_stack(all_features)
                 self._log(f"Base accessibility features: {accessibility_matrix.shape}")
+
+                validation_passed = self._validate_final_feature_relationships(
+                    accessibility_matrix, addresses
+                )
                 
             except Exception as e:
                 self._log(f"ERROR combining features: {str(e)}")
@@ -1232,3 +1246,43 @@ class GRANITEPipeline:
             self._log("✓ Feature directions appear mostly correct")
         
         return correlations
+    
+    def _validate_final_feature_relationships(self, features: np.ndarray, addresses) -> bool:
+        """NEW: Final validation of accessibility-vulnerability relationship"""
+        
+        self._log("=== FINAL FEATURE RELATIONSHIP VALIDATION ===")
+        
+        # Test expected accessibility-vulnerability patterns
+        feature_names = self._generate_feature_names(features.shape[1])
+        
+        # Create accessibility indices for different feature types
+        time_features = [i for i, name in enumerate(feature_names) if 'time' in name]
+        count_features = [i for i, name in enumerate(feature_names) if 'count' in name]
+        
+        if len(time_features) > 0 and len(count_features) > 0:
+            avg_time = np.mean(features[:, time_features], axis=1)
+            avg_count = np.mean(features[:, count_features], axis=1)
+            
+            # These should be negatively correlated (higher time, lower counts)
+            time_count_correlation = np.corrcoef(avg_time, avg_count)[0, 1]
+            
+            self._log(f"Time-Count correlation: {time_count_correlation:.3f} (should be negative)")
+            
+            if time_count_correlation > 0.1:  # Should be negative
+                self._log("ERROR: Time and count features are positively correlated")
+                return False
+            else:
+                self._log("✓ Time-Count relationship is correct")
+        
+        # Check for sufficient variation across addresses
+        feature_variations = np.std(features, axis=0)
+        low_variation_count = np.sum(feature_variations < 0.01)
+        
+        self._log(f"Low variation features: {low_variation_count}/{features.shape[1]}")
+        
+        if low_variation_count > features.shape[1] * 0.3:  # >30% low variation
+            self._log("ERROR: Too many features have low variation")
+            return False
+        
+        self._log("✓ Feature relationships appear correct")
+        return True

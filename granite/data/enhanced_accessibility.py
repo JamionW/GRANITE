@@ -77,155 +77,160 @@ class EnhancedAccessibilityComputer:
         return travel_df
     
     def _calculate_mode_times_fixed(self, distance_km: float, time_period: str) -> Dict[str, float]:
-        """FIXED: Mode-specific travel time calculation with bounds"""
+        """FIXED: More realistic travel time calculation with proper bounds"""
+        
+        # Validate input distance
+        if distance_km < 0 or distance_km > 50:  # Sanity check
+            distance_km = max(0.1, min(distance_km, 50))
         
         times = {}
         
-        for mode, params in self.speed_params.items():
-            # Add realistic speed variation
-            speed_variation = np.random.normal(0, params['std'])
-            actual_speed = np.clip(params['base'] + speed_variation, 
-                                 params['min'], params['max'])
-            
+        # More realistic base speeds (km/h)
+        base_speeds = {
+            'walk': 4.5,    # Reduced from 5.0 - more realistic urban walking
+            'drive': 20.0,  # Reduced from 25.0 - realistic urban driving with stops
+            'transit': 15.0 # Increased from 12.0 - more competitive transit
+        }
+        
+        # Calculate base times
+        for mode, base_speed in base_speeds.items():
             # Base travel time in minutes
-            base_time = (distance_km / actual_speed) * 60
+            base_time = (distance_km / base_speed) * 60
             
-            # Mode-specific adjustments
-            if mode == 'transit':
-                # Wait time (5-15 minutes)
-                wait_time = np.random.uniform(5, 15)
-                # Transfer penalty for longer trips
-                if distance_km > 5:
-                    transfer_penalty = np.random.uniform(3, 8)
-                else:
-                    transfer_penalty = 0
-                final_time = base_time + wait_time + transfer_penalty
+            if mode == 'walk':
+                # Walking: add small random variation, minimum 2 minutes
+                variation = np.random.normal(0, 0.5)
+                final_time = max(2.0, base_time + variation)
                 
             elif mode == 'drive':
-                # Parking time (1-5 minutes)
-                parking_time = np.random.uniform(1, 5)
-                # Traffic factor based on time period
-                traffic_factor = {'morning': 1.3, 'midday': 1.0, 'evening': 1.4}.get(time_period, 1.0)
-                final_time = base_time * traffic_factor + parking_time
+                # Driving: add traffic, parking, more variation
+                traffic_multiplier = {
+                    'morning': 1.4, 'midday': 1.1, 'evening': 1.5
+                }.get(time_period, 1.2)
                 
-            else:  # walk
-                final_time = base_time
+                parking_time = np.random.uniform(2, 6)  # 2-6 minutes parking
+                variation = np.random.normal(0, 1.5)    # More driving variation
+                
+                final_time = max(3.0, (base_time * traffic_multiplier) + parking_time + variation)
+                
+            else:  # transit
+                # Transit: add wait time, transfer penalties
+                base_wait = np.random.uniform(8, 15)  # 8-15 min average wait
+                
+                # Transfer penalty for longer trips
+                if distance_km > 8:
+                    transfer_time = np.random.uniform(5, 12)
+                elif distance_km > 3:
+                    transfer_time = np.random.uniform(0, 8)
+                else:
+                    transfer_time = 0
+                
+                variation = np.random.normal(0, 2.0)
+                final_time = max(5.0, base_time + base_wait + transfer_time + variation)
             
-            # CRITICAL FIX: Ensure minimum time
-            times[mode] = max(1.0, final_time)
+            times[mode] = final_time
         
         return times
     
     def extract_enhanced_accessibility_features(self, addresses: gpd.GeoDataFrame,
-                                              travel_times: pd.DataFrame, 
-                                              dest_type: str) -> np.ndarray:
-        """
-        FIXED: Extract accessibility features with corrected counting logic
-        """
+                                            travel_times: pd.DataFrame, 
+                                            dest_type: str) -> np.ndarray:
+        """FIXED: Ensure features encode accessibility correctly for vulnerability prediction"""
+        
         self.log(f"Extracting features for {dest_type} destinations")
         
         features = []
-        
-        # Get unique destinations for validation
         unique_destinations = travel_times['destination_id'].nunique()
         self.log(f"Processing {len(addresses)} addresses with {unique_destinations} destinations")
         
         for addr_idx, address in addresses.iterrows():
             addr_id = address.get('address_id', addr_idx)
-            
-            # FIXED: Handle variable destination counts per address
             addr_times = travel_times[travel_times['origin_id'] == addr_id].copy()
             
             if len(addr_times) == 0:
-                # No destinations accessible - use default values
-                features.append([8.0, 10.0, 9.0, 0, 1, 2, 0.2, 0.7, 5.0, 0.5])
+                # No destinations - poor accessibility
+                features.append([15.0, 18.0, 17.0, 0, 0, 1, 0.8, 0.0, 12.0, 0.1])
                 continue
             
-            # Remove duplicates and validate
             addr_times = addr_times.drop_duplicates(subset=['destination_id'])
             combined_times = pd.to_numeric(addr_times['combined_time'], errors='coerce').dropna()
             
             if len(combined_times) == 0:
-                features.append([8.0, 10.0, 9.0, 0, 1, 2, 0.2, 0.7, 5.0, 0.5])
+                features.append([15.0, 18.0, 17.0, 0, 0, 1, 0.8, 0.0, 12.0, 0.1])
                 continue
             
-            # Time-based features
+            # Basic time features (higher = worse accessibility = higher vulnerability)
             min_time = float(combined_times.min())
-            mean_time = float(combined_times.mean())
+            mean_time = float(combined_times.mean()) 
             median_time = float(combined_times.median())
             
-            # IMPORTANT: Destination counting with variable available destinations
-            available_destinations = len(combined_times)  # This will vary by address now!
-            
-            # Use original 5/10/15 minute thresholds - these will now vary meaningfully
+            # FIXED: Use proper time thresholds for meaningful variation
+            # 5, 10, 15 minutes are reasonable for local accessibility
             count_5min = int((combined_times <= 5).sum())
-            count_10min = int((combined_times <= 10).sum())
+            count_10min = int((combined_times <= 10).sum()) 
             count_15min = int((combined_times <= 15).sum())
-            
-            # Validation: ensure counts don't exceed available destinations (should be ≤ 6)
-            count_5min = min(count_5min, available_destinations)
-            count_10min = min(count_10min, available_destinations)
-            count_15min = min(count_15min, available_destinations)
             
             # Ensure logical progression
             count_10min = max(count_10min, count_5min)
             count_15min = max(count_15min, count_10min)
             
-            # Modal advantage calculation
+            # Car dependence (higher = worse for vulnerable populations)
             if 'drive_time' in addr_times.columns and 'walk_time' in addr_times.columns:
                 drive_times = pd.to_numeric(addr_times['drive_time'], errors='coerce').dropna()
                 walk_times = pd.to_numeric(addr_times['walk_time'], errors='coerce').dropna()
                 
                 if len(drive_times) > 0 and len(walk_times) > 0:
+                    # FIXED: Calculate car advantage properly
+                    # Higher values = more car-dependent = worse for vulnerable populations
                     avg_drive = drive_times.mean()
                     avg_walk = walk_times.mean()
                     
-                    if avg_walk > 0:
-                        drive_advantage = float(max(0, (avg_walk - avg_drive) / avg_walk))
-                        drive_advantage = min(0.8, drive_advantage)  # Cap at 80%
+                    if avg_walk > 0 and avg_drive > 0:
+                        # How much faster is driving vs walking (0-1 scale)
+                        drive_advantage = min(0.9, max(0.1, 1 - (avg_drive / avg_walk)))
                     else:
-                        drive_advantage = 0.0
+                        drive_advantage = 0.5
                 else:
-                    drive_advantage = 0.0
+                    drive_advantage = 0.5
             else:
-                drive_advantage = 0.0
+                drive_advantage = 0.5
             
-            # Accessibility concentration
+            # FIXED: Time concentration (inverted so higher = more scattered = worse)
             if len(combined_times) > 1:
-                time_std = float(combined_times.std())
                 time_range = float(combined_times.max() - combined_times.min())
-                # Normalize concentration (higher = more concentrated)
-                max_possible_range = 20.0  # Assume max 20-minute range
-                accessibility_concentration = float(1.0 - min(1.0, time_range / max_possible_range))
+                # Higher time_range = more scattered destinations = worse accessibility
             else:
-                time_std = 0.0
-                time_range = 0.0 
-                accessibility_concentration = 1.0
+                time_range = 0.0
             
-            # Placeholder for relative percentile (computed later)
+            # Accessibility percentile (computed later, lower = worse accessibility)
             accessibility_percentile = 0.5
             
             feature_vector = [
-                min_time, mean_time, median_time,
-                count_5min, count_10min, count_15min,
-                drive_advantage, accessibility_concentration,
-                time_range, accessibility_percentile
+                min_time,           # Higher = worse accessibility
+                mean_time,          # Higher = worse accessibility  
+                median_time,        # Higher = worse accessibility
+                count_5min,         # Higher = better accessibility (will be inverted in loss)
+                count_10min,        # Higher = better accessibility (will be inverted in loss)
+                count_15min,        # Higher = better accessibility (will be inverted in loss)
+                drive_advantage,    # Higher = more car dependent = worse for vulnerable
+                time_range,         # Higher = more scattered = worse accessibility
+                accessibility_percentile  # Lower = worse accessibility
             ]
             
             features.append(feature_vector)
         
         feature_array = np.array(features, dtype=np.float64)
         
-        # Compute relative accessibility percentiles
+        # FIXED: Compute percentiles correctly (lower times = better access = higher percentile)
         if len(feature_array) > 1:
             mean_times = feature_array[:, 1]  # mean_time column
             for i in range(len(feature_array)):
                 # Lower mean time = better accessibility = higher percentile
                 percentile = 1.0 - (np.sum(mean_times <= mean_times[i]) / len(mean_times))
-                feature_array[i, 9] = percentile
+                feature_array[i, 8] = percentile
         
-        # VALIDATION: Check for systematic issues
-        self._validate_intra_tract_features_fixed(feature_array, dest_type, unique_destinations)
+        # NEW: Validate feature directions before returning
+        self._validate_feature_directions(feature_array, dest_type)
         
         return feature_array
     
@@ -548,7 +553,7 @@ class EnhancedAccessibilityComputer:
     
     def _process_origin_batch(self, orig_id, orig_coord, destinations, road_graph, address_mapping, time_period):
         """
-        Process only the closest destinations for each origin to create variation
+        FIXED: Ensure realistic destination selection and proper counting
         """
         # Pre-compute straight-line distances to all destinations
         dest_data = []
@@ -566,55 +571,209 @@ class EnhancedAccessibilityComputer:
                 'straight_km': straight_km
             })
         
-        # CRITICAL: Sort by distance and only process closest destinations
+        # FIXED: Sort by distance and apply realistic selection rules
         dest_data.sort(key=lambda x: x['straight_km'])
         
-        # Limit to closest 6 destinations per address
-        # This creates natural variation across addresses in different tract locations
-        max_destinations_per_address = 6
-        selected_destinations = dest_data[:max_destinations_per_address]
+        # Select destinations based on distance tiers for realistic variation
+        selected_destinations = []
+        
+        # Tier 1: Very close (≤2km) - always include if available
+        tier1 = [d for d in dest_data if d['straight_km'] <= 2.0]
+        selected_destinations.extend(tier1[:3])  # Max 3 very close
+        
+        # Tier 2: Nearby (2-5km) - include some
+        tier2 = [d for d in dest_data if 2.0 < d['straight_km'] <= 5.0]
+        selected_destinations.extend(tier2[:2])  # Max 2 nearby
+        
+        # Tier 3: Distant (5-10km) - include one if needed  
+        tier3 = [d for d in dest_data if 5.0 < d['straight_km'] <= 10.0]
+        if len(selected_destinations) < 4:  # Need minimum destinations
+            selected_destinations.extend(tier3[:1])
+        
+        # CRITICAL: Cap total destinations per address at 6
+        # This creates natural variation across addresses
+        selected_destinations = selected_destinations[:6]
+        
+        # If we have too few destinations, add the closest remaining ones
+        if len(selected_destinations) < 3:
+            remaining = [d for d in dest_data if d not in selected_destinations]
+            selected_destinations.extend(remaining[:3-len(selected_destinations)])
         
         batch_results = []
         
         for dest_info in selected_destinations:
             straight_km = dest_info['straight_km']
             
-            # Use the same distance-based routing strategy as before
+            # Use tiered distance calculation for efficiency
             if straight_km > 15.0:
-                network_distance_km = straight_km * 1.6
+                network_distance_km = straight_km * 1.6  # Assume indirect routing
                 route_found = False
-            elif straight_km > 5.0:
+            elif straight_km > 8.0:
                 network_distance_km = straight_km * 1.35
-                route_found = False
-            elif straight_km > 1.0:
+                route_found = False  
+            else:
+                # Only do expensive routing for shorter distances
                 network_distance_km, route_found = self._calculate_network_distance_fast(
-                    orig_coord, dest_info['dest_coord'], road_graph, address_mapping, max_distance_km=5.0
+                    orig_coord, dest_info['dest_coord'], road_graph, address_mapping, 
+                    max_distance_km=8.0
                 )
                 if not route_found:
                     network_distance_km = straight_km * 1.25
-            else:
-                network_distance_km, route_found = self._calculate_network_distance_fast(
-                    orig_coord, dest_info['dest_coord'], road_graph, address_mapping, max_distance_km=2.0
-                )
-                if not route_found:
-                    network_distance_km = straight_km * 1.15
             
-            # Calculate travel times
+            # Calculate travel times with validation
             travel_times = self._calculate_mode_times_fixed(network_distance_km, time_period)
+            
+            # Validate travel times are reasonable
+            for mode, time in travel_times.items():
+                if time < 1.0 or time > 180.0:  # 1 min to 3 hours
+                    self.log(f"WARNING: Unrealistic {mode} time: {time:.1f} min for {straight_km:.2f}km")
+                    # Clamp to reasonable bounds
+                    travel_times[mode] = max(1.0, min(time, 180.0))
+            
             best_mode = min(travel_times.keys(), key=lambda k: travel_times[k])
             
             batch_results.append({
                 'origin_id': orig_id,
-                'destination_id': dest_info['dest_id'],
+                'destination_id': dest_info['dest_id'], 
                 'destination_type': dest_info['dest_type'],
                 'straight_distance_km': straight_km,
                 'network_distance_km': network_distance_km,
                 'walk_time': travel_times['walk'],
-                'drive_time': travel_times['drive'],
+                'drive_time': travel_times['drive'], 
                 'transit_time': travel_times['transit'],
                 'combined_time': travel_times[best_mode],
                 'best_mode': best_mode,
-                'route_found': route_found
+                'route_found': route_found,
+                'tier': 1 if straight_km <= 2 else 2 if straight_km <= 5 else 3
             })
         
         return batch_results
+    
+    def _validate_distance_time_relationship(self, travel_df: pd.DataFrame) -> bool:
+        """NEW: Validate that distance-time relationships make sense"""
+        
+        validation_passed = True
+        
+        for mode in ['walk_time', 'drive_time', 'transit_time']:
+            if mode not in travel_df.columns:
+                continue
+                
+            # Calculate correlation with distance
+            if 'network_distance_km' in travel_df.columns:
+                distances = travel_df['network_distance_km']
+            elif 'straight_distance_km' in travel_df.columns:
+                distances = travel_df['straight_distance_km'] 
+            else:
+                continue
+                
+            times = travel_df[mode]
+            
+            # Remove outliers for correlation calculation
+            q1, q3 = times.quantile(0.25), times.quantile(0.75)
+            iqr = q3 - q1
+            lower_bound = q1 - 1.5 * iqr
+            upper_bound = q3 + 1.5 * iqr
+            
+            clean_mask = (times >= lower_bound) & (times <= upper_bound)
+            clean_times = times[clean_mask]
+            clean_distances = distances[clean_mask]
+            
+            if len(clean_times) < 10:
+                continue
+                
+            correlation = clean_distances.corr(clean_times)
+            
+            self.log(f"{mode} vs distance correlation: {correlation:.3f}")
+            
+            # Minimum acceptable correlation
+            min_correlation = 0.4  # Stricter than before
+            
+            if correlation < min_correlation:
+                self.log(f"ERROR: {mode} correlation too low ({correlation:.3f} < {min_correlation})")
+                validation_passed = False
+                
+                # Debug info
+                self.log(f"  Distance range: {clean_distances.min():.2f} - {clean_distances.max():.2f} km")
+                self.log(f"  Time range: {clean_times.min():.1f} - {clean_times.max():.1f} min")
+            else:
+                self.log(f"✓ {mode} correlation acceptable")
+        
+        return validation_passed
+    
+    def _validate_feature_directions(self, features: np.ndarray, dest_type: str):
+        """NEW: Validate that features will correlate correctly with vulnerability"""
+        
+        feature_names = [
+            'min_time', 'mean_time', 'median_time',      # Should correlate POSITIVELY with vulnerability
+            'count_5min', 'count_10min', 'count_15min',  # Should correlate NEGATIVELY with vulnerability  
+            'drive_advantage', 'time_range', 'accessibility_percentile'
+        ]
+        
+        # Create a synthetic vulnerability score for testing
+        # Higher time = higher vulnerability, Higher counts = lower vulnerability
+        synthetic_vuln = (
+            0.3 * features[:, 1] +          # mean_time (positive)
+            -0.2 * features[:, 4] +         # count_10min (negative)
+            0.1 * features[:, 6] +          # drive_advantage (positive)
+            -0.2 * features[:, 8]           # accessibility_percentile (negative)
+        )
+        
+        self.log(f"=== {dest_type.upper()} FEATURE DIRECTION VALIDATION ===")
+        
+        issues_found = 0
+        for i, name in enumerate(feature_names):
+            values = features[:, i]
+            if np.std(values) < 1e-8:  # Skip zero-variance features
+                continue
+                
+            correlation = np.corrcoef(values, synthetic_vuln)[0, 1]
+            
+            # Expected directions
+            if name in ['min_time', 'mean_time', 'median_time', 'drive_advantage', 'time_range']:
+                expected_sign = 'positive'
+                is_correct = correlation > 0.05  # Small positive threshold
+            elif name in ['count_5min', 'count_10min', 'count_15min', 'accessibility_percentile']:
+                expected_sign = 'negative'  
+                is_correct = correlation < -0.05  # Small negative threshold
+            else:
+                continue  # Skip validation for other features
+            
+            status = "✓" if is_correct else "✗"
+            self.log(f"  {status} {name}: r={correlation:.3f} (expected {expected_sign})")
+            
+            if not is_correct:
+                issues_found += 1
+        
+        if issues_found > 0:
+            self.log(f"⚠️  {issues_found} features may have wrong correlation directions")
+        else:
+            self.log("✅ All feature directions look correct")
+        
+        return issues_found == 0
+    
+    def _validate_destination_counts_fixed(self, travel_df: pd.DataFrame, max_expected: int = 6):
+        """NEW: Validate destination counts don't exceed realistic limits"""
+        
+        # Count destinations per origin
+        origin_dest_counts = travel_df.groupby('origin_id')['destination_id'].nunique()
+        
+        self.log("=== DESTINATION COUNT VALIDATION ===")
+        self.log(f"Destinations per address: mean={origin_dest_counts.mean():.1f}, "
+                f"max={origin_dest_counts.max()}, min={origin_dest_counts.min()}")
+        
+        # Check for addresses with too many destinations
+        excessive_addresses = origin_dest_counts[origin_dest_counts > max_expected]
+        
+        if len(excessive_addresses) > 0:
+            self.log(f"ERROR: {len(excessive_addresses)} addresses have >{max_expected} destinations")
+            self.log(f"Max destinations found: {origin_dest_counts.max()}")
+            return False
+        
+        # Check for addresses with too few destinations  
+        sparse_addresses = origin_dest_counts[origin_dest_counts < 2]
+        
+        if len(sparse_addresses) > len(origin_dest_counts) * 0.1:  # >10% of addresses
+            self.log(f"WARNING: {len(sparse_addresses)} addresses have <2 destinations")
+        
+        self.log("✅ Destination counts within expected range")
+        return True

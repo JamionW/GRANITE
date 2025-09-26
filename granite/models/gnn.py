@@ -10,9 +10,6 @@ from torch_geometric.data import Data
 import numpy as np
 
 class AccessibilitySVIGNN(nn.Module):
-    """
-    FIXED: GNN architecture with proper learning capacity and regularization
-    """
     def __init__(self, accessibility_features_dim, hidden_dim=64, dropout=0.3):
         super(AccessibilitySVIGNN, self).__init__()
         
@@ -20,86 +17,89 @@ class AccessibilitySVIGNN(nn.Module):
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout
         
-        # FIXED: Proper input normalization layer
+        # Input normalization (existing)
         self.input_norm = nn.LayerNorm(accessibility_features_dim)
         
-        # FIXED: Multi-scale feature processing
+        # Feature encoding (existing)
         self.feature_encoder = nn.Sequential(
             nn.Linear(accessibility_features_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(dropout * 0.5),  # Light dropout on input
+            nn.Dropout(dropout * 0.5),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
         )
         
-        # FIXED: Graph convolution layers with proper architecture
+        # Graph convolution layers (existing)
         self.spatial_conv1 = GCNConv(hidden_dim, hidden_dim)
         self.spatial_norm1 = BatchNorm(hidden_dim)
         
         self.attention_conv = GATConv(hidden_dim, hidden_dim//2, heads=2, concat=True, dropout=dropout*0.5)
-        self.attention_norm = BatchNorm(hidden_dim)  # heads=2, hidden_dim//2 -> hidden_dim total
+        self.attention_norm = BatchNorm(hidden_dim)
         
         self.spatial_conv2 = GCNConv(hidden_dim, hidden_dim//2)
         self.spatial_norm2 = BatchNorm(hidden_dim//2)
         
-        # FIXED: Accessibility-aware prediction head
+        # NEW: Accessibility Learning Layer
+        self.accessibility_learner = nn.Sequential(
+            nn.Linear(hidden_dim//2, hidden_dim//4),
+            nn.ReLU(),
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(hidden_dim//4, accessibility_features_dim),  # Same size as input for comparison
+            nn.ReLU()  # Ensure positive accessibility values
+        )
+        
+        # Modified prediction head (smaller since we have dedicated accessibility layer)
         self.prediction_layers = nn.Sequential(
             nn.Linear(hidden_dim//2, hidden_dim//4),
             nn.ReLU(),
             nn.Dropout(dropout),
-            
-            nn.Linear(hidden_dim//4, hidden_dim//8),
-            nn.ReLU(), 
-            nn.Dropout(dropout * 0.5),
-            
-            # Final prediction layer with proper initialization
-            nn.Linear(hidden_dim//8, 1)
+            nn.Linear(hidden_dim//4, 1)
         )
         
-        # FIXED: Proper weight initialization
         self._initialize_weights()
-        
         self.dropout = nn.Dropout(dropout)
-        
+
     def _initialize_weights(self):
-        """FIXED: Proper weight initialization for stable training"""
+        """Proper weight initialization for stable training"""
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_normal_(module.weight)
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
-    
-    def forward(self, accessibility_features, edge_index):
-        """FIXED: Forward pass with proper feature flow"""
         
-        # Input normalization and encoding
+    def forward(self, accessibility_features, edge_index, return_accessibility=False):
+        """
+        NEW: Modified forward pass that can return both SVI predictions and learned accessibility
+        """
+        # Input processing (existing)
         x = self.input_norm(accessibility_features)
         x = self.feature_encoder(x)
         
-        # First spatial convolution
+        # Graph convolution (existing)
         x = self.spatial_conv1(x, edge_index)
         x = self.spatial_norm1(x)
         x = F.relu(x)
         x = self.dropout(x)
         
-        # Attention-based convolution
         x_att = self.attention_conv(x, edge_index)
         x_att = self.attention_norm(x_att)
         x_att = F.relu(x_att)
         
-        # Second spatial convolution
         x = self.spatial_conv2(x_att, edge_index)
         x = self.spatial_norm2(x)
         x = F.relu(x)
         
-        # Final prediction
-        svi_predictions = self.prediction_layers(x)
+        # NEW: Learn accessibility representations
+        learned_accessibility = self.accessibility_learner(x)
         
-        # FIXED: Proper output scaling (sigmoid ensures [0,1] range)
+        # SVI prediction
+        svi_predictions = self.prediction_layers(x)
         svi_predictions = torch.sigmoid(svi_predictions.squeeze())
         
-        return svi_predictions
-
+        if return_accessibility:
+            return svi_predictions, learned_accessibility
+        else:
+            return svi_predictions
 
 class AccessibilityGNNTrainer:
     """
@@ -130,12 +130,13 @@ class AccessibilityGNNTrainer:
         self.training_history = {'losses': [], 'constraint_errors': [], 'spatial_stds': []}
         
     def train(self, graph_data, tract_svi, epochs=100, verbose=True):
-        """
-        FIXED: Training loop with proper loss function and monitoring
-        """
+        """Updated training loop that captures learned accessibility"""
         self.model.train()
         target_svi = torch.FloatTensor([tract_svi])
         n_addresses = graph_data.x.shape[0]
+        
+        # Storage for learned accessibility patterns
+        learned_accessibility_history = []
         
         if verbose:
             print(f"Training GNN: {n_addresses} addresses, target SVI: {tract_svi:.4f}")
@@ -143,23 +144,26 @@ class AccessibilityGNNTrainer:
         for epoch in range(epochs):
             self.optimizer.zero_grad()
             
-            # Forward pass
-            svi_predictions = self.model(graph_data.x, graph_data.edge_index)
+            # Forward pass - get both predictions and learned accessibility
+            svi_predictions, learned_accessibility = self.model(
+                graph_data.x, graph_data.edge_index, return_accessibility=True
+            )
             
-            # FIXED: Multi-component loss function
+            # Store learned accessibility every 10 epochs for analysis
+            if epoch % 10 == 0:
+                learned_accessibility_history.append(learned_accessibility.detach().numpy())
+            
+            # Compute losses (existing logic)
             losses = self._compute_losses(svi_predictions, target_svi, n_addresses)
             total_loss = losses['total']
             
-            # Backward pass
+            # Backward pass (existing)
             total_loss.backward()
-            
-            # FIXED: Gradient clipping for stability
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            
             self.optimizer.step()
             self.scheduler.step(total_loss)
             
-            # Track metrics
+            # Track metrics (existing logic)
             constraint_error = float(abs(svi_predictions.mean() - tract_svi) / tract_svi * 100)
             spatial_std = float(svi_predictions.std())
             
@@ -167,40 +171,38 @@ class AccessibilityGNNTrainer:
             self.training_history['constraint_errors'].append(constraint_error)
             self.training_history['spatial_stds'].append(spatial_std)
             
-            # FIXED: Better bias detection
-            if epoch > 10 and epoch % 10 == 0:
-                bias_detected = self._detect_systematic_bias_fixed(svi_predictions, graph_data.x, epoch)
-                if bias_detected and verbose:
-                    print(f"    WARNING Epoch {epoch}: Learning instability detected")
-            
-            # Early stopping
+            # Early stopping logic (existing)
             if total_loss.item() < self.best_loss:
                 self.best_loss = total_loss.item()
                 self.patience_counter = 0
             else:
                 self.patience_counter += 1
-                
-            if self.patience_counter >= 15:  # Increased patience
+                    
+            if self.patience_counter >= 15:
                 if verbose:
                     print(f"Early stopping at epoch {epoch}")
                 break
             
-            # Progress reporting
+            # Progress reporting (existing)
             if verbose and epoch % 20 == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
                 print(f"Epoch {epoch:3d}: Loss={total_loss.item():.6f}, "
-                      f"Constraint={constraint_error:.2f}%, "
-                      f"Std={spatial_std:.4f}, "
-                      f"LR={current_lr:.6f}")
+                    f"Constraint={constraint_error:.2f}%, "
+                    f"Std={spatial_std:.4f}, "
+                    f"LR={current_lr:.6f}")
         
-        # Final evaluation
+        # Final evaluation with learned accessibility
         self.model.eval()
         with torch.no_grad():
-            final_predictions = self.model(graph_data.x, graph_data.edge_index)
-            
-        # FIXED: More comprehensive results
+            final_predictions, final_learned_accessibility = self.model(
+                graph_data.x, graph_data.edge_index, return_accessibility=True
+            )
+        
+        # Enhanced results with learned accessibility
         results = {
             'final_predictions': final_predictions.detach().numpy(),
+            'learned_accessibility': final_learned_accessibility.detach().numpy(),  # NEW
+            'learned_accessibility_history': learned_accessibility_history,  # NEW
             'training_history': self.training_history,
             'final_spatial_std': float(final_predictions.std()),
             'constraint_error': float(abs(final_predictions.mean() - target_svi)),

@@ -149,45 +149,41 @@ class EnhancedAccessibilityComputer:
             
             if len(addr_times) == 0:
                 # No destinations - poor accessibility
-                features.append([15.0, 18.0, 17.0, 0, 0, 1, 0.8, 0.0, 12.0, 0.1])
+                features.append([15.0, 18.0, 17.0, 0, 0, 1, 0.8, 0.0, 12.0, 0.1])  # Changed to 10 values
                 continue
             
             addr_times = addr_times.drop_duplicates(subset=['destination_id'])
             combined_times = pd.to_numeric(addr_times['combined_time'], errors='coerce').dropna()
             
             if len(combined_times) == 0:
-                features.append([15.0, 18.0, 17.0, 0, 0, 1, 0.8, 0.0, 12.0, 0.1])
+                features.append([15.0, 18.0, 17.0, 0, 0, 1, 0.8, 0.0, 12.0, 0.1])  # Changed to 10 values
                 continue
             
-            # Basic time features (higher = worse accessibility = higher vulnerability)
+            # Basic time features
             min_time = float(combined_times.min())
             mean_time = float(combined_times.mean()) 
             median_time = float(combined_times.median())
             
-            # FIXED: Use proper time thresholds for meaningful variation
-            # 5, 10, 15 minutes are reasonable for local accessibility
+            # Count features
             count_5min = int((combined_times <= 5).sum())
             count_10min = int((combined_times <= 10).sum()) 
             count_15min = int((combined_times <= 15).sum())
             
-            # Ensure logical progression
             count_10min = max(count_10min, count_5min)
             count_15min = max(count_15min, count_10min)
             
-            # Car dependence (higher = worse for vulnerable populations)
+            # Car dependence - FIXED
             if 'drive_time' in addr_times.columns and 'walk_time' in addr_times.columns:
                 drive_times = pd.to_numeric(addr_times['drive_time'], errors='coerce').dropna()
                 walk_times = pd.to_numeric(addr_times['walk_time'], errors='coerce').dropna()
                 
                 if len(drive_times) > 0 and len(walk_times) > 0:
-                    # FIXED: Calculate car advantage properly
-                    # Higher values = more car-dependent = worse for vulnerable populations
                     avg_drive = drive_times.mean()
                     avg_walk = walk_times.mean()
                     
                     if avg_walk > 0 and avg_drive > 0:
-                        # How much faster is driving vs walking (0-1 scale)
-                        drive_advantage = min(0.9, max(0.1, 1 - (avg_drive / avg_walk)))
+                        # FIXED: Higher values = more car-dependent
+                        drive_advantage = min(0.9, max(0.1, (avg_walk - avg_drive) / avg_walk))
                     else:
                         drive_advantage = 0.5
                 else:
@@ -195,41 +191,47 @@ class EnhancedAccessibilityComputer:
             else:
                 drive_advantage = 0.5
             
-            # FIXED: Time concentration (inverted so higher = more scattered = worse)
+            # Time concentration (higher = more scattered)
             if len(combined_times) > 1:
                 time_range = float(combined_times.max() - combined_times.min())
-                # Higher time_range = more scattered destinations = worse accessibility
             else:
                 time_range = 0.0
             
-            # Accessibility percentile (computed later, lower = worse accessibility)
+            # Accessibility concentration (inverse of spread)
+            if len(combined_times) > 1:
+                concentration = 1.0 - (np.std(combined_times) / (mean_time + 1e-8))
+                concentration = max(0.0, min(1.0, concentration))
+            else:
+                concentration = 0.5
+            
+            # Accessibility percentile (computed later)
             accessibility_percentile = 0.5
             
+            # NOW 10 features
             feature_vector = [
-                min_time,           # Higher = worse accessibility
-                mean_time,          # Higher = worse accessibility  
-                median_time,        # Higher = worse accessibility
-                count_5min,         # Higher = better accessibility (will be inverted in loss)
-                count_10min,        # Higher = better accessibility (will be inverted in loss)
-                count_15min,        # Higher = better accessibility (will be inverted in loss)
-                drive_advantage,    # Higher = more car dependent = worse for vulnerable
-                time_range,         # Higher = more scattered = worse accessibility
-                accessibility_percentile  # Lower = worse accessibility
+                min_time,           # 0
+                mean_time,          # 1
+                median_time,        # 2
+                count_5min,         # 3
+                count_10min,        # 4
+                count_15min,        # 5
+                drive_advantage,    # 6 - FIXED
+                concentration,      # 7 - ADDED
+                time_range,         # 8
+                accessibility_percentile  # 9
             ]
             
             features.append(feature_vector)
         
         feature_array = np.array(features, dtype=np.float64)
         
-        # FIXED: Compute percentiles correctly (lower times = better access = higher percentile)
+        # Compute percentiles
         if len(feature_array) > 1:
-            mean_times = feature_array[:, 1]  # mean_time column
+            mean_times = feature_array[:, 1]
             for i in range(len(feature_array)):
-                # Lower mean time = better accessibility = higher percentile
                 percentile = 1.0 - (np.sum(mean_times <= mean_times[i]) / len(mean_times))
-                feature_array[i, 8] = percentile
+                feature_array[i, 9] = percentile
         
-        # NEW: Validate feature directions before returning
         self._validate_feature_directions(feature_array, dest_type)
         
         return feature_array
@@ -701,29 +703,32 @@ class EnhancedAccessibilityComputer:
         return validation_passed
     
     def _validate_feature_directions(self, features: np.ndarray, dest_type: str):
-        """NEW: Validate that features will correlate correctly with vulnerability"""
+        """Validate that features will correlate correctly with vulnerability"""
         
         feature_names = [
-            'min_time', 'mean_time', 'median_time',      # Should correlate POSITIVELY with vulnerability
-            'count_5min', 'count_10min', 'count_15min',  # Should correlate NEGATIVELY with vulnerability  
-            'drive_advantage', 'time_range', 'accessibility_percentile'
+            'min_time', 'mean_time', 'median_time',
+            'count_5min', 'count_10min', 'count_15min',
+            'drive_advantage', 'concentration', 'time_range', 'accessibility_percentile'
         ]
         
-        # Create a synthetic vulnerability score for testing
-        # Higher time = higher vulnerability, Higher counts = lower vulnerability
+        # Create synthetic vulnerability for testing
         synthetic_vuln = (
             0.3 * features[:, 1] +          # mean_time (positive)
             -0.2 * features[:, 4] +         # count_10min (negative)
-            0.1 * features[:, 6] +          # drive_advantage (positive)
-            -0.2 * features[:, 8]           # accessibility_percentile (negative)
+            0.15 * features[:, 6] +         # drive_advantage (positive)
+            -0.15 * features[:, 7] +        # concentration (negative - higher concentration = better access)
+            -0.2 * features[:, 9]           # accessibility_percentile (negative)
         )
         
         self.log(f"=== {dest_type.upper()} FEATURE DIRECTION VALIDATION ===")
         
         issues_found = 0
         for i, name in enumerate(feature_names):
+            if i >= features.shape[1]:
+                continue
+                
             values = features[:, i]
-            if np.std(values) < 1e-8:  # Skip zero-variance features
+            if np.std(values) < 1e-8:
                 continue
                 
             correlation = np.corrcoef(values, synthetic_vuln)[0, 1]
@@ -731,12 +736,12 @@ class EnhancedAccessibilityComputer:
             # Expected directions
             if name in ['min_time', 'mean_time', 'median_time', 'drive_advantage', 'time_range']:
                 expected_sign = 'positive'
-                is_correct = correlation > 0.05  # Small positive threshold
-            elif name in ['count_5min', 'count_10min', 'count_15min', 'accessibility_percentile']:
+                is_correct = correlation > 0.05
+            elif name in ['count_5min', 'count_10min', 'count_15min', 'concentration', 'accessibility_percentile']:
                 expected_sign = 'negative'  
-                is_correct = correlation < -0.05  # Small negative threshold
+                is_correct = correlation < -0.05
             else:
-                continue  # Skip validation for other features
+                continue
             
             status = "✓" if is_correct else "✗"
             self.log(f"  {status} {name}: r={correlation:.3f} (expected {expected_sign})")

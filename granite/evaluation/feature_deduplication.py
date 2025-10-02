@@ -101,17 +101,23 @@ def _get_feature_priority(name: str, priority_keywords: List[str]) -> int:
 
 def validate_feature_quality(features: np.ndarray, feature_names: List[str], 
                            addresses_count: int, verbose: bool = True) -> dict:
-    """
-    Comprehensive feature quality validation
-    
-    Returns:
-        validation_results: Dictionary with validation metrics
-    """
+    """Comprehensive feature quality validation"""
     
     validation = {}
     
     # Basic validation
     n_addresses, n_features = features.shape
+    
+    # CRITICAL FIX: Ensure feature_names matches n_features
+    if len(feature_names) != n_features:
+        if verbose:
+            print(f"[FeatureValidation] WARNING: Feature name count ({len(feature_names)}) != feature count ({n_features})")
+        # Adjust feature names to match
+        if len(feature_names) > n_features:
+            feature_names = feature_names[:n_features]
+        else:
+            feature_names = feature_names + [f'feature_{i}' for i in range(len(feature_names), n_features)]
+    
     validation['basic'] = {
         'n_addresses': n_addresses,
         'n_features': n_features,
@@ -141,41 +147,41 @@ def validate_feature_quality(features: np.ndarray, feature_names: List[str],
         'mean_std': float(np.mean(feature_stds))
     }
     
-    # Feature correlation analysis (sample if too many features)
+    # Feature correlation analysis - FIXED
     if n_features > 50:
-        # Sample features for correlation analysis
         sample_indices = np.random.choice(n_features, 50, replace=False)
         sample_features = features[:, sample_indices]
         sample_names = [feature_names[i] for i in sample_indices]
     else:
         sample_features = features
-        sample_names = feature_names
+        sample_names = feature_names  # Already adjusted above
     
     corr_matrix = np.corrcoef(sample_features.T)
     
-    # Find high correlations
+    # Find high correlations - FIXED bounds
     high_corr_count = 0
     perfect_corr_count = 0
     
-    for i in range(len(sample_names)):
-        for j in range(i + 1, len(sample_names)):
-            corr = abs(corr_matrix[i, j])
-            if corr > 0.9:
-                high_corr_count += 1
-            if corr > 0.99:
-                perfect_corr_count += 1
+    n_samples = len(sample_names)
+    for i in range(n_samples):
+        for j in range(i + 1, n_samples):
+            if i < corr_matrix.shape[0] and j < corr_matrix.shape[1]:  # Bounds check
+                corr = abs(corr_matrix[i, j])
+                if corr > 0.9:
+                    high_corr_count += 1
+                if corr > 0.99:
+                    perfect_corr_count += 1
     
     validation['correlations'] = {
         'high_correlation_pairs': high_corr_count,
         'perfect_correlation_pairs': perfect_corr_count,
-        'correlation_density': high_corr_count / (len(sample_names) * (len(sample_names) - 1) / 2)
+        'correlation_density': high_corr_count / (n_samples * (n_samples - 1) / 2) if n_samples > 1 else 0
     }
     
-    # Feature type analysis
+    # Rest of the function remains the same...
     feature_type_counts = _analyze_feature_types(feature_names)
     validation['feature_types'] = feature_type_counts
     
-    # Overall quality score
     quality_score = _compute_quality_score(validation)
     validation['overall_quality'] = quality_score
     

@@ -251,18 +251,18 @@ class GRANITEPipeline:
         }
     
     def _generate_feature_names(self, n_features):
-        """Updated feature names with corrected time thresholds"""
+        """Updated feature names matching actual feature extraction"""
         base_features = []
         for dest_type in ['employment', 'healthcare', 'grocery']:
             base_features.extend([
                 f'{dest_type}_min_time',
                 f'{dest_type}_mean_time', 
                 f'{dest_type}_median_time',
-                f'{dest_type}_count_15min',  # CHANGED
-                f'{dest_type}_count_5min',  # CHANGED
-                f'{dest_type}_count_45min',  # CHANGED
+                f'{dest_type}_count_5min',
+                f'{dest_type}_count_10min',
+                f'{dest_type}_count_15min',
                 f'{dest_type}_drive_advantage',
-                f'{dest_type}_concentration',
+                f'{dest_type}_concentration',      # ADDED
                 f'{dest_type}_time_range',
                 f'{dest_type}_percentile'
             ])
@@ -275,6 +275,12 @@ class GRANITEPipeline:
         ]
         
         all_features = base_features + derived_features
+        
+        # CRITICAL: Return exactly n_features
+        if len(all_features) < n_features:
+            # Pad with generic names if needed
+            all_features.extend([f'feature_{i}' for i in range(len(all_features), n_features)])
+        
         return all_features[:n_features]
 
     def _compute_accessibility_features(self, addresses, data):

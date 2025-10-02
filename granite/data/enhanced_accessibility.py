@@ -172,7 +172,7 @@ class EnhancedAccessibilityComputer:
             count_10min = max(count_10min, count_5min)
             count_15min = max(count_15min, count_10min)
             
-            # Car dependence - FIXED
+            # Car dependence - FIXED v2
             if 'drive_time' in addr_times.columns and 'walk_time' in addr_times.columns:
                 drive_times = pd.to_numeric(addr_times['drive_time'], errors='coerce').dropna()
                 walk_times = pd.to_numeric(addr_times['walk_time'], errors='coerce').dropna()
@@ -182,8 +182,12 @@ class EnhancedAccessibilityComputer:
                     avg_walk = walk_times.mean()
                     
                     if avg_walk > 0 and avg_drive > 0:
-                        # FIXED: Higher values = more car-dependent
-                        drive_advantage = min(0.9, max(0.1, (avg_walk - avg_drive) / avg_walk))
+                        # FIXED: Ratio of walk/drive - higher means more car-dependent
+                        # If walk=30min and drive=10min, ratio=3.0 (very car dependent)
+                        # If walk=15min and drive=12min, ratio=1.25 (not very car dependent)
+                        walk_drive_ratio = avg_walk / avg_drive
+                        # Normalize to 0-1 range (assume max ratio of 5.0 = very car dependent)
+                        drive_advantage = min(0.9, max(0.1, (walk_drive_ratio - 1.0) / 4.0))
                     else:
                         drive_advantage = 0.5
                 else:
@@ -199,7 +203,9 @@ class EnhancedAccessibilityComputer:
             
             # Accessibility concentration (inverse of spread)
             if len(combined_times) > 1:
-                concentration = 1.0 - (np.std(combined_times) / (mean_time + 1e-8))
+                # FIXED: Higher std relative to mean = more scattered = worse
+                # So we want std/mean as the concentration measure (not inverted)
+                concentration = np.std(combined_times) / (mean_time + 1e-8)
                 concentration = max(0.0, min(1.0, concentration))
             else:
                 concentration = 0.5

@@ -1,4 +1,5 @@
 # Add this test script to validate your fixes
+import numpy as np
 
 def test_accessibility_fixes():
     """Test script to validate that fixes are working"""

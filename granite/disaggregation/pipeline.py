@@ -298,8 +298,15 @@ class GRANITEPipeline:
             target_fips = self.config.get('data', {}).get('target_fips')
             if target_fips:
                 try:
-                    destinations = self.data_loader.create_tract_appropriate_destinations(target_fips)
-                    self._log("Using tract-appropriate destinations for better intra-tract variation")
+                    #destinations = self.data_loader.create_tract_appropriate_destinations(target_fips)
+                    #self._log("Using tract-appropriate destinations for better intra-tract variation")
+                    # TEMPORARILY DISABLED for debugging
+                    destinations = {
+                        'employment': data['employment_destinations'],
+                        'healthcare': data['healthcare_destinations'],
+                        'grocery': data['grocery_destinations']
+                    }
+                    self._log("Using original county-wide destinations (tract enhancement disabled)")
                 except Exception as e:
                     self._log(f"Warning: Could not create tract-appropriate destinations: {str(e)}")
                     # Fallback to original destinations
@@ -575,6 +582,18 @@ class GRANITEPipeline:
             if quality_grade in ['D', 'F']:
                 self._log(f"WARNING: Feature quality is poor - consider investigating")
                 
+            # Debug first 5 addresses
+            if self.verbose and dest_type == 'employment':
+                print("\n=== EMPLOYMENT TRAVEL TIME DEBUG ===")
+                for test_dist in [1.0, 3.0, 5.0, 10.0]:
+                    self.accessibility_computer.debug_mode_times(test_dist, 'morning')
+
+            if self.verbose and dest_type == 'employment':
+                self.accessibility_computer.debug_employment_travel_times(
+                    addresses.head(10), 
+                    destinations['employment'].head(3)
+                )
+
             # Store validation results for later use
             self._feature_validation_results = validation_results
             

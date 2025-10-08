@@ -106,31 +106,64 @@ class GRANITEPipeline:
         return data
 
     def _process_single_tract(self, target_fips, data):
-        """Process single tract with simplified accessibility → SVI approach"""
-        self._log(f"Processing tract {target_fips}...")
+        """Process single tract or multiple tracts with accessibility → SVI approach"""
         
-        # Get tract data
-        target_fips = str(target_fips).strip()
-        data['tracts']['FIPS'] = data['tracts']['FIPS'].astype(str).str.strip()
+        # Check if multi-tract mode
+        n_neighbor_tracts = self.config.get('data', {}).get('neighbor_tracts', 0)
         
-        target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips]
-        if len(target_tract) == 0:
-            return {'success': False, 'error': f'FIPS {target_fips} not found'}
+        if n_neighbor_tracts > 0:
+            # Multi-tract mode
+            self._log(f"Multi-tract mode: {n_neighbor_tracts} neighbors")
+            tract_list = self.data_loader.get_neighboring_tracts(target_fips, n_neighbor_tracts)
+            
+            # Combine addresses from all tracts
+            all_addresses = []
+            tract_svis = {}
+            
+            for fips in tract_list:
+                fips = str(fips).strip()
+                tract_data = data['tracts'][data['tracts']['FIPS'] == fips]
+                if len(tract_data) == 0:
+                    continue
+                
+                tract_svis[fips] = float(tract_data.iloc[0]['RPL_THEMES'])
+                addresses = self.data_loader.get_addresses_for_tract(fips)
+                addresses['tract_fips'] = fips
+                all_addresses.append(addresses)
+            
+            if len(all_addresses) == 0:
+                return {'success': False, 'error': 'No addresses in selected tracts'}
+            
+            tract_addresses = pd.concat(all_addresses, ignore_index=True)
+            target_tract_svi = tract_svis[target_fips]
+            
+            self._log(f"Combined {len(tract_addresses)} addresses from {len(tract_list)} tracts")
+        else:
+            # Single tract mode (original behavior)
+            self._log(f"Processing tract {target_fips}...")
+            target_fips = str(target_fips).strip()
+            data['tracts']['FIPS'] = data['tracts']['FIPS'].astype(str).str.strip()
+            
+            target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips]
+            if len(target_tract) == 0:
+                return {'success': False, 'error': f'FIPS {target_fips} not found'}
+            
+            tract_info = target_tract.iloc[0]
+            target_tract_svi = tract_info['RPL_THEMES']
+            
+            tract_addresses = self.data_loader.get_addresses_for_tract(target_fips)
+            if len(tract_addresses) == 0:
+                return {'success': False, 'error': f'No addresses found for tract {target_fips}'}
+            
+            tract_addresses['tract_fips'] = target_fips
+            tract_svis = {target_fips: target_tract_svi}
         
+        self._log(f"Found {len(tract_addresses)} total addresses")
+        self._log(f"Target tract {target_fips} SVI: {target_tract_svi:.4f}")
+        
+        # Rest is identical for both modes
         state_fips = target_fips[:2]
         county_fips = target_fips[2:5]
-        
-        tract_info = target_tract.iloc[0]
-        tract_svi = tract_info['RPL_THEMES']
-        
-        # Get addresses for this tract
-        tract_addresses = self.data_loader.get_addresses_for_tract(target_fips)
-        
-        if len(tract_addresses) == 0:
-            return {'success': False, 'error': f'No addresses found for tract {target_fips}'}
-        
-        self._log(f"Found {len(tract_addresses)} addresses in tract {target_fips}")
-        self._log(f"Target SVI: {tract_svi:.4f}")
         
         # Step 1: Compute accessibility features
         accessibility_features = self._compute_accessibility_features(
@@ -140,15 +173,13 @@ class GRANITEPipeline:
         if accessibility_features is None:
             return {'success': False, 'error': 'Failed to compute accessibility features'}
         
-        # Generate feature names (you need this defined)
+        # Generate feature names
         feature_names = self._generate_feature_names(accessibility_features.shape[1])
         
-        # Step 2: Build accessibility-based graph
+        # Step 2: Build graph
         from ..models.gnn import normalize_accessibility_features
-
         normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
-
-        # Create spatial graph based on road network and geographic proximity
+        
         graph_data = self.data_loader.create_spatial_accessibility_graph(
             addresses=tract_addresses,
             accessibility_features=normalized_features,
@@ -158,58 +189,102 @@ class GRANITEPipeline:
         
         self._log(f"Built graph: {graph_data.x.shape[0]} nodes, {graph_data.edge_index.shape[1]} edges")
         
-        # Step 3: Train GNN for accessibility and SVI prediction
-        training_result = self._train_accessibility_svi_gnn(
-            graph_data, tract_svi, tract_addresses
-        )
+        # Step 3: Train GNN (modified for multi-tract if needed)
+        if n_neighbor_tracts > 0:
+            training_result = self._train_multi_tract_gnn(
+                graph_data, tract_svis, tract_addresses
+            )
+        else:
+            training_result = self._train_accessibility_svi_gnn(
+                graph_data, target_tract_svi, tract_addresses
+            )
         
         if not training_result['success']:
             return training_result
         
-        # Step 4: Create final predictions with constraint satisfaction
-        final_predictions = self._finalize_predictions(
-            training_result['raw_predictions'], 
-            tract_addresses, 
-            tract_svi
-        )
+        # Step 4: Extract predictions for target tract only
+        if n_neighbor_tracts > 0:
+            target_mask = tract_addresses['tract_fips'] == target_fips
+            target_tract_addresses = tract_addresses[target_mask].copy()
+            target_tract_addresses.reset_index(drop=True, inplace=True)  # CRITICAL
+            
+            target_predictions = training_result['raw_predictions'][target_mask]
 
+            self._stored_raw_predictions = pd.DataFrame({
+                'mean': target_predictions if n_neighbor_tracts > 0 else training_result['raw_predictions'],
+                'x': target_tract_addresses.geometry.x.values if n_neighbor_tracts > 0 else tract_addresses.geometry.x.values,
+                'y': target_tract_addresses.geometry.y.values if n_neighbor_tracts > 0 else tract_addresses.geometry.y.values
+            })
+            self._stored_raw_predictions.reset_index(drop=True, inplace=True)
+            
+            final_predictions = self._finalize_predictions(
+                target_predictions, 
+                target_tract_addresses, 
+                target_tract_svi
+            )
+            
+            # Ensure final_predictions also has reset index
+            if hasattr(final_predictions, 'reset_index'):
+                final_predictions = final_predictions.reset_index(drop=True)
+        else:
+            final_predictions = self._finalize_predictions(
+                training_result['raw_predictions'], 
+                tract_addresses, 
+                target_tract_svi
+            )
+
+            if hasattr(final_predictions, 'reset_index'):
+                final_predictions = final_predictions.reset_index(drop=True)
+        
+        # Step 5: Validation (only on target tract)
+        if n_neighbor_tracts > 0:
+            # Already filtered above with reset indices
+            target_addresses = target_tract_addresses  # Already defined above
+            target_access_features = accessibility_features[target_mask]
+            target_normalized_features = normalized_features[target_mask]
+        else:
+            target_addresses = tract_addresses
+            target_access_features = accessibility_features
+            target_normalized_features = normalized_features
+        
         if self.verbose:
             self._log("Running accessibility-vulnerability debugging...")
             debug_samples = self._debug_accessibility_vulnerability_relationship(
-                final_predictions, accessibility_features, tract_addresses
+                final_predictions, target_access_features, target_addresses
             )
             
-            direction_validation = self._validate_feature_directions(accessibility_features)
+            direction_validation = self._validate_feature_directions(target_access_features)
             
             correlation_diagnostic = self._create_accessibility_correlation_diagnostic(
-                final_predictions, accessibility_features
+                final_predictions, target_access_features
             )
         
-        # Step 5a: Run accessibility feature validation FIRST
+        # Accessibility validation
         self._log("Running accessibility feature validation...")
         try:
             access_validation_results, access_validator = validate_granite_accessibility_features(
-                addresses=tract_addresses,
-                accessibility_features=accessibility_features,
+                addresses=target_addresses,
+                accessibility_features=target_access_features,
                 destinations={
                     'employment': data['employment_destinations'],
                     'healthcare': data['healthcare_destinations'], 
                     'grocery': data['grocery_destinations']
                 },
                 feature_names=feature_names,
-                tract_svi=tract_svi,
+                tract_svi=target_tract_svi,
                 output_dir=os.path.join(self.output_dir, 'accessibility_validation')
             )
         except Exception as e:
             self._log(f"Warning: Accessibility validation failed: {str(e)}")
             access_validation_results = {'error': str(e)}
         
-        # Step 5b: Run spatial diagnostics (modified to return results)
+        # Spatial diagnostics
         validation_results = self._validate_predictions(
-            final_predictions, tract_svi, accessibility_features, normalized_features
+            final_predictions, target_tract_svi, target_access_features, 
+            target_normalized_features
         )
         
-        # Step 5c: Integrate results if both successful
+        # Integration
         if 'error' not in access_validation_results and 'spatial_diagnostics' in validation_results:
             try:
                 integrated_results = integrate_with_spatial_diagnostics(
@@ -220,35 +295,59 @@ class GRANITEPipeline:
             except Exception as e:
                 self._log(f"Warning: Integration failed: {str(e)}")
         
-        # Store accessibility validation results
         validation_results['accessibility_validation'] = access_validation_results
         
-        # Save results and create visualizations
+        # Visualizations
         if self.verbose:
             self._create_research_visualizations({
                 'predictions': final_predictions,
-                'accessibility_features': accessibility_features,
+                'accessibility_features': target_access_features,
                 'validation_results': validation_results,
-                'tract_svi': tract_svi,
+                'tract_svi': target_tract_svi,
                 'training_result': training_result
             })
         
         return {
             'success': True,
             'predictions': final_predictions,
-            'tract_info': tract_info,
-            'accessibility_features': accessibility_features,
+            'tract_info': {'FIPS': target_fips, 'RPL_THEMES': target_tract_svi},
+            'accessibility_features': target_access_features,
             'training_result': training_result,
             'validation_results': validation_results,
-            'methodology': 'Direct Accessibility → SVI Prediction',
+            'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility → SVI',
             'summary': {
-                'addresses_processed': len(tract_addresses),
-                'accessibility_features': accessibility_features.shape[1],
+                'addresses_processed': len(target_addresses),
+                'total_training_addresses': len(tract_addresses),
+                'n_tracts': len(tract_svis),
+                'accessibility_features': target_access_features.shape[1],
                 'spatial_variation': np.std(final_predictions['mean']),
-                'constraint_error': abs(np.mean(final_predictions['mean']) - tract_svi) / tract_svi * 100,
+                'constraint_error': abs(np.mean(final_predictions['mean']) - target_tract_svi) / target_tract_svi * 100,
                 'training_epochs': training_result.get('epochs_trained', 0)
             }
         }
+    
+    def _train_multi_tract_gnn(self, graph_data, tract_svis, addresses):
+        """Train GNN with multi-tract constraints"""
+        
+        # For now, use weighted average constraint
+        all_predictions = []
+        tract_weights = {}
+        
+        for fips, svi in tract_svis.items():
+            tract_mask = addresses['tract_fips'] == fips
+            tract_weights[fips] = tract_mask.sum()
+        
+        # Train with average SVI as target (simple approximation)
+        total_addresses = sum(tract_weights.values())
+        weighted_svi = sum(svi * tract_weights[fips] / total_addresses 
+                        for fips, svi in tract_svis.items())
+        
+        self._log(f"Multi-tract training: weighted target SVI = {weighted_svi:.4f}")
+        
+        # Use existing training function
+        return self._train_accessibility_svi_gnn(
+            graph_data, weighted_svi, addresses
+        )
     
     def _generate_feature_names(self, n_features):
         """Updated feature names matching actual feature extraction"""
@@ -262,7 +361,7 @@ class GRANITEPipeline:
                 f'{dest_type}_count_10min',
                 f'{dest_type}_count_15min',
                 f'{dest_type}_drive_advantage',
-                f'{dest_type}_concentration',      # ADDED
+                f'{dest_type}_dispersion',  # RENAMED
                 f'{dest_type}_time_range',
                 f'{dest_type}_percentile'
             ])
@@ -274,11 +373,23 @@ class GRANITEPipeline:
             'geographic_advantage'
         ]
         
-        all_features = base_features + derived_features
+        # Socioeconomic control features (9 features)
+        socioeconomic_features = [
+            'pct_no_vehicle',
+            'pct_poverty',
+            'pct_unemployed',
+            'pct_no_hs_diploma',
+            'pct_uninsured',
+            'pct_mobile_homes',
+            'pct_crowded',
+            'population',
+            'housing_units'
+        ]
+        
+        all_features = base_features + derived_features + socioeconomic_features
         
         # CRITICAL: Return exactly n_features
         if len(all_features) < n_features:
-            # Pad with generic names if needed
             all_features.extend([f'feature_{i}' for i in range(len(all_features), n_features)])
         
         return all_features[:n_features]
@@ -597,7 +708,52 @@ class GRANITEPipeline:
             # Store validation results for later use
             self._feature_validation_results = validation_results
             
-            return enhanced_features
+            self._log(f"SUCCESS: Generated {enhanced_features.shape[1]} features for {len(addresses)} addresses")
+            
+            # NEW: Add socioeconomic controls
+            if 'FIPS' in addresses.columns:
+                tract_fips = str(addresses['FIPS'].iloc[0]).strip()
+            elif hasattr(addresses.iloc[0], 'FIPS'):
+                tract_fips = str(addresses.iloc[0].FIPS).strip()
+            else:
+                # Fallback: extract from tract context
+                tract_fips = str(data.get('target_fips', '47065000600'))
+
+            self._log(f"Extracted tract FIPS: {tract_fips}")
+            if 'tract_fips' in addresses.columns:
+                # Multi-tract mode: extract features for each tract
+                unique_tracts = addresses['tract_fips'].unique()
+                self._log(f"Extracting socioeconomic features for {len(unique_tracts)} tracts")
+                
+                socioeco_array = np.zeros((len(addresses), 9))
+                
+                for tract_fips in unique_tracts:
+                    tract_mask = addresses['tract_fips'] == tract_fips
+                    tract_features = self.data_loader.get_tract_socioeconomic_features(
+                        str(tract_fips), data['svi']
+                    )
+                    
+                    self._log(f"  Tract {tract_fips}: no_vehicle={tract_features['pct_no_vehicle']:.1f}%, poverty={tract_features['pct_poverty']:.1f}%")
+                    
+                    # Assign to addresses in this tract
+                    socioeco_array[tract_mask] = list(tract_features.values())
+            else:
+                # Single tract fallback
+                tract_fips = str(addresses.iloc[0].get('FIPS', ''))
+                socioeconomic_context = self.data_loader.get_tract_socioeconomic_features(
+                    tract_fips, data['svi']
+                )
+                socioeco_array = np.tile(list(socioeconomic_context.values()), (len(addresses), 1))
+                self._log(f"Single tract: no_vehicle={socioeconomic_context['pct_no_vehicle']:.1f}%")
+
+            # Combine
+            combined_features = np.column_stack([enhanced_features, socioeco_array])
+            
+            self._log(f"Final feature matrix: {combined_features.shape}")
+            self._log(f"  Accessibility features: {enhanced_features.shape[1]}")
+            self._log(f"  Socioeconomic controls: {socioeco_array.shape[1]}")
+            
+            return combined_features
             
         except Exception as e:
             self._log(f"CRITICAL ERROR in accessibility computation: {str(e)}")
@@ -802,6 +958,12 @@ class GRANITEPipeline:
         if raw_predictions is None:
             return pd.DataFrame()
         
+        # CRITICAL: Ensure predictions are numpy array with no index
+        if isinstance(raw_predictions, pd.Series):
+            raw_predictions = raw_predictions.values
+        elif isinstance(raw_predictions, pd.DataFrame):
+            raw_predictions = raw_predictions.values.flatten()
+        
         # Ensure predictions match address count
         n_addresses = len(addresses)
         if len(raw_predictions) > n_addresses:
@@ -874,6 +1036,8 @@ class GRANITEPipeline:
         self._log(f"Finalized predictions: {len(final_predictions)} addresses")
         self._log(f"  Final spatial std: {np.std(adjusted_predictions):.4f}")
         
+        final_predictions.reset_index(drop=True, inplace=True)
+        
         return final_predictions
 
     def _validate_predictions(self, predictions, tract_svi, accessibility_features, normalized_features):
@@ -900,9 +1064,9 @@ class GRANITEPipeline:
             
             # Run comprehensive diagnostics
             diagnostic_results = diagnostics.comprehensive_evaluation(
-                raw_predictions=raw_predictions,
+                raw_predictions=raw_predictions['mean'].values,
                 accessibility_features=accessibility_features,
-                coordinates=coordinates, 
+                coordinates=raw_predictions[['x', 'y']].reset_index(drop=True),  
                 target_svi=tract_svi
             )
             

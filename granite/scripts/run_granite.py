@@ -16,6 +16,7 @@ def main():
     parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
     parser.add_argument('--output', type=str, default='./output', help='Output directory')
     parser.add_argument('--verbose', action='store_true', help='Verbose logging')
+    parser.add_argument('--neighbor-tracts', type=int, default=0, help='Number of neighboring tracts (0=single, 3-5=multi-tract)')
     parser.add_argument('--config', type=str, default=None, help='Config file path')
     
     args = parser.parse_args()
@@ -25,7 +26,8 @@ def main():
         'data': {
             'target_fips': args.fips,
             'state_fips': args.fips[:2],
-            'county_fips': args.fips[2:5]
+            'county_fips': args.fips[2:5],
+            'neighbor_tracts': args.neighbor_tracts
         },
         'model': {
             'epochs': args.epochs,

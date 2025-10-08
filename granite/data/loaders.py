@@ -72,7 +72,7 @@ class DataLoader:
             raise
 
     def load_svi_data(self, state_fips: str = '47', county_name: str = 'Hamilton') -> pd.DataFrame:
-        """Load Social Vulnerability Index data"""
+        """Load Social Vulnerability Index data with socioeconomic controls"""
         self._log(f"Loading SVI data for {county_name} County, {state_fips}...")
         
         svi_file = os.path.join(self.data_dir, 'raw', f'SVI_2020_US.csv')
@@ -93,17 +93,84 @@ class DataLoader:
             county_svi['FIPS'] = county_svi['FIPS'].astype(str)
             county_svi['RPL_THEMES'] = county_svi['RPL_THEMES'].replace(-999, np.nan)
             
-            columns = ['FIPS', 'LOCATION', 'RPL_THEMES', 'E_TOTPOP']
-            county_svi = county_svi[columns]
+            # EXPANDED: Extract socioeconomic control variables
+            desired_columns = [
+                'FIPS', 'LOCATION', 'RPL_THEMES', 'E_TOTPOP', 'E_HU',
+                # Transportation access (CRITICAL)
+                'E_NOVEH', 'EP_NOVEH',
+                # Economic status
+                'E_POV', 'EP_POV150', 'E_UNEMP', 'EP_UNEMP',
+                # Education
+                'E_NOHSDP', 'EP_NOHSDP',
+                # Healthcare access
+                'E_UNINSUR', 'EP_UNINSUR',
+                # Housing
+                'E_MOBILE', 'EP_MOBILE', 'E_CROWD', 'EP_CROWD'
+            ]
+            
+            # Only keep columns that exist
+            available_cols = [col for col in desired_columns if col in county_svi.columns]
+            county_svi = county_svi[available_cols].copy()
+            
+            # Replace -999 with NaN for all numeric columns
+            for col in county_svi.columns:
+                if col not in ['FIPS', 'LOCATION']:
+                    county_svi[col] = county_svi[col].replace(-999, np.nan)
             
             valid_count = county_svi['RPL_THEMES'].notna().sum()
             self._log(f"Loaded {len(county_svi)} tracts ({valid_count} with valid SVI)")
+            self._log(f"Extracted {len(available_cols)} variables including socioeconomic controls")
             
             return county_svi
             
         except Exception as e:
             self._log(f"Error loading SVI data: {str(e)}")
             raise
+
+    def get_tract_socioeconomic_features(self, tract_fips: str, svi_data: pd.DataFrame) -> Dict:
+        """Extract socioeconomic control features for a tract"""
+        
+        tract_fips = str(tract_fips).strip()
+        tract_data = svi_data[svi_data['FIPS'] == tract_fips]
+        
+        if len(tract_data) == 0:
+            self._log(f"WARNING: No SVI data for tract {tract_fips}, using defaults")
+            return self._default_socioeconomic_features()
+        
+        tract = tract_data.iloc[0]
+        
+        # Extract features with safe defaults
+        def safe_get(column, default):
+            val = tract.get(column, default)
+            return float(val) if pd.notna(val) else float(default)
+        
+        features = {
+            'pct_no_vehicle': safe_get('EP_NOVEH', 10.0),
+            'pct_poverty': safe_get('EP_POV150', 15.0),
+            'pct_unemployed': safe_get('EP_UNEMP', 5.0),
+            'pct_no_hs_diploma': safe_get('EP_NOHSDP', 10.0),
+            'pct_uninsured': safe_get('EP_UNINSUR', 12.0),
+            'pct_mobile_homes': safe_get('EP_MOBILE', 5.0),
+            'pct_crowded': safe_get('EP_CROWD', 2.0),
+            'population': safe_get('E_TOTPOP', 2000),
+            'housing_units': safe_get('E_HU', 800)
+        }
+        
+        return features
+
+    def _default_socioeconomic_features(self) -> Dict:
+        """Default socioeconomic features when data is missing"""
+        return {
+            'pct_no_vehicle': 10.0,
+            'pct_poverty': 15.0,
+            'pct_unemployed': 5.0,
+            'pct_no_hs_diploma': 10.0,
+            'pct_uninsured': 12.0,
+            'pct_mobile_homes': 5.0,
+            'pct_crowded': 2.0,
+            'population': 2000.0,
+            'housing_units': 800.0
+        }
 
     def calculate_multimodal_travel_times_batch(self, origins: gpd.GeoDataFrame, 
                                             destinations: gpd.GeoDataFrame,
@@ -313,6 +380,37 @@ class DataLoader:
         self._log(f"Mapped {len(address_to_road_mapping)}/{len(addresses)} addresses to road network")
         
         return road_graph, address_to_road_mapping
+    
+    def get_neighboring_tracts(self, target_fips: str, n_neighbors: int = 4) -> List[str]:
+        """Get neighboring tracts by geographic proximity"""
+        
+        if n_neighbors == 0:
+            return [target_fips]
+        
+        state_fips = target_fips[:2]
+        county_fips = target_fips[2:5]
+        all_tracts = self.load_census_tracts(state_fips, county_fips)
+        
+        target_tract = all_tracts[all_tracts['FIPS'] == target_fips]
+        if len(target_tract) == 0:
+            self._log(f"Target tract {target_fips} not found")
+            return [target_fips]
+        
+        target_geom = target_tract.geometry.iloc[0]
+        
+        # Calculate distances
+        all_tracts['distance'] = all_tracts.geometry.distance(target_geom)
+        
+        # Get n_neighbors closest
+        neighbors = all_tracts[all_tracts['FIPS'] != target_fips].nsmallest(n_neighbors, 'distance')
+        
+        tract_list = [target_fips] + neighbors['FIPS'].tolist()
+        
+        self._log(f"Multi-tract training with {len(tract_list)} tracts:")
+        for fips in tract_list:
+            self._log(f"  {fips}")
+        
+        return tract_list
 
     def _extract_network_edges(self, road_graph, address_to_road_mapping):
         """

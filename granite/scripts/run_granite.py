@@ -18,6 +18,8 @@ def main():
     parser.add_argument('--verbose', action='store_true', help='Verbose logging')
     parser.add_argument('--neighbor-tracts', type=int, default=0, help='Number of neighboring tracts (0=single, 3-5=multi-tract)')
     parser.add_argument('--config', type=str, default=None, help='Config file path')
+    parser.add_argument('--no-cache', action='store_true', help='Disable caching')
+    parser.add_argument('--cache-dir', type=str, default='./granite_cache', help='Cache directory')
     
     args = parser.parse_args()
     
@@ -39,7 +41,9 @@ def main():
             'weight_decay': 1e-4
         },
         'processing': {
-            'verbose': args.verbose
+            'verbose': args.verbose,
+            'enable_caching': not args.no_cache,
+            'cache_dir': args.cache_dir
         }
     }
     

@@ -15,8 +15,16 @@ class EnhancedAccessibilityComputer:
     FIXED: Enhanced accessibility computation with corrected counting logic
     """
     
-    def __init__(self, verbose=True):
+    def __init__(self, verbose=True, enable_caching=True, cache_dir='./granite_cache'):
         self.verbose = verbose
+
+        # ADD THIS: Initialize caching
+        self.enable_caching = enable_caching
+        if enable_caching:
+            from granite.cache import AccessibilityCache
+            self.cache = AccessibilityCache(cache_dir=cache_dir)
+        else:
+            self.cache = None
         
         # FIXED: More realistic speed parameters
         self.speed_params = {
@@ -42,6 +50,27 @@ class EnhancedAccessibilityComputer:
         """
         OPTIMIZED: Calculate travel times with batch processing and smart routing
         """
+
+        if self.cache is not None:
+            import hashlib
+            origins_hash = hashlib.md5(
+                str(origins.geometry.apply(lambda g: (g.x, g.y)).tolist()).encode()
+            ).hexdigest()
+            dests_hash = hashlib.md5(
+                str(destinations.geometry.apply(lambda g: (g.x, g.y)).tolist()).encode()
+            ).hexdigest()
+            
+            cached_result = self.cache.get_absolute(
+                mode='multi',  # or specific mode if you track that
+                dest_type='mixed',  # or the actual destination type
+                threshold=int(time_period == 'morning'),  # simple encoding
+                origins_hash=f"{origins_hash}_{dests_hash}"
+            )
+            
+            if cached_result is not None:
+                self.log(f"✓ Retrieved from cache: {len(origins)} × {len(destinations)} pairs")
+                return cached_result
+        
         total_pairs = len(origins) * len(destinations)
         self.log(f"Computing travel times: {len(origins)} origins → {len(destinations)} destinations ({total_pairs:,} pairs)")
         
@@ -73,6 +102,15 @@ class EnhancedAccessibilityComputer:
         
         # Validate results
         self._validate_travel_times_fixed(travel_df)
+
+        if self.cache is not None:
+            self.cache.set_absolute(
+                travel_df,  
+                mode='multi',
+                dest_type='mixed',
+                threshold=int(time_period == 'morning'),
+                origins_hash=f"{origins_hash}_{dests_hash}"
+            )
         
         return travel_df
     

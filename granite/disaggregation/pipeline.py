@@ -35,8 +35,19 @@ class GRANITEPipeline:
         self.verbose = config.get('processing', {}).get('verbose', False)
         
         os.makedirs(output_dir, exist_ok=True)
+
+        enable_caching = config.get('processing', {}).get('enable_caching', True)
+        cache_dir = config.get('processing', {}).get('cache_dir', './granite_cache')
         
         self.data_loader = DataLoader(data_dir, config=config)
+
+        from granite.data.enhanced_accessibility import EnhancedAccessibilityComputer
+        self.accessibility_computer = EnhancedAccessibilityComputer(
+            verbose=config.get('processing', {}).get('verbose', False),
+            enable_caching=enable_caching,
+            cache_dir=cache_dir
+        )
+
         self.visualizer = GRANITEResearchVisualizer()
         
     def _log(self, message, level='INFO'):
@@ -399,11 +410,37 @@ class GRANITEPipeline:
         FIXED: Compute accessibility features with enhanced error handling and validation
         """
         self._log("Computing enhanced accessibility features...")
+
+        def _generate_cache_key(addresses_gdf, destinations_dict):
+            """Generate stable cache key from addresses and destinations"""
+            import hashlib
+            
+            # Hash addresses
+            addr_coords = sorted(addresses_gdf.geometry.apply(lambda g: (round(g.x, 6), round(g.y, 6))).tolist())
+            addr_hash = hashlib.md5(str(addr_coords).encode()).hexdigest()[:8]
+            
+            # Hash destinations by type
+            dest_hashes = {}
+            for dtype, dgdf in destinations_dict.items():
+                if dgdf is not None and len(dgdf) > 0:
+                    dest_coords = sorted(dgdf.geometry.apply(lambda g: (round(g.x, 6), round(g.y, 6))).tolist())
+                    dest_hashes[dtype] = hashlib.md5(str(dest_coords).encode()).hexdigest()[:8]
+            
+            return addr_hash, dest_hashes
         
         try:
             # FIXED: Initialize the enhanced computer properly
             from ..data.enhanced_accessibility import EnhancedAccessibilityComputer
-            accessibility_computer = EnhancedAccessibilityComputer(verbose=self.verbose)
+
+            # ADD CACHING: Pass cache config from pipeline
+            enable_caching = self.config.get('processing', {}).get('enable_caching', True)
+            cache_dir = self.config.get('processing', {}).get('cache_dir', './granite_cache')
+
+            accessibility_computer = EnhancedAccessibilityComputer(
+                verbose=self.verbose,
+                enable_caching=enable_caching,
+                cache_dir=cache_dir
+            )
             
             # CHANGE 1: Get tract-appropriate destinations with validation
             target_fips = self.config.get('data', {}).get('target_fips')
@@ -450,6 +487,21 @@ class GRANITEPipeline:
                 self._log(f"  {dest_type}: {len(dest_gdf_copy)} destinations")
             
             destinations = validated_destinations
+
+            if accessibility_computer.cache is not None:
+                addr_hash, dest_hashes = _generate_cache_key(addresses, destinations)
+                cache_key = f"{addr_hash}_complete"
+                
+                cached_complete = accessibility_computer.cache.get_absolute(
+                    mode='all_destinations',
+                    dest_type='complete',
+                    threshold=0,
+                    origins_hash=cache_key
+                )
+                
+                if cached_complete is not None:
+                    self._log(f"✓ Retrieved COMPLETE accessibility features from cache ({cached_complete.shape[0]} addresses)")
+                    return cached_complete
             
             # CHANGE 2: Calculate features for all destination types with error handling
             all_features = []
@@ -460,6 +512,31 @@ class GRANITEPipeline:
                 self._log(f"  Processing {dest_type} accessibility...")
                 
                 try:
+                    # ADD THIS: Check cache for this specific destination type
+                    if accessibility_computer.cache is not None:
+                        addr_hash, dest_hashes = _generate_cache_key(addresses, {dest_type: dest_gdf})
+                        dest_cache_key = f"{addr_hash}_{dest_hashes[dest_type]}"
+                        
+                        cached_features = accessibility_computer.cache.get_absolute(
+                            mode='multi',
+                            dest_type=dest_type,
+                            threshold=0,
+                            origins_hash=dest_cache_key
+                        )
+                        
+                        if cached_features is not None:
+                            self._log(f"  ✓ Retrieved {dest_type} features from cache")
+                            all_features.append(cached_features)
+                            feature_names.extend([
+                                f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_median_time',
+                                f'{dest_type}_count_5min', f'{dest_type}_count_10min', f'{dest_type}_count_15min',
+                                f'{dest_type}_drive_advantage', f'{dest_type}_concentration',
+                                f'{dest_type}_time_range', f'{dest_type}_percentile'
+                            ])
+                            successful_computations += 1
+                            continue  # Skip to next destination type
+                    
+                    # EXISTING CODE: If not cached, compute as normal
                     # CHANGE 3: Use the FIXED travel time calculation
                     travel_times = accessibility_computer.calculate_realistic_travel_times(
                         origins=addresses,
@@ -528,6 +605,19 @@ class GRANITEPipeline:
                     successful_computations += 1
                     self._log(f"  ✓ {dest_type}: {dest_features.shape} features computed successfully")
                     
+                    if accessibility_computer.cache is not None:
+                        addr_hash, dest_hashes = _generate_cache_key(addresses, {dest_type: dest_gdf})
+                        dest_cache_key = f"{addr_hash}_{dest_hashes[dest_type]}"
+                        
+                        accessibility_computer.cache.set_absolute(
+                            dest_features,
+                            mode='multi',
+                            dest_type=dest_type,
+                            threshold=0,
+                            origins_hash=dest_cache_key
+                        )
+                        self._log(f"  ✓ Cached {dest_type} features for reuse")
+
                 except Exception as e:
                     self._log(f"ERROR processing {dest_type}: {str(e)}")
                     import traceback
@@ -538,6 +628,34 @@ class GRANITEPipeline:
             if successful_computations == 0:
                 self._log("CRITICAL ERROR: No accessibility features could be computed for any destination type")
                 return None
+            
+            if accessibility_computer.cache is not None and successful_computations >= 2:
+                try:
+                    # Extract employment features for mode comparison example
+                    emp_idx = [i for i, name in enumerate(feature_names) if 'employment' in name]
+                    if len(emp_idx) >= 3:  # Need at least min_time, mean_time, median_time
+                        emp_features_flat = all_features[0]  # First destination type (employment)
+                        
+                        # Compute car/transit ratio if we have the data
+                        # This is a simplified example - adjust based on your actual feature structure
+                        addr_hash, _ = _generate_cache_key(addresses, destinations)
+                        
+                        # Store a simple mode comparison metric
+                        if emp_features_flat.shape[1] >= 7:  # Has drive_advantage column
+                            drive_advantage = emp_features_flat[:, 6]  # Index 6 is drive_advantage
+                            
+                            accessibility_computer.cache.set_differential(
+                                drive_advantage,
+                                mode_a='car',
+                                mode_b='transit',
+                                dest_type='employment',
+                                threshold=0,
+                                origins_hash=addr_hash,
+                                operation='difference'
+                            )
+                            self._log("✓ Cached car/transit mode comparison differential")
+                except Exception as e:
+                    self._log(f"Note: Could not cache mode differentials: {str(e)}")
             
             if len(all_features) == 0:
                 self._log("CRITICAL ERROR: Feature list is empty")
@@ -752,6 +870,19 @@ class GRANITEPipeline:
             self._log(f"Final feature matrix: {combined_features.shape}")
             self._log(f"  Accessibility features: {enhanced_features.shape[1]}")
             self._log(f"  Socioeconomic controls: {socioeco_array.shape[1]}")
+
+            if accessibility_computer.cache is not None:
+                addr_hash, dest_hashes = _generate_cache_key(addresses, destinations)
+                cache_key = f"{addr_hash}_complete"
+                
+                accessibility_computer.cache.set_absolute(
+                    combined_features,
+                    mode='all_destinations',
+                    dest_type='complete',
+                    threshold=0,
+                    origins_hash=cache_key
+                )
+                self._log(f"✓ Cached complete feature matrix for reuse")
             
             return combined_features
             
@@ -784,9 +915,9 @@ class GRANITEPipeline:
                     percentile_90 = float(np.percentile(combined_times, 90))
                     
                     # Count-based features (destinations within time thresholds)
-                    count_5min = int((combined_times <= 30).sum())
-                    count_10min = int((combined_times <= 60).sum())
-                    count_15min = int((combined_times <= 90).sum())
+                    count_5min = int((combined_times <= 5).sum())
+                    count_10min = int((combined_times <= 10).sum())
+                    count_15min = int((combined_times <= 15).sum())
                     
                     # Transit accessibility
                     transit_share = float((addr_times['best_mode'] == 'transit').mean())
@@ -910,7 +1041,11 @@ class GRANITEPipeline:
             
             # Store raw predictions for diagnostics
             predictions = training_result['final_predictions']
-            self._stored_raw_predictions = predictions.copy()
+            self._stored_raw_predictions = pd.DataFrame({
+                'mean': predictions if isinstance(predictions, np.ndarray) else predictions.values,
+                'x': addresses.geometry.x.values,
+                'y': addresses.geometry.y.values
+            })
             
             # Enhanced result reporting
             constraint_error = abs(np.mean(predictions) - tract_svi) / tract_svi * 100

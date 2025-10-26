@@ -213,7 +213,7 @@ class AccessibilityFeatureValidator:
         dest_types = ['employment', 'healthcare', 'grocery']
         
         for i, dest_type in enumerate(dest_types):
-            start_idx = i * 8
+            start_idx = i * 10
             if start_idx + 2 < time_values.shape[1]:
                 min_times = time_values[:, start_idx]      # min_time
                 mean_times = time_values[:, start_idx + 1] # mean_time
@@ -272,7 +272,7 @@ class AccessibilityFeatureValidator:
                 }
             }
         
-        # Validate count progressions (30min <= 60min <= 90min)
+        # Validate count progressions (5min <= 10min <= 15min)
         validation['count_progression'] = self._validate_count_progressions()
         
         return validation
@@ -283,13 +283,13 @@ class AccessibilityFeatureValidator:
         issues = {}
         
         dest_types = ['employment', 'healthcare', 'grocery']
-        count_types = ['30min', '60min', '90min']
+        count_types = ['5min', '10min', '15min']
         
         for dest_idx, dest_type in enumerate(dest_types):
             available_destinations = len(self.destinations.get(dest_type, []))
             
             for count_idx, count_type in enumerate(count_types):
-                feature_idx = dest_idx * 8 + 3 + count_idx  # Count features start at offset 3
+                feature_idx = dest_idx * 10 + 3 + count_idx  # Count features start at offset 3
                 
                 if feature_idx < count_values.shape[1]:
                     counts = count_values[:, feature_idx]
@@ -305,14 +305,14 @@ class AccessibilityFeatureValidator:
         return issues
     
     def _validate_count_progressions(self) -> Dict:
-        """Validate that count progressions make sense (30min <= 60min <= 90min)"""
+        """Validate that count progressions make sense"""
         
         progressions = {}
         
         dest_types = ['employment', 'healthcare', 'grocery']
         
         for dest_idx, dest_type in enumerate(dest_types):
-            start_idx = dest_idx * 8 + 3  # Count features start at offset 3
+            start_idx = dest_idx * 10 + 3  # Count features start at offset 3
             
             if start_idx + 2 < self.accessibility_features.shape[1]:
                 count_30 = self.accessibility_features[:, start_idx]
@@ -428,8 +428,8 @@ class AccessibilityFeatureValidator:
         dest_types = ['employment', 'healthcare', 'grocery']
         
         for dest_idx, dest_type in enumerate(dest_types):
-            start_idx = dest_idx * 8
-            end_idx = start_idx + 8
+            start_idx = dest_idx * 10
+            end_idx = start_idx + 10
             
             if end_idx <= len(self.feature_names):
                 dest_features = self.accessibility_features[:, start_idx:end_idx]
@@ -533,11 +533,11 @@ class AccessibilityFeatureValidator:
         
         dest_types = ['employment', 'healthcare', 'grocery']
         for dest_idx, dest_type in enumerate(dest_types):
-            start_idx = dest_idx * 8
+            start_idx = dest_idx * 10
             
             if start_idx + 7 < len(self.feature_names):
                 min_time = self.accessibility_features[:, start_idx]
-                count_60 = self.accessibility_features[:, start_idx + 4]  # 60min count
+                count_10min = self.accessibility_features[:, start_idx + 4]  # 10min count
                 
                 if np.std(min_time) > 0 and np.std(count_60) > 0:
                     corr = pearsonr(min_time, count_60)[0]
@@ -554,11 +554,11 @@ class AccessibilityFeatureValidator:
         score_count_correlations = []
         
         for dest_idx, dest_type in enumerate(dest_types):
-            start_idx = dest_idx * 8
+            start_idx = dest_idx * 10
             
             if start_idx + 7 < len(self.feature_names):
                 score = self.accessibility_features[:, start_idx + 7]  # accessibility_score
-                count_60 = self.accessibility_features[:, start_idx + 4]  # 60min count
+                count_10min = self.accessibility_features[:, start_idx + 4]  # 60min count
                 
                 if np.std(score) > 0 and np.std(count_60) > 0:
                     corr = pearsonr(score, count_60)[0]
@@ -599,11 +599,11 @@ class AccessibilityFeatureValidator:
         # Test by destination type
         dest_types = ['employment', 'healthcare', 'grocery']
         for dest_idx, dest_type in enumerate(dest_types):
-            start_idx = dest_idx * 8
+            start_idx = dest_idx * 10
             
             if start_idx + 7 < len(self.feature_names):
                 # Use accessibility score as proxy for overall access to this destination type
-                dest_accessibility = self.accessibility_features[:, start_idx + 7]
+                dest_accessibility = self.accessibility_features[:, start_idx + 9]
                 dest_corr = pearsonr(distances_to_center, dest_accessibility)[0]
                 
                 center_periphery_analysis[f'{dest_type}_vs_distance'] = {
@@ -627,9 +627,9 @@ class AccessibilityFeatureValidator:
         if len(dest_types) >= 2:
             accessibility_scores = []
             for dest_idx, dest_type in enumerate(dest_types):
-                start_idx = dest_idx * 8
+                start_idx = dest_idx * 10
                 if start_idx + 7 < len(self.feature_names):
-                    score = self.accessibility_features[:, start_idx + 7]
+                    score = self.accessibility_features[:, start_idx + 9]
                     accessibility_scores.append(score)
             
             if len(accessibility_scores) >= 2:
@@ -1041,13 +1041,31 @@ class AccessibilityFeatureValidator:
     
     def _generate_feature_names(self) -> List[str]:
         """Generate feature names based on GRANITE structure"""
+
+        #Index 0: min_time
+        #Index 1: mean_time
+        #Index 2: median_time
+        #Index 3: count_5min
+        #Index 4: count_10min
+        #Index 5: count_15min
+        #Index 6: drive_advantage
+        #Index 7: dispersion
+        #Index 8: time_range
+        #Index 9: accessibility_percentile
         
         base_features = []
         for dest_type in ['employment', 'healthcare', 'grocery']:
             base_features.extend([
-                f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_90th_time',
-                f'{dest_type}_count_30min', f'{dest_type}_count_60min', f'{dest_type}_count_90min',
-                f'{dest_type}_transit_share', f'{dest_type}_accessibility_score'
+                f'{dest_type}_min_time', 
+                f'{dest_type}_mean_time', 
+                f'{dest_type}_median_time',     # ← Changed from 90th_time
+                f'{dest_type}_count_5min', 
+                f'{dest_type}_count_10min', 
+                f'{dest_type}_count_15min',
+                f'{dest_type}_drive_advantage',  # ← NEW
+                f'{dest_type}_dispersion',       # ← NEW (not concentration)
+                f'{dest_type}_time_range',       # ← NEW
+                f'{dest_type}_percentile'        # ← NEW (not accessibility_score)
             ])
         
         derived_features = ['total_accessibility', 'accessibility_diversity', 
@@ -1269,7 +1287,7 @@ class AccessibilityFeatureValidator:
         dest_types = ['employment', 'healthcare', 'grocery']
         
         for i, dest_type in enumerate(dest_types):
-            start_idx = i * 8
+            start_idx = i * 10
             if start_idx + 2 < len(time_features):
                 min_times = time_values[:, start_idx]
                 mean_times = time_values[:, start_idx + 1]
@@ -1334,7 +1352,7 @@ class AccessibilityFeatureValidator:
         accessibility_scores = []
         
         for dest_idx, dest_type in enumerate(dest_types):
-            start_idx = dest_idx * 8
+            start_idx = dest_idx * 10
             if start_idx + 7 < len(self.feature_names):
                 score = self.accessibility_features[:, start_idx + 7]
                 accessibility_scores.append(score)

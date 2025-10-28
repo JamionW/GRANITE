@@ -29,3 +29,9 @@
 {"timestamp": "2025-10-26T14:29:49.918862", "operation": "set", "cache_type": "differential", "key": "954898c34425fc65adc6c32749ce66bd", "hit": true, "metadata": {"modes": "car_vs_transit", "operation": "difference"}}
 {"timestamp": "2025-10-26T14:29:50.085127", "operation": "set", "cache_type": "absolute", "key": "ac8bf20a0e94b64b36bcc79ce0e96451", "hit": true, "metadata": {"mode": "all_destinations", "dest_type": "complete", "threshold": 0}}
 {"timestamp": "2025-10-26T14:39:28.029976", "operation": "get", "cache_type": "absolute", "key": "72d569f0a83a7635ab4eae097e8f8eae", "hit": true, "metadata": {"mode": "all_destinations", "dest_type": "complete", "threshold": 0}}
+{"timestamp": "2025-10-27T10:02:34.590687", "operation": "get", "cache_type": "absolute", "key": "7b215742d18415cdc85a8dcf5be7dc57", "hit": false, "metadata": {"mode": "multi", "dest_type": "mixed", "threshold": 1}}
+{"timestamp": "2025-10-27T10:02:41.032328", "operation": "set", "cache_type": "absolute", "key": "7b215742d18415cdc85a8dcf5be7dc57", "hit": true, "metadata": {"mode": "multi", "dest_type": "mixed", "threshold": 1}}
+{"timestamp": "2025-10-27T10:02:41.350149", "operation": "get", "cache_type": "absolute", "key": "a17f52b81756ca4b72cdc6eee8b1f04e", "hit": false, "metadata": {"mode": "multi", "dest_type": "mixed", "threshold": 1}}
+{"timestamp": "2025-10-27T10:02:44.723387", "operation": "set", "cache_type": "absolute", "key": "a17f52b81756ca4b72cdc6eee8b1f04e", "hit": true, "metadata": {"mode": "multi", "dest_type": "mixed", "threshold": 1}}
+{"timestamp": "2025-10-27T10:02:45.054600", "operation": "get", "cache_type": "absolute", "key": "9f147330f522285c9b0273a58c6bec31", "hit": false, "metadata": {"mode": "multi", "dest_type": "mixed", "threshold": 1}}
+{"timestamp": "2025-10-27T10:02:48.395575", "operation": "set", "cache_type": "absolute", "key": "9f147330f522285c9b0273a58c6bec31", "hit": true, "metadata": {"mode": "multi", "dest_type": "mixed", "threshold": 1}}

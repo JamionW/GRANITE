@@ -10,6 +10,8 @@ from typing import Dict, List, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
+from ..routing.osrm_router import OSRMRouter
+
 class EnhancedAccessibilityComputer:
     """
     FIXED: Enhanced accessibility computation with corrected counting logic
@@ -39,6 +41,14 @@ class EnhancedAccessibilityComputer:
             'suburban': 1.10,
             'edge': 1.05
         }
+
+        # Initialize OSRM router (auto-detects local servers)
+        try:
+            from ..routing.osrm_router import OSRMRouter
+            self.osrm_router = OSRMRouter(verbose=self.verbose)
+        except Exception as e:
+            self.log(f"OSRM router not available: {e}")
+            self.osrm_router = None
     
     def log(self, message):
         if self.verbose:
@@ -212,8 +222,6 @@ class EnhancedAccessibilityComputer:
                 else:
                     dispersion = 0.0
                 
-                time_range = float(combined_times.max() - combined_times.min()) if len(combined_times) > 1 else 0.0
-                
                 accessibility_percentile = 0.5  # Will be computed later
                 
                 feature_vector = [
@@ -224,13 +232,12 @@ class EnhancedAccessibilityComputer:
                     count_10min,
                     count_15min,
                     drive_advantage,
-                    dispersion,  # RENAMED from concentration
-                    time_range,
+                    dispersion,
                     accessibility_percentile
                 ]
                 
             else:
-                feature_vector = [120.0, 120.0, 120.0, 0, 0, 0, 0.5, 0.5, 0.0, 0.5]
+                feature_vector = [120.0, 120.0, 120.0, 0, 0, 0, 0.5, 0.5, 0.5]
             
             features.append(feature_vector)
         
@@ -254,7 +261,7 @@ class EnhancedAccessibilityComputer:
             'min_time', 'mean_time', 'median_time',
             'count_5min', 'count_10min', 'count_15min', 
             'drive_advantage', 'accessibility_concentration',
-            'time_range', 'accessibility_percentile'
+            'accessibility_percentile'
         ]
         
         self.log(f"=== {dest_type.upper()} VALIDATION ===")
@@ -701,7 +708,7 @@ class EnhancedAccessibilityComputer:
         feature_names = [
             'min_time', 'mean_time', 'median_time',
             'count_5min', 'count_10min', 'count_15min',
-            'drive_advantage', 'dispersion', 'time_range', 'accessibility_percentile'
+            'drive_advantage', 'dispersion', 'accessibility_percentile'
         ]
         
         # FIXED: Correct synthetic vulnerability
@@ -728,7 +735,7 @@ class EnhancedAccessibilityComputer:
             
             # FIXED: Correct expected directions
             if name in ['min_time', 'mean_time', 'median_time', 'drive_advantage', 
-                        'dispersion', 'time_range', 'accessibility_percentile']:
+                        'dispersion', 'accessibility_percentile']:
                 expected_positive = True
             elif name in ['count_5min', 'count_10min', 'count_15min']:
                 expected_positive = False

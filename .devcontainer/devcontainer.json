@@ -1,0 +1,19 @@
+{
+  "name": "GRANITE Development",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "postStartCommand": "bash /workspaces/GRANITE/scripts/start_osrm.sh",
+  "forwardPorts": [5000, 5001],
+  "portsAttributes": {
+    "5000": {
+      "label": "OSRM Driving",
+      "onAutoForward": "ignore"
+    },
+    "5001": {
+      "label": "OSRM Walking",
+      "onAutoForward": "ignore"
+    }
+  }
+}

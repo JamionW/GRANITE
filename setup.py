@@ -98,6 +98,7 @@ INSTALL_REQUIRES = [
     "fiona>=1.8.0",
     "pyproj>=3.0.0",
     "rasterio>=1.2.0",
+    "geopy>=2.3.0", 
     
     # Deep learning
     "torch>=1.10.0",

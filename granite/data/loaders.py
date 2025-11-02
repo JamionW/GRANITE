@@ -22,7 +22,7 @@ class DataLoader:
     Uses road network topology for graph creation instead of simple KNN
     """
     
-    def __init__(self, data_dir: str = './data', config: dict = None):
+    def __init__(self, data_dir: str = '/workspaces/GRANITE/data', config: dict = None):
         self.data_dir = data_dir
         self.config = config or {}
         self.verbose = config.get('processing', {}).get('verbose', False) if config else False
@@ -38,7 +38,8 @@ class DataLoader:
         os.makedirs(data_dir, exist_ok=True)
 
         # Initialize real data loader
-        self.real_data_loader = RealDataLoader(data_dir=data_dir, verbose=self.verbose)
+        raw_data_dir = os.path.join(data_dir, 'raw')
+        self.real_data_loader = RealDataLoader(data_dir=raw_data_dir, verbose=self.verbose)
 
         # Invoke enhanced destination calcluations
         self.bind_enhanced_destination_methods()
@@ -792,95 +793,120 @@ class DataLoader:
         return county_map.get((state_fips, county_fips), 'Unknown')
 
     # Destination creation methods (core accessibility destinations)
-    def create_employment_destinations(self, use_real_data=True) -> gpd.GeoDataFrame:
-        """Create employment destinations for accessibility analysis"""
-
+    def create_employment_destinations(self, use_real_data: bool = False) -> gpd.GeoDataFrame:
+        """
+        Create employment destinations for accessibility analysis
+        
+        Parameters:
+            use_real_data: If True, load from LEHD data; if False, use synthetic data
+        """
         if use_real_data:
             try:
-                state_fips = self.config.get('data', {}).get('state_fips', '47')
-                county_fips = self.config.get('data', {}).get('county_fips', '065')
-                return self.real_data_loader.load_lehd_employment(state_fips, county_fips)
+                self._log("Attempting to load REAL employment data...")
+                employment_gdf = self.real_data_loader.load_lehd_employment()
+                self._log(f"✓ Loaded {len(employment_gdf)} REAL employment locations")
+                return employment_gdf
             except Exception as e:
                 self._log(f"Error loading real employment data: {e}")
-                self._log("Falling back to synthetic data")   
-                employers = [
-                    {'name': 'Downtown Chattanooga', 'lat': 35.0456, 'lon': -85.3097, 'employees': 5000, 'type': 'mixed'},
-                    {'name': 'Volkswagen Chattanooga', 'lat': 35.0614, 'lon': -85.1580, 'employees': 4000, 'type': 'manufacturing'},
-                    {'name': 'BlueCross BlueShield TN', 'lat': 35.0456, 'lon': -85.3097, 'employees': 3500, 'type': 'insurance'},
-                    {'name': 'Erlanger Health System', 'lat': 35.0539, 'lon': -85.3083, 'employees': 8000, 'type': 'healthcare'},
-                    {'name': 'University of Tennessee Chattanooga', 'lat': 35.0456, 'lon': -85.3011, 'employees': 2500, 'type': 'education'},
-                    {'name': 'Tennessee Valley Authority', 'lat': 35.0398, 'lon': -85.3062, 'employees': 1500, 'type': 'utilities'},
-                    {'name': 'Hamilton County Government', 'lat': 35.0456, 'lon': -85.3097, 'employees': 2000, 'type': 'government'},
-                    {'name': 'Hamilton Place Mall Area', 'lat': 35.0407, 'lon': -85.2111, 'employees': 3000, 'type': 'retail'},
-                    {'name': 'East Brainerd Business District', 'lat': 35.0156, 'lon': -85.2180, 'employees': 1500, 'type': 'mixed'},
-                    {'name': 'Northshore Business District', 'lat': 35.0722, 'lon': -85.2967, 'employees': 1200, 'type': 'mixed'}
-                ]
-                
-                geometries = [Point(emp['lon'], emp['lat']) for emp in employers]
-                employment_gdf = gpd.GeoDataFrame(employers, geometry=geometries, crs='EPSG:4326')
-                employment_gdf['dest_id'] = range(len(employment_gdf))
-                employment_gdf['dest_type'] = 'employment'
-                
-                self._log(f"Created {len(employment_gdf)} employment destinations")
-                return employment_gdf
+                self._log("Falling back to synthetic data")
+        
+        # Original synthetic data code
+        employers = [
+            {'name': 'Downtown Chattanooga', 'lat': 35.0456, 'lon': -85.3097, 'employees': 5000, 'type': 'mixed'},
+            {'name': 'Volkswagen Chattanooga', 'lat': 35.0614, 'lon': -85.1580, 'employees': 4000, 'type': 'manufacturing'},
+            {'name': 'BlueCross BlueShield TN', 'lat': 35.0456, 'lon': -85.3097, 'employees': 3500, 'type': 'insurance'},
+            {'name': 'Erlanger Health System', 'lat': 35.0539, 'lon': -85.3083, 'employees': 8000, 'type': 'healthcare'},
+            {'name': 'University of Tennessee Chattanooga', 'lat': 35.0456, 'lon': -85.3011, 'employees': 2500, 'type': 'education'},
+            {'name': 'Tennessee Valley Authority', 'lat': 35.0398, 'lon': -85.3062, 'employees': 1500, 'type': 'utilities'},
+            {'name': 'Hamilton County Government', 'lat': 35.0456, 'lon': -85.3097, 'employees': 2000, 'type': 'government'},
+            {'name': 'Hamilton Place Mall Area', 'lat': 35.0407, 'lon': -85.2111, 'employees': 3000, 'type': 'retail'},
+            {'name': 'East Brainerd Business District', 'lat': 35.0156, 'lon': -85.2180, 'employees': 1500, 'type': 'mixed'},
+            {'name': 'Northshore Business District', 'lat': 35.0722, 'lon': -85.2967, 'employees': 1200, 'type': 'mixed'}
+        ]
+        
+        geometries = [Point(emp['lon'], emp['lat']) for emp in employers]
+        employment_gdf = gpd.GeoDataFrame(employers, geometry=geometries, crs='EPSG:4326')
+        employment_gdf['dest_id'] = range(len(employment_gdf))
+        employment_gdf['dest_type'] = 'employment'
+        
+        self._log(f"Created {len(employment_gdf)} employment destinations")
+        return employment_gdf
 
-    def create_healthcare_destinations(self, use_real_data=True) -> gpd.GeoDataFrame:
-        """Create healthcare destinations for accessibility analysis"""
-
+    def create_healthcare_destinations(self, use_real_data: bool = False) -> gpd.GeoDataFrame:
+        """
+        Create healthcare destinations for accessibility analysis
+        
+        Parameters:
+            use_real_data: If True, load from healthcare CSV; if False, use synthetic data
+        """
         if use_real_data:
             try:
-                return self.real_data_loader.load_healthcare_facilities()
+                self._log("Attempting to load REAL healthcare data...")
+                healthcare_gdf = self.real_data_loader.load_healthcare_facilities()
+                self._log(f"✓ Loaded {len(healthcare_gdf)} REAL healthcare facilities")
+                return healthcare_gdf
             except Exception as e:
                 self._log(f"Error loading real healthcare data: {e}")
                 self._log("Falling back to synthetic data")
-                hospitals = [
-                    {'name': 'Erlanger Baroness Hospital', 'lat': 35.0539, 'lon': -85.3083, 'beds': 400, 'type': 'General'},
-                    {'name': 'CHI Memorial Hospital', 'lat': 35.0627, 'lon': -85.2985, 'beds': 300, 'type': 'General'},
-                    {'name': 'Parkridge Medical Center', 'lat': 35.0456, 'lon': -85.2597, 'beds': 368, 'type': 'General'},
-                    {'name': 'TriStar StoneCrest Medical Center', 'lat': 35.1156, 'lon': -85.2441, 'beds': 101, 'type': 'General'},
-                    {'name': 'Erlanger East Hospital', 'lat': 35.0407, 'lon': -85.2111, 'beds': 140, 'type': 'General'},
-                    {'name': 'Siskin Hospital', 'lat': 35.0456, 'lon': -85.3097, 'beds': 79, 'type': 'Rehabilitation'},
-                    {'name': 'Moccasin Bend Mental Health', 'lat': 35.0722, 'lon': -85.3365, 'beds': 150, 'type': 'Psychiatric'},
-                    {'name': 'Parkridge Valley Hospital', 'lat': 35.0175, 'lon': -85.3365, 'beds': 60, 'type': 'General'}
-                ]
-                
-                geometries = [Point(hosp['lon'], hosp['lat']) for hosp in hospitals]
-                healthcare_gdf = gpd.GeoDataFrame(hospitals, geometry=geometries, crs='EPSG:4326')
-                healthcare_gdf['dest_id'] = range(len(healthcare_gdf))
-                healthcare_gdf['dest_type'] = 'healthcare'
-                
-                self._log(f"Created {len(healthcare_gdf)} healthcare destinations")
-                return healthcare_gdf
+        
+        # Original synthetic data code
+        hospitals = [
+            {'name': 'Erlanger Baroness Hospital', 'lat': 35.0539, 'lon': -85.3083, 'beds': 400, 'type': 'General'},
+            {'name': 'CHI Memorial Hospital', 'lat': 35.0627, 'lon': -85.2985, 'beds': 300, 'type': 'General'},
+            {'name': 'Parkridge Medical Center', 'lat': 35.0456, 'lon': -85.2597, 'beds': 368, 'type': 'General'},
+            {'name': 'TriStar StoneCrest Medical Center', 'lat': 35.1156, 'lon': -85.2441, 'beds': 101, 'type': 'General'},
+            {'name': 'Erlanger East Hospital', 'lat': 35.0407, 'lon': -85.2111, 'beds': 140, 'type': 'General'},
+            {'name': 'Siskin Hospital', 'lat': 35.0456, 'lon': -85.3097, 'beds': 79, 'type': 'Rehabilitation'},
+            {'name': 'Moccasin Bend Mental Health', 'lat': 35.0722, 'lon': -85.3365, 'beds': 150, 'type': 'Psychiatric'},
+            {'name': 'Parkridge Valley Hospital', 'lat': 35.0175, 'lon': -85.3365, 'beds': 60, 'type': 'General'}
+        ]
+        
+        geometries = [Point(hosp['lon'], hosp['lat']) for hosp in hospitals]
+        healthcare_gdf = gpd.GeoDataFrame(hospitals, geometry=geometries, crs='EPSG:4326')
+        healthcare_gdf['dest_id'] = range(len(healthcare_gdf))
+        healthcare_gdf['dest_type'] = 'healthcare'
+        
+        self._log(f"Created {len(healthcare_gdf)} healthcare destinations")
+        return healthcare_gdf
 
-    def create_grocery_destinations(self, use_real_data=True) -> gpd.GeoDataFrame:
-        """Create grocery destinations for accessibility analysis"""
-
+    def create_grocery_destinations(self, use_real_data: bool = False) -> gpd.GeoDataFrame:
+        """
+        Create grocery destinations for accessibility analysis
+        
+        Parameters:
+            use_real_data: If True, load from OSM CSV; if False, use synthetic data
+        """
         if use_real_data:
             try:
-                return self.real_data_loader.load_grocery_stores()
+                self._log("Attempting to load REAL grocery data...")
+                grocery_gdf = self.real_data_loader.load_grocery_stores()
+                self._log(f"✓ Loaded {len(grocery_gdf)} REAL grocery stores")
+                return grocery_gdf
             except Exception as e:
                 self._log(f"Error loading real grocery data: {e}")
-                self._log("Falling back to synthetic data")      
-                stores = [
-                    {'name': 'Walmart Supercenter - Hamilton Place', 'lat': 35.0407, 'lon': -85.2111, 'type': 'supermarket'},
-                    {'name': 'Kroger - East Brainerd', 'lat': 35.0156, 'lon': -85.2180, 'type': 'supermarket'},
-                    {'name': 'Publix - Signal Mountain', 'lat': 35.1456, 'lon': -85.3456, 'type': 'supermarket'},
-                    {'name': 'Food City - Northgate', 'lat': 35.0722, 'lon': -85.2967, 'type': 'supermarket'},
-                    {'name': 'IGA - Downtown', 'lat': 35.0456, 'lon': -85.3097, 'type': 'grocery'},
-                    {'name': 'Walmart Neighborhood Market - Hixson', 'lat': 35.1256, 'lon': -85.2441, 'type': 'grocery'},
-                    {'name': 'Fresh Market - Northshore', 'lat': 35.0627, 'lon': -85.2985, 'type': 'grocery'},
-                    {'name': 'Bi-Lo - East Ridge', 'lat': 35.0495, 'lon': -85.1938, 'type': 'supermarket'},
-                    {'name': 'Save-A-Lot - South Chattanooga', 'lat': 35.0175, 'lon': -85.3365, 'type': 'discount'},
-                    {'name': 'Food Lion - East Chattanooga', 'lat': 35.0456, 'lon': -85.2580, 'type': 'supermarket'}
-                ]
-                
-                geometries = [Point(store['lon'], store['lat']) for store in stores]
-                grocery_gdf = gpd.GeoDataFrame(stores, geometry=geometries, crs='EPSG:4326')
-                grocery_gdf['dest_id'] = range(len(grocery_gdf))
-                grocery_gdf['dest_type'] = 'grocery'
-                
-                self._log(f"Created {len(grocery_gdf)} grocery destinations")
-                return grocery_gdf
+                self._log("Falling back to synthetic data")
+        
+        # Original synthetic data code
+        stores = [
+            {'name': 'Walmart Supercenter - Hamilton Place', 'lat': 35.0407, 'lon': -85.2111, 'type': 'supermarket'},
+            {'name': 'Kroger - East Brainerd', 'lat': 35.0156, 'lon': -85.2180, 'type': 'supermarket'},
+            {'name': 'Publix - Signal Mountain', 'lat': 35.1456, 'lon': -85.3456, 'type': 'supermarket'},
+            {'name': 'Food City - Northgate', 'lat': 35.0722, 'lon': -85.2967, 'type': 'supermarket'},
+            {'name': 'IGA - Downtown', 'lat': 35.0456, 'lon': -85.3097, 'type': 'grocery'},
+            {'name': 'Walmart Neighborhood Market - Hixson', 'lat': 35.1256, 'lon': -85.2441, 'type': 'grocery'},
+            {'name': 'Fresh Market - Northshore', 'lat': 35.0627, 'lon': -85.2985, 'type': 'grocery'},
+            {'name': 'Bi-Lo - East Ridge', 'lat': 35.0495, 'lon': -85.1938, 'type': 'supermarket'},
+            {'name': 'Save-A-Lot - South Chattanooga', 'lat': 35.0175, 'lon': -85.3365, 'type': 'discount'},
+            {'name': 'Food Lion - East Chattanooga', 'lat': 35.0456, 'lon': -85.2580, 'type': 'supermarket'}
+        ]
+        
+        geometries = [Point(store['lon'], store['lat']) for store in stores]
+        grocery_gdf = gpd.GeoDataFrame(stores, geometry=geometries, crs='EPSG:4326')
+        grocery_gdf['dest_id'] = range(len(grocery_gdf))
+        grocery_gdf['dest_type'] = 'grocery'
+        
+        self._log(f"Created {len(grocery_gdf)} grocery destinations")
+        return grocery_gdf
 
     def compute_accessibility_features(self, addresses: gpd.GeoDataFrame) -> np.ndarray:
         """

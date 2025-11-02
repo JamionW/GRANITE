@@ -54,75 +54,30 @@ class EnhancedAccessibilityComputer:
         if self.verbose:
             print(f"[EnhancedAccessibility] {message}")
     
-    def calculate_realistic_travel_times(self, origins: gpd.GeoDataFrame, 
-                                    destinations: gpd.GeoDataFrame,
-                                    time_period: str = 'morning') -> pd.DataFrame:
-        """
-        OPTIMIZED: Calculate travel times with batch processing and smart routing
-        """
-
-        if self.cache is not None:
-            import hashlib
-            origins_hash = hashlib.md5(
-                str(origins.geometry.apply(lambda g: (g.x, g.y)).tolist()).encode()
-            ).hexdigest()
-            dests_hash = hashlib.md5(
-                str(destinations.geometry.apply(lambda g: (g.x, g.y)).tolist()).encode()
-            ).hexdigest()
-            
-            cached_result = self.cache.get_absolute(
-                mode='multi',  # or specific mode if you track that
-                dest_type='mixed',  # or the actual destination type
-                threshold=int(time_period == 'morning'),  # simple encoding
-                origins_hash=f"{origins_hash}_{dests_hash}"
-            )
-            
-            if cached_result is not None:
-                self.log(f"✓ Retrieved from cache: {len(origins)} × {len(destinations)} pairs")
-                return cached_result
+    def calculate_realistic_travel_times(self, origins, destinations, mode='combined'):
+        """Calculate travel times with OSRMRouter"""
         
-        total_pairs = len(origins) * len(destinations)
-        self.log(f"Computing travel times: {len(origins)} origins → {len(destinations)} destinations ({total_pairs:,} pairs)")
+        self._log(f"Computing {len(origins)} × {len(destinations)} routes via OSRM...")
         
-        # Load road network once (expensive operation)
-        road_graph, address_mapping = self._load_road_network_for_routing(origins, destinations)
+        # Initialize router if needed
+        if not hasattr(self, 'router'):
+            from ..routing.osrm_router import OSRMRouter
+            self.router = OSRMRouter(verbose=self.verbose)
         
-        results = []
-        processed = 0
+        # Compute routes
+        travel_times_df = self.router.compute_multimodal_travel_times(origins, destinations)
         
-        # Process origins in batches with progress reporting
-        for orig_idx, origin in origins.iterrows():
-            orig_id = origin.get('address_id', orig_idx)
-            orig_coord = (origin.geometry.y, origin.geometry.x)
-            
-            # Process all destinations for this origin at once
-            batch_results = self._process_origin_batch(
-                orig_id, orig_coord, destinations, road_graph, address_mapping, time_period
-            )
-            results.extend(batch_results)
-            
-            processed += len(batch_results)  # Track actual processed pairs
-            
-            # Progress reporting every 100 origins
-            if (orig_idx + 1) % 100 == 0:
-                self.log(f"  Processed {processed:,}/{total_pairs:,} pairs ({processed/total_pairs*100:.1f}%) - Origin {orig_idx + 1}/{len(origins)}")
-                
-        travel_df = pd.DataFrame(results)
-        self.log(f"Generated {len(travel_df)} travel time records")
+        # VERIFY no fallback was used
+        different_times = (travel_times_df['walk_time'] != travel_times_df['drive_time']).sum()
+        total_routes = len(travel_times_df)
         
-        # Validate results
-        self._validate_travel_times_fixed(travel_df)
-
-        if self.cache is not None:
-            self.cache.set_absolute(
-                travel_df,  
-                mode='multi',
-                dest_type='mixed',
-                threshold=int(time_period == 'morning'),
-                origins_hash=f"{origins_hash}_{dests_hash}"
-            )
+        if different_times == 0:
+            self._log("⚠️  WARNING: OSRM may be using fallback (all walk == drive times)")
+        else:
+            pct = 100 * different_times / total_routes
+            self._log(f"✓ OSRM verified: {pct:.1f}% of routes have mode-specific times")
         
-        return travel_df
+        return travel_times_df
     
     def _calculate_mode_times_fixed(self, distance_km: float, time_period: str) -> Dict[str, float]:
         """FIXED: More realistic travel time calculation with proper bounds"""
@@ -566,8 +521,99 @@ class EnhancedAccessibilityComputer:
         
         # Fallback
         return straight_km * 1.3, False
-    
+
     def _process_origin_batch(self, orig_id, orig_coord, destinations, road_graph, address_mapping, time_period):
+        """FIXED: Use OSRM routing when available, fallback to synthetic"""
+        
+        # If OSRM is available, use it for real routing
+        if self.osrm_router is not None:
+            return self._process_origin_batch_osrm(orig_id, orig_coord, destinations, time_period)
+        
+        # Otherwise, use synthetic fallback
+        return self._process_origin_batch_synthetic(orig_id, orig_coord, destinations, road_graph, address_mapping, time_period)
+
+    def _process_origin_batch_osrm(self, orig_id, orig_coord, destinations, time_period):
+        """Process batch using real OSRM routing"""
+        
+        # Create single-origin GeoDataFrame
+        import geopandas as gpd
+        from shapely.geometry import Point
+        
+        origin_gdf = gpd.GeoDataFrame({
+            'address_id': [orig_id],
+            'geometry': [Point(orig_coord[1], orig_coord[0])]  # lon, lat order
+        }, crs='EPSG:4326')
+        
+        # Use OSRM to compute routes
+        try:
+            osrm_results = self.osrm_router.compute_multimodal_travel_times(origin_gdf, destinations)
+            
+            # Convert to expected format
+            batch_results = []
+            
+            for _, row in osrm_results.iterrows():
+                dest_id = row['dest_id']
+                
+                # Find destination info
+                dest_row = destinations[destinations.index == dest_id].iloc[0] if dest_id in destinations.index else None
+                if dest_row is None:
+                    dest_row = destinations[destinations.get('dest_id', destinations.index) == dest_id].iloc[0]
+                
+                dest_coord = (dest_row.geometry.y, dest_row.geometry.x)
+                dest_type = dest_row.get('dest_type', 'unknown')
+                
+                # Calculate distances
+                from geopy.distance import geodesic
+                straight_km = geodesic(orig_coord, dest_coord).kilometers
+                
+                # Estimate network distance from drive time
+                drive_time = row['drive_time']
+                if pd.notna(drive_time) and drive_time > 0:
+                    network_km = (drive_time / 60.0) * 25.0  # Assume 25 km/h average
+                else:
+                    network_km = straight_km * 1.3
+                
+                # Estimate transit time (OSRM doesn't provide this)
+                transit_time = self._estimate_transit_time(straight_km, time_period)
+                
+                batch_results.append({
+                    'origin_id': orig_id,
+                    'destination_id': dest_id,
+                    'destination_type': dest_type,
+                    'straight_distance_km': straight_km,
+                    'network_distance_km': network_km,
+                    'walk_time': row['walk_time'] if pd.notna(row['walk_time']) else 999.0,
+                    'drive_time': row['drive_time'] if pd.notna(row['drive_time']) else 999.0,
+                    'transit_time': transit_time,
+                    'combined_time': row['combined_time'] if pd.notna(row['combined_time']) else 999.0,
+                    'best_mode': row['best_mode'] if pd.notna(row['best_mode']) else 'drive',
+                    'route_found': pd.notna(row['drive_time'])
+                })
+            
+            return batch_results
+            
+        except Exception as e:
+            self.log(f"OSRM routing failed for origin {orig_id}: {e}")
+            # Fallback to synthetic
+            return self._process_origin_batch_synthetic(orig_id, orig_coord, destinations, None, {}, time_period)
+
+    def _estimate_transit_time(self, distance_km, time_period):
+        """Estimate transit time based on distance"""
+        base_speed = 15.0  # km/h
+        base_time = (distance_km / base_speed) * 60
+        
+        wait_time = np.random.uniform(8, 15)
+        
+        if distance_km > 8:
+            transfer_time = np.random.uniform(5, 12)
+        elif distance_km > 3:
+            transfer_time = np.random.uniform(0, 8)
+        else:
+            transfer_time = 0
+        
+        return max(5.0, base_time + wait_time + transfer_time)
+    
+    def _process_origin_batch_synthetic(self, orig_id, orig_coord, destinations, road_graph, address_mapping, time_period):
         """FIXED: Variable destination selection for proper variance"""
         
         # Calculate distances to all destinations

@@ -1,246 +1,296 @@
 """
-OSRM Routing Integration for GRANITE
-Auto-detects and uses local OSRM servers (no config needed)
+Real OSRM Router - Actually calls the OSRM servers
+Place in granite/data/osrm_router.py
 """
 import requests
-import numpy as np
 import pandas as pd
 import geopandas as gpd
-import subprocess
+import numpy as np
+from typing import Dict, List, Tuple
 import time
-import warnings
-warnings.filterwarnings('ignore')
 
 class OSRMRouter:
-    """
-    OSRM routing client - automatically uses local servers
-    """
+    """Routes using actual OSRM servers instead of fallback calculations"""
     
-    def __init__(self, batch_size=100, verbose=True):
-        """
-        Args:
-            batch_size: Maximum origins/destinations per batch (OSRM limit ~100)
-            verbose: Enable logging
-        """
-        self.driving_url = 'http://localhost:5000'
-        self.walking_url = 'http://localhost:5001'
+    def __init__(self, 
+                 driving_url: str = "http://localhost:5000",
+                 walking_url: str = "http://localhost:5001",
+                 batch_size: int = 100,
+                 verbose: bool = False):
+        self.driving_url = driving_url
+        self.walking_url = walking_url
         self.batch_size = batch_size
         self.verbose = verbose
         
-        # Ensure OSRM servers are running
-        self._ensure_osrm_running()
+        # Verify servers are running
+        self._verify_servers()
     
     def log(self, message):
         if self.verbose:
             print(f"[OSRMRouter] {message}")
     
-    def _ensure_osrm_running(self):
-        """
-        Check if OSRM servers are running, start them if not
-        """
-        driving_ok = self._test_server(self.driving_url, 'driving')
-        walking_ok = self._test_server(self.walking_url, 'foot')
-        
-        if not (driving_ok and walking_ok):
-            self.log("OSRM servers not running, attempting to start...")
+    def _verify_servers(self):
+        """Check that OSRM servers are accessible"""
+        for name, url, profile in [("Driving", self.driving_url, "driving"), 
+                                     ("Foot", self.walking_url, "foot")]:
             try:
-                subprocess.run(['bash', '/workspaces/GRANITE/scripts/start_osrm.sh'], 
-                             check=True, capture_output=True, timeout=30)
-                time.sleep(3)
-                
-                # Verify again
-                driving_ok = self._test_server(self.driving_url, 'driving')
-                walking_ok = self._test_server(self.walking_url, 'foot')
-                
-                if driving_ok and walking_ok:
-                    self.log("✓ OSRM servers started successfully")
+                # Test with a simple route query
+                test_url = f"{url}/route/v1/{profile}/-85.3,35.0;-85.2,35.0?overview=false"
+                response = requests.get(test_url, timeout=5)
+                if response.status_code == 200:
+                    self.log(f"✓ {name} server ready: {url}")
                 else:
-                    self.log("⚠ Could not start OSRM servers, will use fallback estimates")
+                    raise ConnectionError(f"{name} server returned status {response.status_code}")
+            except requests.exceptions.ConnectionError:
+                raise ConnectionError(f"Cannot connect to {name} server at {url}. Is the server running?")
             except Exception as e:
-                self.log(f"⚠ Could not auto-start OSRM: {e}")
-                self.log("Will use distance-based fallback estimates")
+                raise ConnectionError(f"Cannot connect to {name} server at {url}: {e}")
     
-    def _test_server(self, base_url, profile):
-        """Test if OSRM server is accessible"""
-        try:
-            test_coords = "-85.3097,35.0456;-85.2111,35.0407"
-            url = f"{base_url}/route/v1/{profile}/{test_coords}"
-            response = requests.get(url, timeout=3)
-            
-            if response.status_code == 200:
-                self.log(f"✓ {profile.title()} server ready: {base_url}")
-                return True
-            else:
-                return False
-        except:
-            return False
-    
-    def compute_travel_time_matrix(self, origins: gpd.GeoDataFrame, 
-                                   destinations: gpd.GeoDataFrame,
-                                   mode='driving') -> np.ndarray:
+    def compute_multimodal_travel_times(self,
+                                       origins: gpd.GeoDataFrame,
+                                       destinations: gpd.GeoDataFrame) -> pd.DataFrame:
         """
-        Compute all-to-all travel times using OSRM Table API
+        Compute travel times using actual OSRM routing
         
         Args:
             origins: GeoDataFrame with origin points
             destinations: GeoDataFrame with destination points
-            mode: 'driving' or 'foot' (walking)
-        
+            
         Returns:
-            Matrix [n_origins, n_destinations] with travel times in minutes
+            DataFrame with columns: origin_id, dest_id, walk_time, drive_time, 
+                                   combined_time, best_mode
         """
-        base_url = self.driving_url if mode == 'driving' else self.walking_url
-        profile = 'driving' if mode == 'driving' else 'foot'
-        
-        self.log(f"Computing {mode} travel times: {len(origins)} origins × {len(destinations)} destinations")
-        
-        n_origins = len(origins)
-        n_destinations = len(destinations)
-        
-        travel_time_matrix = np.zeros((n_origins, n_destinations))
-        
-        # Process in batches
-        total_batches = 0
-        for i in range(0, n_origins, self.batch_size):
-            for j in range(0, n_destinations, self.batch_size):
-                
-                origin_batch = origins.iloc[i:i+self.batch_size]
-                dest_batch = destinations.iloc[j:j+self.batch_size]
-                
-                # Compute batch
-                batch_matrix = self._compute_batch(origin_batch, dest_batch, base_url, profile)
-                
-                # Fill into full matrix
-                i_end = min(i + self.batch_size, n_origins)
-                j_end = min(j + self.batch_size, n_destinations)
-                travel_time_matrix[i:i_end, j:j_end] = batch_matrix
-                
-                total_batches += 1
-                
-                if total_batches % 10 == 0:
-                    self.log(f"  Processed {total_batches} batches...")
-                
-                time.sleep(0.05)  # Brief pause
-        
-        self.log(f"  Completed: {total_batches} batches, {n_origins * n_destinations:,} route pairs")
-        
-        return travel_time_matrix
-    
-    def _compute_batch(self, origins: gpd.GeoDataFrame, 
-                      destinations: gpd.GeoDataFrame,
-                      base_url: str,
-                      profile: str) -> np.ndarray:
-        """
-        Compute single batch using OSRM Table API
-        """
-        try:
-            # Build coordinate string
-            origin_coords = [(row.geometry.x, row.geometry.y) for _, row in origins.iterrows()]
-            dest_coords = [(row.geometry.x, row.geometry.y) for _, row in destinations.iterrows()]
-            all_coords = origin_coords + dest_coords
-            
-            coords_str = ";".join([f"{lon},{lat}" for lon, lat in all_coords])
-            
-            # Specify which are sources vs destinations
-            sources_str = ",".join(str(k) for k in range(len(origin_coords)))
-            dests_str = ",".join(str(k + len(origin_coords)) for k in range(len(dest_coords)))
-            
-            # Make API call
-            url = f"{base_url}/table/v1/{profile}/{coords_str}"
-            params = {
-                'sources': sources_str,
-                'destinations': dests_str
-            }
-            
-            response = requests.get(url, params=params, timeout=30)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if 'durations' in data:
-                    # Convert seconds to minutes
-                    batch_matrix = np.array(data['durations']) / 60.0
-                    return batch_matrix
-                else:
-                    return self._fallback_batch(origins, destinations)
-            else:
-                return self._fallback_batch(origins, destinations)
-                
-        except Exception as e:
-            if self.verbose:
-                self.log(f"OSRM batch failed, using fallback: {e}")
-            return self._fallback_batch(origins, destinations)
-    
-    def _fallback_batch(self, origins: gpd.GeoDataFrame, 
-                       destinations: gpd.GeoDataFrame) -> np.ndarray:
-        """
-        Fallback to distance-based estimates if OSRM fails
-        """
-        from geopy.distance import geodesic
-        
-        batch_matrix = np.zeros((len(origins), len(destinations)))
-        
-        for i, (_, origin) in enumerate(origins.iterrows()):
-            origin_coords = (origin.geometry.y, origin.geometry.x)
-            
-            for j, (_, dest) in enumerate(destinations.iterrows()):
-                dest_coords = (dest.geometry.y, dest.geometry.x)
-                
-                distance_km = geodesic(origin_coords, dest_coords).km
-                network_distance = distance_km * 1.3
-                speed_kmh = 25.0
-                travel_time_min = (network_distance / speed_kmh) * 60
-                
-                batch_matrix[i, j] = travel_time_min
-        
-        return batch_matrix
-    
-    def compute_multimodal_travel_times(self, origins: gpd.GeoDataFrame,
-                                       destinations: gpd.GeoDataFrame) -> pd.DataFrame:
-        """
-        Compute travel times for multiple modes
-        
-        Returns:
-            DataFrame with columns: origin_id, dest_id, walk_time, drive_time, combined_time, best_mode
-        """
-        self.log("Computing multimodal travel times...")
+        self.log(f"Computing multimodal travel times...")
+        self.log(f"Computing driving travel times: {len(origins)} origins × {len(destinations)} destinations")
         
         # Compute driving times
-        drive_matrix = self.compute_travel_time_matrix(origins, destinations, mode='driving')
+        drive_results = self._compute_mode_times(origins, destinations, mode='driving')
+        
+        self.log(f"Computing foot travel times: {len(origins)} origins × {len(destinations)} destinations")
         
         # Compute walking times
-        walk_matrix = self.compute_travel_time_matrix(origins, destinations, mode='foot')
+        walk_results = self._compute_mode_times(origins, destinations, mode='foot')
         
-        # Build results dataframe
+        # Merge results
         results = []
-        
-        for i, (_, origin) in enumerate(origins.iterrows()):
-            origin_id = origin.get('address_id', i)
+        for (orig_id, dest_id), drive_time in drive_results.items():
+            walk_time = walk_results.get((orig_id, dest_id), np.nan)
             
-            for j, (_, dest) in enumerate(destinations.iterrows()):
-                dest_id = dest.get('dest_id', j)
-                
-                walk_time = walk_matrix[i, j]
-                drive_time = drive_matrix[i, j]
-                
-                # Choose best mode
-                if walk_time <= 15:  # Walkable
+            # Best mode is the faster one
+            if pd.notna(walk_time) and pd.notna(drive_time):
+                if walk_time < drive_time:
                     best_mode = 'walk'
                     combined_time = walk_time
-                elif drive_time < walk_time * 0.5:  # Driving much faster
-                    best_mode = 'drive'
-                    combined_time = drive_time + 3  # Add parking/access time
                 else:
-                    best_mode = 'walk'
-                    combined_time = walk_time
-                
-                results.append({
-                    'origin_id': origin_id,
-                    'dest_id': dest_id,
-                    'walk_time': walk_time,
-                    'drive_time': drive_time,
-                    'combined_time': combined_time,
-                    'best_mode': best_mode
-                })
+                    best_mode = 'drive'
+                    combined_time = drive_time
+            elif pd.notna(walk_time):
+                best_mode = 'walk'
+                combined_time = walk_time
+            elif pd.notna(drive_time):
+                best_mode = 'drive'
+                combined_time = drive_time
+            else:
+                best_mode = 'unknown'
+                combined_time = np.nan
+            
+            results.append({
+                'origin_id': orig_id,
+                'dest_id': dest_id,
+                'walk_time': walk_time,
+                'drive_time': drive_time,
+                'combined_time': combined_time,
+                'best_mode': best_mode
+            })
         
         return pd.DataFrame(results)
+    
+    def _compute_mode_times(self, 
+                           origins: gpd.GeoDataFrame, 
+                           destinations: gpd.GeoDataFrame,
+                           mode: str) -> Dict[Tuple[int, int], float]:
+        """
+        Compute travel times for one mode using OSRM
+        
+        Returns:
+            Dict mapping (origin_id, dest_id) -> time_in_minutes
+        """
+        url_base = self.driving_url if mode == 'driving' else self.walking_url
+        profile = mode  # 'driving' or 'foot'
+        
+        results = {}
+        total_pairs = len(origins) * len(destinations)
+        processed = 0
+        batches = 0
+        
+        # Process in batches to avoid overwhelming the server
+        for orig_idx, origin in origins.iterrows():
+            orig_id = origin.get('address_id', orig_idx)
+            orig_lon, orig_lat = origin.geometry.x, origin.geometry.y
+            
+            # Batch destinations
+            dest_batch = []
+            dest_ids = []
+            
+            for dest_idx, destination in destinations.iterrows():
+                dest_id = destination.get('dest_id', dest_idx)
+                dest_lon, dest_lat = destination.geometry.x, destination.geometry.y
+                
+                dest_batch.append((dest_lon, dest_lat))
+                dest_ids.append(dest_id)
+                
+                # Process batch when full
+                if len(dest_batch) >= self.batch_size:
+                    batch_results = self._route_batch(
+                        (orig_lon, orig_lat), dest_batch, url_base, profile
+                    )
+                    
+                    for dest_id, travel_time in zip(dest_ids, batch_results):
+                        results[(orig_id, dest_id)] = travel_time
+                    
+                    processed += len(dest_batch)
+                    batches += 1
+                    dest_batch = []
+                    dest_ids = []
+            
+            # Process remaining destinations in batch
+            if dest_batch:
+                batch_results = self._route_batch(
+                    (orig_lon, orig_lat), dest_batch, url_base, profile
+                )
+                
+                for dest_id, travel_time in zip(dest_ids, batch_results):
+                    results[(orig_id, dest_id)] = travel_time
+                
+                processed += len(dest_batch)
+                batches += 1
+        
+        self.log(f"  Completed: {batches} batches, {processed} route pairs")
+        
+        return results
+    
+    def _route_batch(self, 
+                    origin: Tuple[float, float],
+                    destinations: List[Tuple[float, float]],
+                    url_base: str,
+                    profile: str) -> List[float]:
+        """
+        Route from one origin to multiple destinations using OSRM table service
+        
+        Returns:
+            List of travel times in minutes (nan if route not found)
+        """
+        # Build coordinates string: origin first, then all destinations
+        coords = [origin] + destinations
+        coords_str = ";".join([f"{lon},{lat}" for lon, lat in coords])
+        
+        # Use table service for one-to-many routing
+        # sources=0 means only the first coordinate (origin)
+        # destinations=1;2;3;... means all other coordinates (use semicolons!)
+        dest_indices = ";".join([str(i) for i in range(1, len(coords))])
+        
+        url = f"{url_base}/table/v1/{profile}/{coords_str}?sources=0&destinations={dest_indices}"
+        
+        try:
+            response = requests.get(url, timeout=30)
+            
+            # Check for specific error
+            if response.status_code == 400:
+                data = response.json()
+                error_msg = data.get('message', 'Unknown error')
+                
+                # Common issue: coordinates not on network
+                if 'Coordinate is invalid' in error_msg or 'NoSegment' in error_msg:
+                    self.log(f"Warning: Coordinates not on network, trying /nearest service")
+                    # Try using nearest service to snap coordinates to road network
+                    return self._route_batch_with_snapping(origin, destinations, url_base, profile)
+                else:
+                    self.log(f"Warning: OSRM 400 error: {error_msg}")
+                    return [np.nan] * len(destinations)
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['code'] != 'Ok':
+                self.log(f"Warning: OSRM returned code {data['code']}")
+                return [np.nan] * len(destinations)
+            
+            # Extract durations (in seconds) and convert to minutes
+            durations = data['durations'][0]  # First row = origin to all destinations
+            travel_times = [d / 60.0 if d is not None else np.nan for d in durations]
+            
+            return travel_times
+            
+        except requests.exceptions.Timeout:
+            self.log(f"Warning: Request timeout for batch of {len(destinations)} destinations")
+            return [np.nan] * len(destinations)
+        except Exception as e:
+            self.log(f"Warning: Error in routing batch: {e}")
+            return [np.nan] * len(destinations)
+    
+    def _route_batch_with_snapping(self,
+                                   origin: Tuple[float, float],
+                                   destinations: List[Tuple[float, float]],
+                                   url_base: str,
+                                   profile: str) -> List[float]:
+        """
+        Route with coordinate snapping to nearest road
+        """
+        # Snap origin to nearest road
+        snapped_origin = self._snap_to_road(origin, url_base, profile)
+        if snapped_origin is None:
+            return [np.nan] * len(destinations)
+        
+        # Snap destinations to nearest roads
+        snapped_destinations = []
+        for dest in destinations:
+            snapped = self._snap_to_road(dest, url_base, profile)
+            if snapped is None:
+                snapped_destinations.append(dest)  # Use original if snapping fails
+            else:
+                snapped_destinations.append(snapped)
+        
+        # Try routing again with snapped coordinates
+        coords = [snapped_origin] + snapped_destinations
+        coords_str = ";".join([f"{lon},{lat}" for lon, lat in coords])
+        dest_indices = ";".join([str(i) for i in range(1, len(coords))])  # Use semicolons!
+        
+        url = f"{url_base}/table/v1/{profile}/{coords_str}?sources=0&destinations={dest_indices}"
+        
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['code'] == 'Ok':
+                durations = data['durations'][0]
+                return [d / 60.0 if d is not None else np.nan for d in durations]
+            else:
+                return [np.nan] * len(destinations)
+                
+        except Exception as e:
+            self.log(f"Warning: Snapped routing also failed: {e}")
+            return [np.nan] * len(destinations)
+    
+    def _snap_to_road(self, 
+                     coord: Tuple[float, float], 
+                     url_base: str,
+                     profile: str) -> Tuple[float, float]:
+        """Snap coordinate to nearest road using OSRM nearest service"""
+        lon, lat = coord
+        url = f"{url_base}/nearest/v1/{profile}/{lon},{lat}?number=1"
+        
+        try:
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['code'] == 'Ok' and len(data['waypoints']) > 0:
+                waypoint = data['waypoints'][0]
+                snapped_lon, snapped_lat = waypoint['location']
+                return (snapped_lon, snapped_lat)
+            else:
+                return None
+                
+        except Exception:
+            return None

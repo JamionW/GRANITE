@@ -57,7 +57,7 @@ class EnhancedAccessibilityComputer:
     def calculate_realistic_travel_times(self, origins, destinations, mode='combined'):
         """Calculate travel times with OSRMRouter"""
         
-        self._log(f"Computing {len(origins)} × {len(destinations)} routes via OSRM...")
+        self.log(f"Computing {len(origins)} × {len(destinations)} routes via OSRM...")
         
         # Initialize router if needed
         if not hasattr(self, 'router'):
@@ -72,10 +72,10 @@ class EnhancedAccessibilityComputer:
         total_routes = len(travel_times_df)
         
         if different_times == 0:
-            self._log("⚠️  WARNING: OSRM may be using fallback (all walk == drive times)")
+            self.log("⚠️  WARNING: OSRM may be using fallback (all walk == drive times)")
         else:
             pct = 100 * different_times / total_routes
-            self._log(f"✓ OSRM verified: {pct:.1f}% of routes have mode-specific times")
+            self.log(f"✓ OSRM verified: {pct:.1f}% of routes have mode-specific times")
         
         return travel_times_df
     
@@ -805,7 +805,7 @@ class EnhancedAccessibilityComputer:
         """NEW: Validate destination counts don't exceed realistic limits"""
         
         # Count destinations per origin
-        origin_dest_counts = travel_df.groupby('origin_id')['destination_id'].nunique()
+        origin_dest_counts = travel_df.groupby('origin_id')['dest_id'].nunique()
         
         self.log("=== DESTINATION COUNT VALIDATION ===")
         self.log(f"Destinations per address: mean={origin_dest_counts.mean():.1f}, "

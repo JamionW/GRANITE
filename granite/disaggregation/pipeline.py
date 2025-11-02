@@ -97,9 +97,9 @@ class GRANITEPipeline:
         
         # Load accessibility destinations
         self._log("Loading accessibility destinations...")
-        data['employment_destinations'] = self.data_loader.create_employment_destinations()
-        data['healthcare_destinations'] = self.data_loader.create_healthcare_destinations()
-        data['grocery_destinations'] = self.data_loader.create_grocery_destinations()
+        data['employment_destinations'] = self.data_loader.create_employment_destinations(use_real_data=True)
+        data['healthcare_destinations'] = self.data_loader.create_healthcare_destinations(use_real_data=True)
+        data['grocery_destinations'] = self.data_loader.create_grocery_destinations(use_real_data=True)
         
         # Load road network and addresses
         data['roads'] = self.data_loader.load_road_network(
@@ -118,6 +118,13 @@ class GRANITEPipeline:
 
     def _process_single_tract(self, target_fips, data):
         """Process single tract or multiple tracts with accessibility → SVI approach"""
+        
+        # CLEAR OLD ACCESSIBILITY CACHE
+        cache_dir = os.path.join(self.data_dir, 'cache', 'accessibility_features')
+        if os.path.exists(cache_dir):
+            import shutil
+            shutil.rmtree(cache_dir)
+            self._log("✓ Cleared old accessibility cache - will recompute with real data")
         
         # Check if multi-tract mode
         n_neighbor_tracts = self.config.get('data', {}).get('neighbor_tracts', 0)

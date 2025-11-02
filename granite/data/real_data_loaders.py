@@ -1,176 +1,268 @@
 """
-Real Data Loaders for GRANITE
-Replaces synthetic destination generation with real data sources
+Real Data Loaders for GRANITE - Corrected for Actual File Structure
+Loads LEHD employment, healthcare facilities, and grocery stores
 """
+import os
 import pandas as pd
 import geopandas as gpd
-from pathlib import Path
 from shapely.geometry import Point
 import warnings
 warnings.filterwarnings('ignore')
 
+
 class RealDataLoader:
     """
-    Load real-world destination data from acquired sources
+    Loader for real-world data sources
+    Handles LEHD employment, healthcare facilities, and grocery stores
+    File paths corrected to match actual directory structure
     """
     
     def __init__(self, data_dir='./data/raw', verbose=True):
-        self.data_dir = Path(data_dir)
+        self.data_dir = data_dir
         self.verbose = verbose
-    
-    def log(self, message):
+        
+    def _log(self, message):
         if self.verbose:
             print(f"[RealDataLoader] {message}")
     
     def load_lehd_employment(self, state_fips='47', county_fips='065'):
         """
-        Load employment destinations from LEHD data
+        Load LEHD employment data from WAC files
+        Returns GeoDataFrame with employment locations and job counts
         
-        Returns:
-            GeoDataFrame with employment locations at census block centroids
+        Uses actual file structure:
+        - Employment data: data/raw/lehd/tn_wac_S000_JT00_2021.csv
+        - Block geometries: data/raw/lehd/tl_2021_47_tabblock20.shp
         """
-        self.log(f"Loading LEHD employment data for {state_fips}{county_fips}...")
+        self._log(f"Loading LEHD employment data for {state_fips}{county_fips}...")
         
-        # Load LEHD workplace data
-        lehd_file = self.data_dir / 'lehd' / 'tn_wac_S000_JT00_2021.csv'
-        if not lehd_file.exists():
-            raise FileNotFoundError(f"LEHD data not found: {lehd_file}")
+        # Load LEHD WAC file
+        lehd_file = os.path.join(self.data_dir, 'lehd', 'tn_wac_S000_JT00_2021.csv')
         
+        if not os.path.exists(lehd_file):
+            raise FileNotFoundError(
+                f"LEHD data not found: {lehd_file}"
+            )
+        
+        self._log(f"Reading LEHD data from {lehd_file}")
         lehd_data = pd.read_csv(lehd_file, dtype={'w_geocode': str})
         
-        # Filter to target county
-        county_filter = state_fips + county_fips
-        lehd_data = lehd_data[lehd_data['w_geocode'].str.startswith(county_filter)].copy()
+        # Filter to target county (first 5 digits of w_geocode = state+county FIPS)
+        target_prefix = f"{state_fips}{county_fips}"
+        county_data = lehd_data[lehd_data['w_geocode'].str.startswith(target_prefix)].copy()
         
-        # Filter to blocks with significant employment (>10 jobs)
-        lehd_data = lehd_data[lehd_data['C000'] > 10].copy()
+        if len(county_data) == 0:
+            raise ValueError(f"No LEHD data found for county {state_fips}{county_fips}")
         
-        self.log(f"  Found {len(lehd_data)} employment blocks")
-        self.log(f"  Total jobs: {lehd_data['C000'].sum():,}")
+        self._log(f"Filtered to {len(county_data)} blocks in target county")
         
-        # Load census block shapefiles
-        block_shp = self.data_dir / 'lehd' / 'tl_2021_47_tabblock20.shp'
-        if not block_shp.exists():
-            raise FileNotFoundError(f"Census block shapefile not found: {block_shp}")
+        # Aggregate to block group level (first 12 digits)
+        county_data['block_group'] = county_data['w_geocode'].str[:12]
+        block_group_employment = county_data.groupby('block_group')['C000'].sum().reset_index()
+        block_group_employment.columns = ['block_group', 'employees']
         
-        blocks_gdf = gpd.read_file(block_shp)
-        blocks_gdf = blocks_gdf[blocks_gdf['GEOID20'].str.startswith(county_filter)].copy()
+        self._log(f"Aggregated to {len(block_group_employment)} block groups")
         
-        # Merge employment data with block geometries
-        employment_blocks = blocks_gdf.merge(
-            lehd_data,
-            left_on='GEOID20',
-            right_on='w_geocode',
-            how='inner'
+        # Load block geometries from LEHD directory
+        block_file = os.path.join(self.data_dir, 'lehd', 'tl_2021_47_tabblock20.shp')
+        
+        if not os.path.exists(block_file):
+            raise FileNotFoundError(
+                f"Census block geometries not found: {block_file}\n"
+                f"Required for LEHD employment location mapping"
+            )
+        
+        self._log(f"Loading block geometries from {block_file}")
+        blocks = gpd.read_file(block_file)
+        
+        # Create block group ID from block GEOID (first 12 characters)
+        blocks['block_group'] = blocks['GEOID20'].str[:12]
+        
+        # Get centroids for each block group
+        block_groups = blocks.dissolve(by='block_group')
+        block_groups = block_groups.reset_index()
+        block_groups['geometry'] = block_groups.geometry.centroid
+        
+        # Merge employment data with geometries
+        employment_gdf = block_group_employment.merge(
+            block_groups[['block_group', 'geometry']], 
+            on='block_group'
         )
+        employment_gdf = gpd.GeoDataFrame(employment_gdf, geometry='geometry', crs='EPSG:4326')
         
-        # Get block centroids as employment destinations
-        employment_blocks['geometry'] = employment_blocks.geometry.centroid
+        # Filter to county (in case block file has broader coverage)
+        if employment_gdf.crs != 'EPSG:4326':
+            employment_gdf = employment_gdf.to_crs('EPSG:4326')
         
-        # Create standardized destination format
-        employment_destinations = employment_blocks[['GEOID20', 'C000', 'geometry']].copy()
-        employment_destinations.rename(columns={
-            'GEOID20': 'dest_id',
-            'C000': 'employees'
-        }, inplace=True)
+        # Filter to meaningful employment locations (>10 employees)
+        employment_gdf = employment_gdf[employment_gdf['employees'] > 10].copy()
         
-        employment_destinations['dest_type'] = 'employment'
-        employment_destinations['name'] = 'Block ' + employment_destinations['dest_id']
-        
-        # Add importance weighting based on job count
-        max_jobs = employment_destinations['employees'].max()
-        employment_destinations['importance'] = employment_destinations['employees'] / max_jobs
-        
-        self.log(f"  Created {len(employment_destinations)} employment destinations")
-        
-        return employment_destinations
-    
-    def load_healthcare_facilities(self, county_filter='hamilton'):
-        """
-        Load healthcare facilities from curated CSV
-        
-        Returns:
-            GeoDataFrame with healthcare facility locations
-        """
-        self.log("Loading healthcare facilities...")
-        
-        healthcare_file = self.data_dir / 'healthcare' / 'hamilton_county_healthcare.csv'
-        if not healthcare_file.exists():
-            raise FileNotFoundError(f"Healthcare data not found: {healthcare_file}")
-        
-        healthcare_df = pd.read_csv(healthcare_file)
-        
-        # Create geometry from lat/lon
-        geometry = [Point(lon, lat) for lon, lat in zip(healthcare_df['lon'], healthcare_df['lat'])]
-        healthcare_gdf = gpd.GeoDataFrame(healthcare_df, geometry=geometry, crs='EPSG:4326')
-        
-        # Standardize format
-        healthcare_gdf['dest_id'] = range(len(healthcare_gdf))
-        healthcare_gdf['dest_type'] = 'healthcare'
-        
-        # Calculate importance based on beds (hospitals) or set to 0.5 (clinics)
-        healthcare_gdf['importance'] = healthcare_gdf.apply(
-            lambda row: min(1.0, row['beds'] / 400) if row['beds'] > 0 else 0.5,
+        # Add required columns
+        employment_gdf['dest_id'] = range(len(employment_gdf))
+        employment_gdf['dest_type'] = 'employment'
+        employment_gdf['name'] = employment_gdf.apply(
+            lambda x: f"Employment BG {x['block_group'][-4:]} ({int(x['employees'])} jobs)", 
             axis=1
         )
         
-        self.log(f"  Loaded {len(healthcare_gdf)} healthcare facilities")
-        self.log(f"    Hospitals: {len(healthcare_gdf[healthcare_gdf['type'] == 'hospital'])}")
-        self.log(f"    Clinics: {len(healthcare_gdf[healthcare_gdf['type'] == 'clinic'])}")
+        self._log(f"✓ Loaded {len(employment_gdf)} employment locations with {employment_gdf['employees'].sum():,} total jobs")
         
-        return healthcare_gdf
+        return employment_gdf[['dest_id', 'name', 'employees', 'dest_type', 'geometry']]
+    
+    def load_healthcare_facilities(self):
+        """
+        Load healthcare facilities from CSV
+        Returns GeoDataFrame with facility locations
+        
+        Uses actual file structure:
+        - data/raw/healthcare/hamilton_county_healthcare.csv
+        """
+        self._log("Loading healthcare facilities...")
+        
+        healthcare_file = os.path.join(self.data_dir, 'healthcare', 'hamilton_county_healthcare.csv')
+        
+        if not os.path.exists(healthcare_file):
+            raise FileNotFoundError(
+                f"Healthcare data not found: {healthcare_file}"
+            )
+        
+        # Load healthcare data
+        self._log(f"Reading healthcare data from {healthcare_file}")
+        healthcare_data = pd.read_csv(healthcare_file)
+        
+        # Validate required columns
+        required_cols = ['name', 'lat', 'lon']
+        missing_cols = [col for col in required_cols if col not in healthcare_data.columns]
+        if missing_cols:
+            raise ValueError(f"Healthcare CSV missing required columns: {missing_cols}")
+        
+        # Create geometry from lat/lon
+        geometry = [Point(xy) for xy in zip(healthcare_data['lon'], healthcare_data['lat'])]
+        healthcare_gdf = gpd.GeoDataFrame(
+            healthcare_data,
+            geometry=geometry,
+            crs='EPSG:4326'
+        )
+        
+        # Add required columns
+        healthcare_gdf['dest_id'] = range(len(healthcare_gdf))
+        healthcare_gdf['dest_type'] = 'healthcare'
+        
+        self._log(f"✓ Loaded {len(healthcare_gdf)} healthcare facilities")
+        
+        return healthcare_gdf[['dest_id', 'name', 'dest_type', 'geometry']]
     
     def load_grocery_stores(self):
         """
-        Load grocery stores from OSM data
+        Load grocery stores from OSM export CSV
+        Returns GeoDataFrame with store locations
         
-        Returns:
-            GeoDataFrame with grocery store locations
+        Uses actual file structure:
+        - data/raw/osm_grocery/hamilton_county_grocery_stores.csv
         """
-        self.log("Loading grocery stores...")
+        self._log("Loading grocery stores...")
         
-        grocery_file = self.data_dir / 'osm_grocery' / 'hamilton_county_grocery_stores.csv'
-        if not grocery_file.exists():
-            raise FileNotFoundError(f"Grocery data not found: {grocery_file}")
+        grocery_file = os.path.join(self.data_dir, 'osm_grocery', 'hamilton_county_grocery_stores.csv')
         
-        grocery_df = pd.read_csv(grocery_file)
+        if not os.path.exists(grocery_file):
+            raise FileNotFoundError(
+                f"Grocery data not found: {grocery_file}"
+            )
+        
+        # Load grocery data
+        self._log(f"Reading grocery data from {grocery_file}")
+        grocery_data = pd.read_csv(grocery_file)
+        
+        # Validate required columns
+        required_cols = ['name', 'lat', 'lon']
+        missing_cols = [col for col in required_cols if col not in grocery_data.columns]
+        if missing_cols:
+            raise ValueError(f"Grocery CSV missing required columns: {missing_cols}")
         
         # Create geometry from lat/lon
-        geometry = [Point(lon, lat) for lon, lat in zip(grocery_df['lon'], grocery_df['lat'])]
-        grocery_gdf = gpd.GeoDataFrame(grocery_df, geometry=geometry, crs='EPSG:4326')
+        geometry = [Point(xy) for xy in zip(grocery_data['lon'], grocery_data['lat'])]
+        grocery_gdf = gpd.GeoDataFrame(
+            grocery_data,
+            geometry=geometry,
+            crs='EPSG:4326'
+        )
         
-        # Standardize format
+        # Add required columns
         grocery_gdf['dest_id'] = range(len(grocery_gdf))
         grocery_gdf['dest_type'] = 'grocery'
         
-        # Calculate importance based on store type
-        store_type_importance = {
-            'supermarket': 1.0,
-            'convenience': 0.4,
-            'grocery': 0.7
+        self._log(f"✓ Loaded {len(grocery_gdf)} grocery stores")
+        
+        return grocery_gdf[['dest_id', 'name', 'dest_type', 'geometry']]
+
+
+# Quick validation function
+def validate_data_files(data_dir='./data/raw'):
+    """
+    Validate that all required data files exist
+    Returns dict with validation results
+    """
+    results = {
+        'employment': {
+            'wac_file': os.path.exists(os.path.join(data_dir, 'lehd', 'tn_wac_S000_JT00_2021.csv')),
+            'block_file': os.path.exists(os.path.join(data_dir, 'lehd', 'tl_2021_47_tabblock20.shp'))
+        },
+        'healthcare': {
+            'facility_file': os.path.exists(os.path.join(data_dir, 'healthcare', 'hamilton_county_healthcare.csv'))
+        },
+        'grocery': {
+            'store_file': os.path.exists(os.path.join(data_dir, 'osm_grocery', 'hamilton_county_grocery_stores.csv'))
         }
-        grocery_gdf['importance'] = grocery_gdf['type'].map(store_type_importance).fillna(0.6)
-        
-        self.log(f"  Loaded {len(grocery_gdf)} grocery stores")
-        
-        return grocery_gdf
+    }
     
-    def load_all_destinations(self, state_fips='47', county_fips='065'):
-        """
-        Load all destination types
+    all_present = all([
+        results['employment']['wac_file'],
+        results['employment']['block_file'],
+        results['healthcare']['facility_file'],
+        results['grocery']['store_file']
+    ])
+    
+    return results, all_present
+
+
+if __name__ == '__main__':
+    # Quick test
+    print("Validating data file structure...")
+    results, all_present = validate_data_files()
+    
+    print("\nEmployment Data:")
+    print(f"  WAC file: {'✓' if results['employment']['wac_file'] else '✗'}")
+    print(f"  Block geometries: {'✓' if results['employment']['block_file'] else '✗'}")
+    
+    print("\nHealthcare Data:")
+    print(f"  Facility file: {'✓' if results['healthcare']['facility_file'] else '✗'}")
+    
+    print("\nGrocery Data:")
+    print(f"  Store file: {'✓' if results['grocery']['store_file'] else '✗'}")
+    
+    if all_present:
+        print("\n✓ All required data files present!")
+        print("\nAttempting to load data...")
         
-        Returns:
-            Dictionary with 'employment', 'healthcare', 'grocery' GeoDataFrames
-        """
-        self.log("Loading all real destinations...")
+        loader = RealDataLoader(data_dir='./data/raw')
         
-        destinations = {
-            'employment': self.load_lehd_employment(state_fips, county_fips),
-            'healthcare': self.load_healthcare_facilities(),
-            'grocery': self.load_grocery_stores()
-        }
+        try:
+            emp = loader.load_lehd_employment()
+            print(f"✓ Employment: {len(emp)} locations")
+        except Exception as e:
+            print(f"✗ Employment: {e}")
         
-        total_destinations = sum(len(dests) for dests in destinations.values())
-        self.log(f"Total destinations loaded: {total_destinations}")
+        try:
+            health = loader.load_healthcare_facilities()
+            print(f"✓ Healthcare: {len(health)} facilities")
+        except Exception as e:
+            print(f"✗ Healthcare: {e}")
         
-        return destinations
+        try:
+            grocery = loader.load_grocery_stores()
+            print(f"✓ Grocery: {len(grocery)} stores")
+        except Exception as e:
+            print(f"✗ Grocery: {e}")
+    else:
+        print("\n✗ Some required data files are missing")
+        print("See above for details")

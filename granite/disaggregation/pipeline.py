@@ -345,27 +345,105 @@ class GRANITEPipeline:
         }
     
     def _train_multi_tract_gnn(self, graph_data, tract_svis, addresses):
-        """Train GNN with multi-tract constraints"""
+        """Train GNN with proper multi-tract constraints"""
         
-        # For now, use weighted average constraint
-        all_predictions = []
-        tract_weights = {}
+        self._log("Training Multi-Tract Accessibility SVI GNN...")
         
-        for fips, svi in tract_svis.items():
-            tract_mask = addresses['tract_fips'] == fips
-            tract_weights[fips] = tract_mask.sum()
-        
-        # Train with average SVI as target (simple approximation)
-        total_addresses = sum(tract_weights.values())
-        weighted_svi = sum(svi * tract_weights[fips] / total_addresses 
-                        for fips, svi in tract_svis.items())
-        
-        self._log(f"Multi-tract training: weighted target SVI = {weighted_svi:.4f}")
-        
-        # Use existing training function
-        return self._train_accessibility_svi_gnn(
-            graph_data, weighted_svi, addresses
-        )
+        try:
+            from ..models.gnn import AccessibilitySVIGNN, MultiTractGNNTrainer, normalize_accessibility_features
+            import torch
+            import pandas as pd
+            
+            # Normalize features (same as single-tract)
+            normalized_features, feature_scaler = normalize_accessibility_features(graph_data.x.numpy())
+            graph_data.x = torch.FloatTensor(normalized_features)
+            
+            # Create model (same architecture as single-tract)
+            model = AccessibilitySVIGNN(
+                accessibility_features_dim=graph_data.x.shape[1],
+                hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
+                dropout=self.config.get('model', {}).get('dropout', 0.3)
+            )
+            
+            # Create tract masks for per-tract constraints
+            tract_masks = {}
+            for fips in tract_svis.keys():
+                tract_masks[fips] = (addresses['tract_fips'] == fips).values
+            
+            # Create MULTI-TRACT trainer (new class)
+            trainer = MultiTractGNNTrainer(model, config=self.config.get('training', {}))
+            
+            # Training parameters
+            epochs = self.config.get('model', {}).get('epochs', 100)
+            
+            self._log(f"Training on {len(tract_svis)} tracts:")
+            for fips, svi in tract_svis.items():
+                n_addrs = tract_masks[fips].sum()
+                self._log(f"  {fips}: {n_addrs} addresses, SVI={svi:.4f}")
+            
+            # Train with multi-tract constraints
+            training_result = trainer.train(
+                graph_data=graph_data,
+                tract_svis=tract_svis,
+                tract_masks=tract_masks,
+                epochs=epochs,
+                verbose=self.verbose
+            )
+            
+            # Store raw predictions with tract info
+            predictions = training_result['final_predictions']
+            self._stored_raw_predictions = pd.DataFrame({
+                'mean': predictions,
+                'x': addresses.geometry.x.values,
+                'y': addresses.geometry.y.values,
+                'tract_fips': addresses['tract_fips'].values
+            })
+            
+            # Report results
+            overall_error = training_result['overall_constraint_error']
+            spatial_std = training_result['final_spatial_std']
+            
+            self._log(f"Multi-tract training completed:")
+            self._log(f"  Overall constraint error: {overall_error:.2f}%")
+            self._log(f"  Spatial variation: {spatial_std:.4f}")
+            self._log(f"  Epochs: {training_result['epochs_trained']}")
+            
+            # Show per-tract errors
+            self._log("Per-tract constraint errors:")
+            for fips, error in training_result['per_tract_errors'].items():
+                self._log(f"  {fips}: {error:.2f}%")
+            
+            # Quality assessment
+            if overall_error < 10 and spatial_std > 0.01:
+                self._log("✓ Multi-tract training quality: GOOD")
+            elif overall_error < 25:
+                self._log("⚠ Multi-tract training quality: ACCEPTABLE")
+            else:
+                self._log("✗ Multi-tract training quality: POOR")
+            
+            return {
+                'success': True,
+                'raw_predictions': predictions,
+                'learned_accessibility': training_result.get('learned_accessibility'),
+                'model': model,
+                'training_history': training_result.get('training_history', {}),
+                'raw_constraint_error': overall_error,
+                'per_tract_errors': training_result['per_tract_errors'],
+                'spatial_std': spatial_std,
+                'epochs_trained': training_result['epochs_trained'],
+                'learning_converged': training_result['learning_converged']
+            }
+            
+        except Exception as e:
+            self._log(f"Error in multi-tract training: {str(e)}")
+            import traceback
+            self._log(f"Traceback: {traceback.format_exc()}")
+            
+            return {
+                'success': False,
+                'error': str(e),
+                'raw_predictions': None
+            }
     
     def _generate_feature_names(self, n_features):
         """Updated feature names matching actual feature extraction"""
@@ -547,8 +625,7 @@ class GRANITEPipeline:
                     # CHANGE 3: Use the FIXED travel time calculation
                     travel_times = accessibility_computer.calculate_realistic_travel_times(
                         origins=addresses,
-                        destinations=dest_gdf,
-                        time_period='morning'
+                        destinations=dest_gdf
                     )
 
                     # NEW: Validate travel times before feature extraction
@@ -570,7 +647,7 @@ class GRANITEPipeline:
                         sample = travel_times.head(3)
                         self._log(f"  Sample {dest_type} travel times:")
                         for _, row in sample.iterrows():
-                            self._log(f"    Origin {row['origin_id']} -> Dest {row['destination_id']}: "
+                            self._log(f"    Origin {row['origin_id']} -> Dest {row['dest_id']}: "
                                     f"{row['combined_time']:.1f}min ({row['best_mode']})")
                     
                     # CHANGE 4: Use the FIXED feature extraction
@@ -1520,8 +1597,56 @@ class GRANITEPipeline:
             'count_features': count_features
         }
     
+    def _get_expected_correlation_direction(self, feature_name):
+        """
+        Determine theoretically expected correlation direction with vulnerability.
+        
+        Returns:
+            "POSITIVE": Feature should increase with vulnerability (e.g., longer travel times)
+            "NEGATIVE": Feature should decrease with vulnerability (e.g., more destinations)
+            "UNKNOWN": Feature type cannot be classified
+        """
+        feature_lower = feature_name.lower()
+        
+        # Features that should correlate POSITIVELY with vulnerability
+        # (Higher values = worse accessibility = higher vulnerability)
+        positive_indicators = [
+            'min_time', 'mean_time', 'median_time',  # Longer travel times = worse
+            'drive_advantage',  # Higher car dependency = worse
+            'dispersion',  # More scattered destinations = worse
+            'time_range',  # Greater time variation = worse
+            'percentile',  # Higher percentile = worse relative position
+            'accessibility_percentile'  # Higher percentile = worse accessibility
+        ]
+        
+        # Features that should correlate NEGATIVELY with vulnerability
+        # (Higher values = better accessibility = lower vulnerability)
+        negative_indicators = [
+            'count_5min', 'count_10min', 'count_15min',  # More nearby destinations = better
+            'count_30min', 'count_60min', 'count_90min',
+            'local_accessibility_index',  # Higher index = better
+            'modal_flexibility',  # More options = better
+            'accessibility_score',  # Higher score = better
+            'accessibility_equity',  # Higher equity = better
+            'geographic_accessibility'  # Higher = better
+        ]
+        
+        # Check positive indicators first (more specific)
+        for indicator in positive_indicators:
+            if indicator in feature_lower:
+                return "POSITIVE"
+        
+        # Then check negative indicators
+        for indicator in negative_indicators:
+            if indicator in feature_lower:
+                return "NEGATIVE"
+        
+        # Unknown feature type
+        return "UNKNOWN"
+
+
     def _create_accessibility_correlation_diagnostic(self, final_predictions, accessibility_features):
-        """Create detailed correlation diagnostic"""
+        """Create detailed correlation diagnostic with proper feature direction classification"""
         
         self._log("=== ACCESSIBILITY CORRELATION DIAGNOSTIC ===")
         
@@ -1535,10 +1660,15 @@ class GRANITEPipeline:
             feature_values = accessibility_features[:, i]
             corr = np.corrcoef(feature_values, predicted_svi)[0, 1]
             
-            # Determine if correlation direction is theoretically correct
-            expected_direction = "POSITIVE" if any(word in feature_name for word in ['time', 'drive_advantage']) else "NEGATIVE"
+            # Determine expected direction using proper classification
+            expected_direction = self._get_expected_correlation_direction(feature_name)
             actual_direction = "POSITIVE" if corr > 0 else "NEGATIVE"
-            is_correct = expected_direction == actual_direction
+            
+            # Only mark as correct/incorrect if we know the expected direction
+            if expected_direction == "UNKNOWN":
+                is_correct = None
+            else:
+                is_correct = expected_direction == actual_direction
             
             correlations.append({
                 'feature': feature_name,
@@ -1555,26 +1685,39 @@ class GRANITEPipeline:
         self._log("TOP CORRELATIONS (strongest to weakest):")
         
         correct_count = 0
+        known_count = 0
+        
         for i, corr_info in enumerate(correlations[:15]):  # Show top 15
-            status = "✓" if corr_info['correct'] else "✗"
+            if corr_info['correct'] is None:
+                status = "?"
+            elif corr_info['correct']:
+                status = "✓"
+                correct_count += 1
+            else:
+                status = "✗"
+            
+            if corr_info['expected'] != "UNKNOWN":
+                known_count += 1
+            
             self._log(f"  {status} {corr_info['feature']}: r={corr_info['correlation']:.3f} "
                     f"({corr_info['strength']}, expected {corr_info['expected']})")
+        
+        # Calculate correctness rate only for features with known expected directions
+        if known_count > 0:
+            correctness_rate = correct_count / known_count * 100
             
-            if corr_info['correct']:
-                correct_count += 1
-        
-        total_features = len(correlations)
-        correctness_rate = correct_count / total_features * 100
-        
-        self._log(f"\nOVERALL DIRECTIONAL CORRECTNESS: {correct_count}/{total_features} ({correctness_rate:.1f}%)")
-        
-        if correctness_rate < 60:
-            self._log("🚨 MAJOR ISSUE: Less than 60% of features have correct correlation direction!")
-            self._log("   This suggests systematic feature encoding problems.")
-        elif correctness_rate < 80:
-            self._log("⚠️  WARNING: Some features may be incorrectly encoded or model is learning confounding patterns")
+            self._log(f"\nOVERALL DIRECTIONAL CORRECTNESS: {correct_count}/{known_count} ({correctness_rate:.1f}%)")
+            self._log(f"(Excluding {len(correlations) - known_count} features with unknown expected direction)")
+            
+            if correctness_rate < 60:
+                self._log("🚨 MAJOR ISSUE: Less than 60% of features have correct correlation direction!")
+                self._log("   This suggests systematic feature encoding problems OR confounding factors.")
+            elif correctness_rate < 80:
+                self._log("⚠️  WARNING: Some features may be incorrectly encoded or model is learning confounding patterns")
+            else:
+                self._log("✓ Feature directions appear mostly correct")
         else:
-            self._log("✓ Feature directions appear mostly correct")
+            self._log("\n⚠️  WARNING: No features with known expected directions found")
         
         return correlations
     

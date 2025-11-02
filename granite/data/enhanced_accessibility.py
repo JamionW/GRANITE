@@ -204,7 +204,7 @@ class EnhancedAccessibilityComputer:
             for i in range(len(feature_array)):
                 # Percentile rank of travel time (0 = best, 1 = worst)
                 percentile = np.sum(mean_times < mean_times[i]) / len(mean_times)
-                feature_array[i, 9] = percentile
+                feature_array[i, 8] = percentile
         
         return feature_array
     

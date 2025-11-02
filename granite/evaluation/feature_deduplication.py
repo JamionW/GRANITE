@@ -12,27 +12,28 @@ def deduplicate_accessibility_features(features: np.ndarray, feature_names: List
                                      verbose: bool = True) -> Tuple[np.ndarray, List[str]]:
     """
     Remove perfectly correlated and redundant features
-    
-    Args:
-        features: Feature matrix [n_addresses, n_features]
-        feature_names: List of feature names
-        correlation_threshold: Correlation threshold for deduplication
-        verbose: Whether to print deduplication info
-        
-    Returns:
-        deduplicated_features, deduplicated_feature_names
     """
     
+    # CRITICAL FIX: Ensure feature_names matches actual feature count
+    n_features = features.shape[1]
+    if len(feature_names) != n_features:
+        if verbose:
+            print(f"[FeatureDedup] WARNING: Adjusting feature_names from {len(feature_names)} to {n_features}")
+        if len(feature_names) > n_features:
+            feature_names = feature_names[:n_features]
+        else:
+            feature_names = feature_names + [f'feature_{i}' for i in range(len(feature_names), n_features)]
+    
     if verbose:
-        print(f"[FeatureDedup] Starting with {features.shape[1]} features")
+        print(f"[FeatureDedup] Starting with {n_features} features")
     
     # Calculate correlation matrix
     corr_matrix = np.corrcoef(features.T)
     
     # Find highly correlated pairs
     high_corr_pairs = []
-    for i in range(len(feature_names)):
-        for j in range(i + 1, len(feature_names)):
+    for i in range(n_features):  # CHANGED: was range(len(feature_names))
+        for j in range(i + 1, n_features):  # CHANGED: was range(i + 1, len(feature_names))
             if abs(corr_matrix[i, j]) >= correlation_threshold:
                 high_corr_pairs.append((i, j, corr_matrix[i, j], feature_names[i], feature_names[j]))
     

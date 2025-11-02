@@ -177,6 +177,14 @@ class EnhancedAccessibilityComputer:
                 else:
                     dispersion = 0.0
                 
+                # Time range - normalized by mean time for scale independence
+                if len(combined_times) > 1:
+                    time_range = float(combined_times.max() - combined_times.min())
+                    normalized_time_range = time_range / (mean_time + 1e-8)
+                    normalized_time_range = max(0.0, min(2.0, normalized_time_range))
+                else:
+                    normalized_time_range = 0.0
+                
                 accessibility_percentile = 0.5  # Will be computed later
                 
                 feature_vector = [
@@ -188,11 +196,13 @@ class EnhancedAccessibilityComputer:
                     count_15min,
                     drive_advantage,
                     dispersion,
+                    normalized_time_range,
                     accessibility_percentile
                 ]
                 
             else:
-                feature_vector = [120.0, 120.0, 120.0, 0, 0, 0, 0.5, 0.5, 0.5]
+                # Fallback for addresses with no travel time data
+                feature_vector = [120.0, 120.0, 120.0, 0, 0, 0, 0.5, 0.5, 0.0, 0.5]
             
             features.append(feature_vector)
         
@@ -204,7 +214,7 @@ class EnhancedAccessibilityComputer:
             for i in range(len(feature_array)):
                 # Percentile rank of travel time (0 = best, 1 = worst)
                 percentile = np.sum(mean_times < mean_times[i]) / len(mean_times)
-                feature_array[i, 8] = percentile
+                feature_array[i, 9] = percentile
         
         return feature_array
     
@@ -215,7 +225,7 @@ class EnhancedAccessibilityComputer:
         feature_names = [
             'min_time', 'mean_time', 'median_time',
             'count_5min', 'count_10min', 'count_15min', 
-            'drive_advantage', 'accessibility_concentration',
+            'drive_advantage', 'dispersion', 'time_range',
             'accessibility_percentile'
         ]
         
@@ -754,7 +764,7 @@ class EnhancedAccessibilityComputer:
         feature_names = [
             'min_time', 'mean_time', 'median_time',
             'count_5min', 'count_10min', 'count_15min',
-            'drive_advantage', 'dispersion', 'accessibility_percentile'
+            'drive_advantage', 'dispersion', 'time_range', 'accessibility_percentile'
         ]
         
         # FIXED: Correct synthetic vulnerability
@@ -763,6 +773,7 @@ class EnhancedAccessibilityComputer:
             -0.2 * features[:, 4] +     # count_10min (NEGATIVE)
             0.15 * features[:, 6] +     # drive_advantage (POSITIVE)
             0.15 * features[:, 7] +     # dispersion (POSITIVE - more scattered = worse)
+            0.1 * features[:, 8] +      # time_range (POSITIVE - more variability = worse)
             0.2 * features[:, 9]        # percentile (POSITIVE - higher = worse position)
         )
         
@@ -781,7 +792,7 @@ class EnhancedAccessibilityComputer:
             
             # FIXED: Correct expected directions
             if name in ['min_time', 'mean_time', 'median_time', 'drive_advantage', 
-                        'dispersion', 'accessibility_percentile']:
+                        'dispersion', 'time_range', 'accessibility_percentile']:
                 expected_positive = True
             elif name in ['count_5min', 'count_10min', 'count_15min']:
                 expected_positive = False

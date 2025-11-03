@@ -315,23 +315,23 @@ class AccessibilityFeatureValidator:
             start_idx = dest_idx * 10 + 3  # Count features start at offset 3
             
             if start_idx + 2 < self.accessibility_features.shape[1]:
-                count_30 = self.accessibility_features[:, start_idx]
-                count_60 = self.accessibility_features[:, start_idx + 1]
-                count_90 = self.accessibility_features[:, start_idx + 2]
+                count_5min = self.accessibility_features[:, start_idx]
+                count_10min = self.accessibility_features[:, start_idx + 1]
+                count_15min = self.accessibility_features[:, start_idx + 2]
                 
                 # Check progression validity
-                valid_30_60 = np.sum(count_30 <= count_60)
-                valid_60_90 = np.sum(count_60 <= count_90)
-                valid_full = np.sum((count_30 <= count_60) & (count_60 <= count_90))
+                valid_5_to_10 = np.sum(count_5min <= count_10min)
+                valid_10_to_15 = np.sum(count_10min <= count_15min)
+                valid_full = np.sum((count_5min <= count_10min) & (count_10min <= count_15min))
                 
                 progressions[dest_type] = {
-                    'valid_30_to_60': int(valid_30_60),
-                    'valid_60_to_90': int(valid_60_90),
+                    'valid_5_to_10': int(valid_5_to_10),
+                    'valid_10_to_15': int(valid_10_to_15),
                     'valid_full_progression': int(valid_full),
                     'total_addresses': self.n_addresses,
                     'progression_validity_rate': valid_full / self.n_addresses,
-                    'violations_30_60': int(np.sum(count_30 > count_60)),
-                    'violations_60_90': int(np.sum(count_60 > count_90))
+                    'violations_5_to_10': int(np.sum(count_5min > count_10min)),
+                    'violations_10_to_15': int(np.sum(count_10min > count_15min))
                 }
         
         return progressions
@@ -539,8 +539,8 @@ class AccessibilityFeatureValidator:
                 min_time = self.accessibility_features[:, start_idx]
                 count_10min = self.accessibility_features[:, start_idx + 4]  # 10min count
                 
-                if np.std(min_time) > 0 and np.std(count_60) > 0:
-                    corr = pearsonr(min_time, count_60)[0]
+                if np.std(min_time) > 0 and np.std(count_5) > 0:
+                    corr = pearsonr(min_time, count_5)[0]
                     time_count_correlations.append({
                         'destination': dest_type,
                         'correlation': corr,
@@ -560,8 +560,8 @@ class AccessibilityFeatureValidator:
                 score = self.accessibility_features[:, start_idx + 7]  # accessibility_score
                 count_10min = self.accessibility_features[:, start_idx + 4]  # 60min count
                 
-                if np.std(score) > 0 and np.std(count_60) > 0:
-                    corr = pearsonr(score, count_60)[0]
+                if np.std(score) > 0 and np.std(count_5) > 0:
+                    corr = pearsonr(score, count_5)[0]
                     score_count_correlations.append({
                         'destination': dest_type,
                         'correlation': corr,
@@ -1329,7 +1329,7 @@ class AccessibilityFeatureValidator:
         # 1. Time vs Count relationship
         ax1 = axes[0, 0]
         time_features = [i for i, name in enumerate(self.feature_names) if 'min_time' in name]
-        count_features = [i for i, name in enumerate(self.feature_names) if 'count_60min' in name]
+        count_features = [i for i, name in enumerate(self.feature_names) if 'count_5min' in name]
         
         if time_features and count_features:
             for i, (time_idx, count_idx) in enumerate(zip(time_features, count_features)):

@@ -155,19 +155,50 @@ class EnhancedAccessibilityComputer:
                 count_10min = int((combined_times <= 10).sum())
                 count_15min = int((combined_times <= 15).sum())
                 
-                if 'best_mode' in addr_times.columns:
-                    walk_mask = addr_times['best_mode'] == 'walk'
-                    drive_mask = addr_times['best_mode'] == 'drive'
+                # Compute drive advantage using actual modal times
+                drive_advantage = 0.0  # Default value
+
+                if 'walk_time' in addr_times.columns and 'drive_time' in addr_times.columns:
+                    walk_times = addr_times['walk_time'].values
+                    drive_times = addr_times['drive_time'].values
                     
-                    if walk_mask.any() and drive_mask.any():
-                        walk_avg = addr_times[walk_mask]['combined_time'].mean()
-                        drive_avg = addr_times[drive_mask]['combined_time'].mean()
-                        drive_advantage = (walk_avg - drive_avg) / (walk_avg + 1e-8)
-                        drive_advantage = max(0.0, min(1.0, drive_advantage)) 
-                    else:
-                        drive_advantage = 0.5
-                else:
-                    drive_advantage = 0.5
+                    # Filter valid times
+                    valid_mask = (walk_times > 0) & (drive_times > 0) & np.isfinite(walk_times) & np.isfinite(drive_times)
+                    
+                    if valid_mask.sum() > 0:
+                        walk_avg = walk_times[valid_mask].mean()
+                        drive_avg = drive_times[valid_mask].mean()
+                        
+                        # Drive advantage: fraction of time saved by driving
+                        if walk_avg > 0:
+                            drive_advantage = float((walk_avg - drive_avg) / walk_avg)
+                            drive_advantage = np.clip(drive_advantage, -0.2, 1.0)
+
+                # Right after computing drive_advantage, add:
+                if dest_type == 'employment':  # Only debug employment
+                    # Store for diagnostic
+                    if not hasattr(self, '_drive_advantage_debug'):
+                        self._drive_advantage_debug = {
+                            'values': [],
+                            'walk_times_present': False,
+                            'drive_times_present': False,
+                            'valid_count': 0
+                        }
+                    
+                    self._drive_advantage_debug['values'].append(drive_advantage)
+                    
+                    if 'walk_time' in addr_times.columns:
+                        self._drive_advantage_debug['walk_times_present'] = True
+                    if 'drive_time' in addr_times.columns:
+                        self._drive_advantage_debug['drive_times_present'] = True
+                    
+                    if len(addr_times) > 0 and 'walk_time' in addr_times.columns:
+                        walk_times = addr_times['walk_time'].values
+                        drive_times = addr_times['drive_time'].values if 'drive_time' in addr_times.columns else []
+                        
+                        if len(drive_times) > 0:
+                            valid_mask = (walk_times > 0) & (drive_times > 0) & ~np.isnan(walk_times) & ~np.isnan(drive_times)
+                            self._drive_advantage_debug['valid_count'] += valid_mask.sum()
                 
                 # FIXED: Rename to "dispersion" with correct interpretation
                 # Higher dispersion = worse accessibility
@@ -215,6 +246,17 @@ class EnhancedAccessibilityComputer:
                 # Percentile rank of travel time (0 = best, 1 = worst)
                 percentile = np.sum(mean_times < mean_times[i]) / len(mean_times)
                 feature_array[i, 9] = percentile
+
+        if hasattr(self, '_drive_advantage_debug'):
+            debug = self._drive_advantage_debug
+            print(f"\n=== DRIVE ADVANTAGE DIAGNOSTIC ({dest_type}) ===")
+            print(f"Total addresses: {len(debug['values'])}")
+            print(f"walk_time column present: {debug['walk_times_present']}")
+            print(f"drive_time column present: {debug['drive_times_present']}")
+            print(f"Valid pairs found: {debug['valid_count']}")
+            print(f"Unique values: {len(set(debug['values']))}")
+            print(f"Value distribution: {np.unique(debug['values'], return_counts=True)}")
+            print(f"=======================================\n")
         
         return feature_array
     

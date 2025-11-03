@@ -1020,9 +1020,9 @@ class DataLoader:
                 percentile_90 = float(np.percentile(combined_times, 90))
                 
                 # Count-based features (destinations within time thresholds)
-                count_30min = int(np.sum(combined_times <= 30))
-                count_60min = int(np.sum(combined_times <= 60))
-                count_90min = int(np.sum(combined_times <= 90))
+                count_5min = int(np.sum(combined_times <= 5))
+                count_10min = int(np.sum(combined_times <= 10))
+                count_15min = int(np.sum(combined_times <= 15))
                 
                 # Transit accessibility
                 transit_trips = addr_times['best_mode'] == 'transit'
@@ -1034,12 +1034,12 @@ class DataLoader:
             else:
                 # No destinations accessible
                 min_time = mean_time = percentile_90 = 120.0
-                count_30min = count_60min = count_90min = 0
+                count_10min = count_5min = count_15min = 0
                 transit_share = accessibility_score = 0.0
             
             features.append([
                 min_time, mean_time, percentile_90,
-                count_30min, count_60min, count_90min,
+                count_5min, count_10min, count_15min,
                 transit_share, accessibility_score
             ])
         

@@ -1623,7 +1623,6 @@ class GRANITEPipeline:
         # (Higher values = better accessibility = lower vulnerability)
         negative_indicators = [
             'count_5min', 'count_10min', 'count_15min',  # More nearby destinations = better
-            'count_30min', 'count_60min', 'count_90min',
             'local_accessibility_index',  # Higher index = better
             'modal_flexibility',  # More options = better
             'accessibility_score',  # Higher score = better

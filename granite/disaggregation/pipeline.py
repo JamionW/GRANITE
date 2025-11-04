@@ -446,49 +446,59 @@ class GRANITEPipeline:
             }
     
     def _generate_feature_names(self, n_features):
-        """Updated feature names matching actual feature extraction"""
-        base_features = []
-        for dest_type in ['employment', 'healthcare', 'grocery']:
-            base_features.extend([
+        """Generate feature names for n features (now 24 per destination type)"""
+        
+        feature_names = []
+        
+        # We have 3 destination types × 24 features = 72 base features
+        # Plus 4 derived features = 76 total (before deduplication)
+        dest_types = ['employment', 'healthcare', 'grocery']
+        
+        for dest_type in dest_types:
+            # Original 10 features
+            feature_names.extend([
                 f'{dest_type}_min_time',
-                f'{dest_type}_mean_time', 
+                f'{dest_type}_mean_time',
                 f'{dest_type}_median_time',
                 f'{dest_type}_count_5min',
                 f'{dest_type}_count_10min',
                 f'{dest_type}_count_15min',
                 f'{dest_type}_drive_advantage',
-                f'{dest_type}_dispersion',  # RENAMED
+                f'{dest_type}_dispersion',
                 f'{dest_type}_time_range',
-                f'{dest_type}_percentile'
+                f'{dest_type}_percentile',
+            ])
+            
+            # New 14 features
+            feature_names.extend([
+                f'{dest_type}_opportunity_concentration',
+                f'{dest_type}_concentration_ratio',
+                f'{dest_type}_directional_diversity',
+                f'{dest_type}_accessibility_gradient',
+                f'{dest_type}_walkability_rate',
+                f'{dest_type}_essential_walkable',
+                f'{dest_type}_walk_competitive_nearby',
+                f'{dest_type}_quality_weighted_access',
+                f'{dest_type}_network_connectivity',
+                f'{dest_type}_accessible_30min_count',
+                f'{dest_type}_drive_adv_category',
+                f'{dest_type}_time_stability',
+                f'{dest_type}_accessibility_inequality',
+                f'{dest_type}_edge_penalty',
             ])
         
+        # Derived features (4)
         derived_features = [
             'local_accessibility_index',
             'modal_flexibility',
-            'accessibility_equity', 
+            'accessibility_equity',
             'geographic_advantage'
         ]
         
-        # Socioeconomic control features (9 features)
-        socioeconomic_features = [
-            'pct_no_vehicle',
-            'pct_poverty',
-            'pct_unemployed',
-            'pct_no_hs_diploma',
-            'pct_uninsured',
-            'pct_mobile_homes',
-            'pct_crowded',
-            'population',
-            'housing_units'
-        ]
+        feature_names.extend(derived_features)
         
-        all_features = base_features + derived_features + socioeconomic_features
-        
-        # CRITICAL: Return exactly n_features
-        if len(all_features) < n_features:
-            all_features.extend([f'feature_{i}' for i in range(len(all_features), n_features)])
-        
-        return all_features[:n_features]
+        # Return exactly n_features (handles deduplication)
+        return feature_names[:n_features]
 
     def _compute_accessibility_features(self, addresses, data):
         """
@@ -654,7 +664,8 @@ class GRANITEPipeline:
                     dest_features = accessibility_computer.extract_enhanced_accessibility_features(
                         addresses=addresses,
                         travel_times=travel_times,
-                        dest_type=dest_type
+                        dest_type=dest_type,
+                        destinations=dest_gdf
                     )
                     
                     if dest_features is None or dest_features.size == 0:
@@ -667,24 +678,68 @@ class GRANITEPipeline:
                         self._log(f"ERROR: Feature count mismatch for {dest_type}: "
                                 f"got {dest_features.shape[0]}, expected {expected_addresses}")
                         continue
-                    
-                    if dest_features.shape[1] != 10:  # Expected 10 features per destination type
+
+                    # NEW: Expect 24 features per destination type
+                    if dest_features.shape[1] != 24:
                         self._log(f"WARNING: Unexpected feature count for {dest_type}: "
-                                f"got {dest_features.shape[1]}, expected 10")
-                    
-                    # VALIDATION: Check for systematic issues
-                    zero_var_features = np.sum(np.std(dest_features, axis=0) < 1e-8)
-                    if zero_var_features > 0:
-                        self._log(f"ERROR: {dest_type} has {zero_var_features} zero-variance features")
-                        continue
+                                f"got {dest_features.shape[1]}, expected 24")
+
+                    # VALIDATION: Remove zero-variance features instead of rejecting everything
+                    feature_stds = np.std(dest_features, axis=0)
+                    zero_var_mask = feature_stds < 1e-8
+                    zero_var_count = np.sum(zero_var_mask)
+
+                    if zero_var_count > 0:
+                        self._log(f"WARNING: {dest_type} has {zero_var_count} zero-variance features, removing them")
+                        
+                        # Identify which features
+                        feature_names_temp = [
+                            'min_time', 'mean_time', 'median_time',
+                            'count_5min', 'count_10min', 'count_15min',
+                            'drive_advantage', 'dispersion', 'time_range', 'percentile',
+                            'opportunity_concentration', 'concentration_ratio',
+                            'directional_diversity', 'accessibility_gradient',
+                            'walkability_rate', 'essential_walkable', 'walk_competitive_nearby',
+                            'quality_weighted_access', 'network_connectivity', 'accessible_30min_count',
+                            'drive_adv_category', 'time_stability', 'accessibility_inequality', 'edge_penalty'
+                        ]
+                        
+                        for i, has_zero_var in enumerate(zero_var_mask):
+                            if has_zero_var and i < len(feature_names_temp):
+                                self._log(f"  Zero variance: {dest_type}_{feature_names_temp[i]}")
+                        
+                        # Keep only features with variance
+                        valid_features_mask = ~zero_var_mask
+                        dest_features = dest_features[:, valid_features_mask]
+                        self._log(f"  Kept {dest_features.shape[1]} features with variance")
+                        
+                        # If we removed all features, that's a real error
+                        if dest_features.shape[1] == 0:
+                            self._log(f"ERROR: All {dest_type} features have zero variance")
+                            continue
                     
                     all_features.append(dest_features)
-                    feature_names.extend([
-                        f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_median_time',
-                        f'{dest_type}_count_5min', f'{dest_type}_count_10min', f'{dest_type}_count_15min',
-                        f'{dest_type}_drive_advantage', f'{dest_type}_concentration',
-                        f'{dest_type}_time_range', f'{dest_type}_percentile'
-                    ])
+                    
+                    # Generate feature names for whatever features we actually kept
+                    base_feature_names = [
+                        'min_time', 'mean_time', 'median_time',
+                        'count_5min', 'count_10min', 'count_15min',
+                        'drive_advantage', 'dispersion', 'time_range', 'percentile',
+                        'opportunity_concentration', 'concentration_ratio',
+                        'directional_diversity', 'accessibility_gradient',
+                        'walkability_rate', 'essential_walkable', 'walk_competitive_nearby',
+                        'quality_weighted_access', 'network_connectivity', 'accessible_30min_count',
+                        'drive_adv_category', 'time_stability', 'accessibility_inequality', 'edge_penalty'
+                    ]
+
+                    # Only add names for features that made it through
+                    if zero_var_count > 0:
+                        # Keep only the names of features we kept
+                        kept_feature_names = [name for i, name in enumerate(base_feature_names) if not zero_var_mask[i]]
+                        feature_names.extend([f'{dest_type}_{name}' for name in kept_feature_names])
+                    else:
+                        # All features kept
+                        feature_names.extend([f'{dest_type}_{name}' for name in base_feature_names])
                     
                     successful_computations += 1
                     self._log(f"  ✓ {dest_type}: {dest_features.shape} features computed successfully")

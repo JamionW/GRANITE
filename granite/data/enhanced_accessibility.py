@@ -53,6 +53,204 @@ class EnhancedAccessibilityComputer:
     def log(self, message):
         if self.verbose:
             print(f"[EnhancedAccessibility] {message}")
+
+    def compute_concentration_features(self, addr_times, threshold_5min=5, threshold_30min=30):
+        """
+        Compute what fraction of total accessible opportunities are nearby.
+        Distinguishes trapped urban poor from connected urban affluent.
+        """
+        total_dests = len(addr_times)
+        
+        if total_dests == 0:
+            return {
+                'opportunity_concentration': 0.0,
+                'accessible_30min_count': 0,
+                'concentration_ratio': 0.0
+            }
+        
+        # Count accessible destinations within 30 minutes
+        accessible_30min = (addr_times['combined_time'] <= threshold_30min).sum()
+        
+        # Count nearby destinations within 5 minutes
+        nearby_5min = (addr_times['combined_time'] <= threshold_5min).sum()
+        
+        # What fraction of accessible destinations are nearby?
+        if accessible_30min > 0:
+            concentration = nearby_5min / accessible_30min
+        else:
+            concentration = 0.0
+        
+        # Ratio of nearby to total (captures absolute opportunity)
+        concentration_ratio = nearby_5min / total_dests if total_dests > 0 else 0.0
+        
+        return {
+            'opportunity_concentration': float(concentration),
+            'accessible_30min_count': int(accessible_30min),
+            'concentration_ratio': float(concentration_ratio)
+        }
+
+    def compute_directional_dispersion(self, address_point, dest_points, time_threshold=15):
+        """
+        Measure how evenly distributed accessible destinations are around address.
+        Urban core: high (destinations all around)
+        Suburban edge: low (destinations in one direction)
+        """
+        import numpy as np
+        
+        if len(dest_points) < 4:
+            return 0.0
+        
+        # Compute angles from address to each destination
+        dx = dest_points.geometry.x.values - address_point.x
+        dy = dest_points.geometry.y.values - address_point.y
+        angles = np.arctan2(dy, dx)  # radians, -π to π
+        
+        # Divide into 8 directional bins (N, NE, E, SE, S, SW, W, NW)
+        bins = np.linspace(-np.pi, np.pi, 9)
+        hist, _ = np.histogram(angles, bins=bins)
+        
+        # Shannon entropy of directional distribution
+        hist_positive = hist[hist > 0]
+        if len(hist_positive) == 0:
+            return 0.0
+        
+        probs = hist_positive / hist_positive.sum()
+        entropy = -np.sum(probs * np.log2(probs + 1e-10))
+        
+        # Normalize to [0, 1] - max entropy for 8 bins is log2(8) = 3.0
+        directional_diversity = entropy / 3.0
+        
+        return float(np.clip(directional_diversity, 0.0, 1.0))
+
+    def compute_accessibility_gradient(self, times_array):
+        """
+        Measure how steeply accessibility drops off with distance.
+        Steep gradient = edge location (vulnerable)
+        Gentle gradient = central location (advantaged)
+        """
+        import numpy as np
+        
+        sorted_times = np.sort(times_array)
+        
+        if len(sorted_times) < 10:
+            return 0.5
+        
+        # Compare 10th percentile to 90th percentile
+        idx_10 = max(0, len(sorted_times) // 10)
+        idx_90 = min(len(sorted_times) - 1, 9 * len(sorted_times) // 10)
+        
+        t_10 = sorted_times[idx_10]
+        t_90 = sorted_times[idx_90]
+        
+        # Calculate gradient steepness
+        if t_10 > 0:
+            gradient_steepness = (t_90 - t_10) / t_10
+        else:
+            gradient_steepness = 10.0
+        
+        # Normalize: steep (>5.0) -> 1.0, gentle (<1.0) -> 0.0
+        normalized = np.clip(gradient_steepness / 5.0, 0, 1)
+        
+        return float(normalized)
+
+    def compute_walkability_viability(self, addr_times):
+        """
+        Measure whether walking is a realistic option.
+        Not just "is driving faster" but "can you walk at all"
+        """
+        import numpy as np
+        
+        if 'walk_time' not in addr_times.columns or 'drive_time' not in addr_times.columns:
+            return {
+                'walkability_rate': 0.0,
+                'essential_walkable': 0.0,
+                'walk_competitive_nearby': 0.0
+            }
+        
+        walk_times = addr_times['walk_time'].values
+        drive_times = addr_times['drive_time'].values
+        
+        # Filter valid times
+        valid_mask = (walk_times > 0) & (drive_times > 0) & np.isfinite(walk_times) & np.isfinite(drive_times)
+        
+        if valid_mask.sum() == 0:
+            return {
+                'walkability_rate': 0.0,
+                'essential_walkable': 0.0,
+                'walk_competitive_nearby': 0.0
+            }
+        
+        walk_times = walk_times[valid_mask]
+        drive_times = drive_times[valid_mask]
+        
+        # Key destinations reachable by walking (<20min walk)
+        walkable_count = (walk_times <= 20).sum()
+        total_count = len(walk_times)
+        walkability_rate = walkable_count / total_count if total_count > 0 else 0.0
+        
+        # Are there ANY critical destinations walkable?
+        essential_walkable = float((walk_times <= 15).any())
+        
+        # Walking competitive for nearby destinations?
+        nearby_mask = drive_times <= 5
+        if nearby_mask.sum() > 0:
+            nearby_walk_times = walk_times[nearby_mask]
+            walk_competitive_nearby = (nearby_walk_times <= 15).mean()
+        else:
+            walk_competitive_nearby = 0.0
+        
+        return {
+            'walkability_rate': float(walkability_rate),
+            'essential_walkable': float(essential_walkable),
+            'walk_competitive_nearby': float(walk_competitive_nearby)
+        }
+
+    def compute_quality_weighted_accessibility(self, times_array, beta=0.1):
+        """
+        Weight accessibility by impedance function.
+        Captures that nearby opportunities are worth more than distant ones.
+        
+        Uses negative exponential decay: value = e^(-β*time)
+        β = 0.1 means half-value at ~7 minutes
+        """
+        import numpy as np
+        
+        if len(times_array) == 0:
+            return 0.0
+        
+        # Impedance function
+        impedance = np.exp(-beta * times_array)
+        
+        # Sum of impedance-weighted opportunities
+        weighted_access = impedance.sum()
+        
+        return float(weighted_access)
+
+    def compute_network_centrality_proxy(self, address_times, destinations):
+        """
+        Proxy for network centrality without needing full graph computation.
+        Measures 'connectivity' - how well-connected is this address to the network?
+        
+        High connectivity = central location, many route options
+        Low connectivity = peripheral location, few route options
+        """
+        import numpy as np
+        
+        if len(address_times) == 0:
+            return 0.5
+        
+        times = address_times['combined_time'].values
+        
+        # Variance in travel times as proxy for route diversity
+        # Central locations have many route options -> higher variance
+        # Peripheral locations have few options -> lower variance
+        if len(times) > 1:
+            time_variance = np.std(times) / (np.mean(times) + 1e-8)
+            connectivity = np.clip(time_variance, 0, 1)
+        else:
+            connectivity = 0.0
+        
+        return float(connectivity)
     
     def calculate_realistic_travel_times(self, origins, destinations, mode='combined'):
         """Calculate travel times with OSRMRouter"""
@@ -135,8 +333,29 @@ class EnhancedAccessibilityComputer:
         
         return times
     
-    def extract_enhanced_accessibility_features(self, addresses, travel_times, dest_type):
-        """Extract 10 enhanced accessibility features"""
+    def extract_enhanced_accessibility_features(self, addresses, travel_times, dest_type, destinations=None):
+        """
+        Extract 24 enhanced accessibility features (was 10, now 24)
+        
+        Original 10:
+        - min_time, mean_time, median_time
+        - count_5min, count_10min, count_15min
+        - drive_advantage, dispersion, time_range, percentile
+        
+        New 14:
+        - opportunity_concentration, concentration_ratio
+        - directional_diversity
+        - accessibility_gradient
+        - walkability_rate, essential_walkable, walk_competitive_nearby
+        - quality_weighted_access
+        - network_connectivity
+        - accessible_30min_count
+        - drive_advantage_category (discretized)
+        - time_stability (consistency across modes)
+        - accessibility_inequality (gap between best and worst)
+        - edge_penalty (penalty for being at network edge)
+        """
+        import numpy as np
         
         features = []
         
@@ -147,6 +366,7 @@ class EnhancedAccessibilityComputer:
             if len(addr_times) > 0:
                 combined_times = addr_times['combined_time'].values
                 
+                # === ORIGINAL 10 FEATURES ===
                 min_time = float(combined_times.min())
                 mean_time = float(combined_times.mean())
                 median_time = float(np.median(combined_times))
@@ -155,60 +375,30 @@ class EnhancedAccessibilityComputer:
                 count_10min = int((combined_times <= 10).sum())
                 count_15min = int((combined_times <= 15).sum())
                 
-                # Compute drive advantage using actual modal times
-                drive_advantage = 0.0  # Default value
-
+                # Drive advantage (fixed version)
+                drive_advantage = 0.0
                 if 'walk_time' in addr_times.columns and 'drive_time' in addr_times.columns:
                     walk_times = addr_times['walk_time'].values
                     drive_times = addr_times['drive_time'].values
                     
-                    # Filter valid times
                     valid_mask = (walk_times > 0) & (drive_times > 0) & np.isfinite(walk_times) & np.isfinite(drive_times)
                     
                     if valid_mask.sum() > 0:
                         walk_avg = walk_times[valid_mask].mean()
                         drive_avg = drive_times[valid_mask].mean()
                         
-                        # Drive advantage: fraction of time saved by driving
                         if walk_avg > 0:
                             drive_advantage = float((walk_avg - drive_avg) / walk_avg)
                             drive_advantage = np.clip(drive_advantage, -0.2, 1.0)
-
-                # Right after computing drive_advantage, add:
-                if dest_type == 'employment':  # Only debug employment
-                    # Store for diagnostic
-                    if not hasattr(self, '_drive_advantage_debug'):
-                        self._drive_advantage_debug = {
-                            'values': [],
-                            'walk_times_present': False,
-                            'drive_times_present': False,
-                            'valid_count': 0
-                        }
-                    
-                    self._drive_advantage_debug['values'].append(drive_advantage)
-                    
-                    if 'walk_time' in addr_times.columns:
-                        self._drive_advantage_debug['walk_times_present'] = True
-                    if 'drive_time' in addr_times.columns:
-                        self._drive_advantage_debug['drive_times_present'] = True
-                    
-                    if len(addr_times) > 0 and 'walk_time' in addr_times.columns:
-                        walk_times = addr_times['walk_time'].values
-                        drive_times = addr_times['drive_time'].values if 'drive_time' in addr_times.columns else []
-                        
-                        if len(drive_times) > 0:
-                            valid_mask = (walk_times > 0) & (drive_times > 0) & ~np.isnan(walk_times) & ~np.isnan(drive_times)
-                            self._drive_advantage_debug['valid_count'] += valid_mask.sum()
                 
-                # FIXED: Rename to "dispersion" with correct interpretation
-                # Higher dispersion = worse accessibility
+                # Dispersion
                 if len(combined_times) > 1:
                     dispersion = np.std(combined_times) / (mean_time + 1e-8)
                     dispersion = max(0.0, min(1.0, dispersion))
                 else:
                     dispersion = 0.0
                 
-                # Time range - normalized by mean time for scale independence
+                # Time range
                 if len(combined_times) > 1:
                     time_range = float(combined_times.max() - combined_times.min())
                     normalized_time_range = time_range / (mean_time + 1e-8)
@@ -218,7 +408,85 @@ class EnhancedAccessibilityComputer:
                 
                 accessibility_percentile = 0.5  # Will be computed later
                 
+                # === NEW 14 FEATURES ===
+                
+                # 1-3: Concentration features
+                conc_features = self.compute_concentration_features(addr_times)
+                opportunity_concentration = conc_features['opportunity_concentration']
+                accessible_30min_count = conc_features['accessible_30min_count']
+                concentration_ratio = conc_features['concentration_ratio']
+                
+                # 4: Directional diversity
+                if destinations is not None and len(destinations) > 0:
+                    directional_diversity = self.compute_directional_dispersion(
+                        address.geometry, 
+                        destinations
+                    )
+                else:
+                    directional_diversity = 0.5
+                
+                # 5: Accessibility gradient
+                accessibility_gradient = self.compute_accessibility_gradient(combined_times)
+                
+                # 6-8: Walkability viability
+                walk_features = self.compute_walkability_viability(addr_times)
+                walkability_rate = walk_features['walkability_rate']
+                essential_walkable = walk_features['essential_walkable']
+                walk_competitive_nearby = walk_features['walk_competitive_nearby']
+                
+                # 9: Quality-weighted accessibility
+                quality_weighted_access = self.compute_quality_weighted_accessibility(combined_times)
+                
+                # 10: Network connectivity proxy
+                network_connectivity = self.compute_network_centrality_proxy(addr_times, destinations)
+                
+                # 11: Drive advantage category (discretized for interpretability)
+                if drive_advantage < 0.5:
+                    drive_adv_category = 0.0  # Walking competitive
+                elif drive_advantage < 0.75:
+                    drive_adv_category = 0.5  # Moderate car advantage
+                else:
+                    drive_adv_category = 1.0  # Strong car dependency
+                
+                # 12: Time stability (how consistent are times across modes?)
+                if 'walk_time' in addr_times.columns and 'drive_time' in addr_times.columns:
+                    walk_times = addr_times['walk_time'].values
+                    drive_times = addr_times['drive_time'].values
+                    valid_mask = (walk_times > 0) & (drive_times > 0) & np.isfinite(walk_times) & np.isfinite(drive_times)
+                    
+                    if valid_mask.sum() > 0:
+                        # Lower variance = more stable/predictable
+                        time_cv = np.std(combined_times[valid_mask]) / (np.mean(combined_times[valid_mask]) + 1e-8)
+                        time_stability = 1.0 - np.clip(time_cv, 0, 1)
+                    else:
+                        time_stability = 0.5
+                else:
+                    time_stability = 0.5
+                
+                # 13: Accessibility inequality (gap between best and worst access)
+                if len(combined_times) > 1:
+                    best = combined_times.min()
+                    worst = combined_times.max()
+                    if best > 0:
+                        inequality = (worst - best) / best
+                        accessibility_inequality = np.clip(inequality / 10.0, 0, 1)
+                    else:
+                        accessibility_inequality = 1.0
+                else:
+                    accessibility_inequality = 0.0
+                
+                # 14: Edge penalty (are you at the edge of accessible area?)
+                # High penalty = few nearby destinations, many far destinations
+                if count_5min == 0 and count_15min > 0:
+                    edge_penalty = 1.0
+                elif count_5min > 0:
+                    edge_penalty = 0.0
+                else:
+                    edge_penalty = 0.5
+                
+                # Assemble feature vector (24 features)
                 feature_vector = [
+                    # Original 10
                     min_time,
                     mean_time,
                     median_time,
@@ -228,12 +496,36 @@ class EnhancedAccessibilityComputer:
                     drive_advantage,
                     dispersion,
                     normalized_time_range,
-                    accessibility_percentile
+                    accessibility_percentile,
+                    
+                    # New 14
+                    opportunity_concentration,
+                    concentration_ratio,
+                    directional_diversity,
+                    accessibility_gradient,
+                    walkability_rate,
+                    essential_walkable,
+                    walk_competitive_nearby,
+                    quality_weighted_access,
+                    network_connectivity,
+                    accessible_30min_count,
+                    drive_adv_category,
+                    time_stability,
+                    accessibility_inequality,
+                    edge_penalty
                 ]
                 
             else:
-                # Fallback for addresses with no travel time data
-                feature_vector = [120.0, 120.0, 120.0, 0, 0, 0, 0.5, 0.5, 0.0, 0.5]
+                # Fallback for addresses with no travel time data (24 features)
+                feature_vector = [
+                    120.0, 120.0, 120.0,  # times
+                    0, 0, 0,  # counts
+                    0.5, 0.5, 0.0, 0.5,  # original features
+                    0.0, 0.0, 0.5, 1.0,  # concentration, diversity, gradient
+                    0.0, 0.0, 0.0,  # walkability
+                    0.0, 0.5,  # quality, connectivity
+                    0, 1.0, 0.5, 1.0, 1.0  # counts, categories, stability, inequality, edge
+                ]
             
             features.append(feature_vector)
         
@@ -243,11 +535,11 @@ class EnhancedAccessibilityComputer:
         if len(feature_array) > 1:
             mean_times = feature_array[:, 1]
             for i in range(len(feature_array)):
-                # Percentile rank of travel time (0 = best, 1 = worst)
                 percentile = np.sum(mean_times < mean_times[i]) / len(mean_times)
                 feature_array[i, 9] = percentile
-
-        if hasattr(self, '_drive_advantage_debug'):
+        
+        # Debug output for first destination type only
+        if dest_type == 'employment' and hasattr(self, '_drive_advantage_debug'):
             debug = self._drive_advantage_debug
             print(f"\n=== DRIVE ADVANTAGE DIAGNOSTIC ({dest_type}) ===")
             print(f"Total addresses: {len(debug['values'])}")

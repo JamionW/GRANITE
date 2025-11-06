@@ -408,82 +408,6 @@ class EnhancedAccessibilityComputer:
                 
                 accessibility_percentile = 0.5  # Will be computed later
                 
-                # === NEW 14 FEATURES ===
-                
-                # 1-3: Concentration features
-                conc_features = self.compute_concentration_features(addr_times)
-                opportunity_concentration = conc_features['opportunity_concentration']
-                accessible_30min_count = conc_features['accessible_30min_count']
-                concentration_ratio = conc_features['concentration_ratio']
-                
-                # 4: Directional diversity
-                if destinations is not None and len(destinations) > 0:
-                    directional_diversity = self.compute_directional_dispersion(
-                        address.geometry, 
-                        destinations
-                    )
-                else:
-                    directional_diversity = 0.5
-                
-                # 5: Accessibility gradient
-                accessibility_gradient = self.compute_accessibility_gradient(combined_times)
-                
-                # 6-8: Walkability viability
-                walk_features = self.compute_walkability_viability(addr_times)
-                walkability_rate = walk_features['walkability_rate']
-                essential_walkable = walk_features['essential_walkable']
-                walk_competitive_nearby = walk_features['walk_competitive_nearby']
-                
-                # 9: Quality-weighted accessibility
-                quality_weighted_access = self.compute_quality_weighted_accessibility(combined_times)
-                
-                # 10: Network connectivity proxy
-                network_connectivity = self.compute_network_centrality_proxy(addr_times, destinations)
-                
-                # 11: Drive advantage category (discretized for interpretability)
-                if drive_advantage < 0.5:
-                    drive_adv_category = 0.0  # Walking competitive
-                elif drive_advantage < 0.75:
-                    drive_adv_category = 0.5  # Moderate car advantage
-                else:
-                    drive_adv_category = 1.0  # Strong car dependency
-                
-                # 12: Time stability (how consistent are times across modes?)
-                if 'walk_time' in addr_times.columns and 'drive_time' in addr_times.columns:
-                    walk_times = addr_times['walk_time'].values
-                    drive_times = addr_times['drive_time'].values
-                    valid_mask = (walk_times > 0) & (drive_times > 0) & np.isfinite(walk_times) & np.isfinite(drive_times)
-                    
-                    if valid_mask.sum() > 0:
-                        # Lower variance = more stable/predictable
-                        time_cv = np.std(combined_times[valid_mask]) / (np.mean(combined_times[valid_mask]) + 1e-8)
-                        time_stability = 1.0 - np.clip(time_cv, 0, 1)
-                    else:
-                        time_stability = 0.5
-                else:
-                    time_stability = 0.5
-                
-                # 13: Accessibility inequality (gap between best and worst access)
-                if len(combined_times) > 1:
-                    best = combined_times.min()
-                    worst = combined_times.max()
-                    if best > 0:
-                        inequality = (worst - best) / best
-                        accessibility_inequality = np.clip(inequality / 10.0, 0, 1)
-                    else:
-                        accessibility_inequality = 1.0
-                else:
-                    accessibility_inequality = 0.0
-                
-                # 14: Edge penalty (are you at the edge of accessible area?)
-                # High penalty = few nearby destinations, many far destinations
-                if count_5min == 0 and count_15min > 0:
-                    edge_penalty = 1.0
-                elif count_5min > 0:
-                    edge_penalty = 0.0
-                else:
-                    edge_penalty = 0.5
-                
                 # Assemble feature vector (24 features)
                 feature_vector = [
                     # Original 10
@@ -496,23 +420,7 @@ class EnhancedAccessibilityComputer:
                     drive_advantage,
                     dispersion,
                     normalized_time_range,
-                    accessibility_percentile,
-                    
-                    # New 14
-                    opportunity_concentration,
-                    concentration_ratio,
-                    directional_diversity,
-                    accessibility_gradient,
-                    walkability_rate,
-                    essential_walkable,
-                    walk_competitive_nearby,
-                    quality_weighted_access,
-                    network_connectivity,
-                    accessible_30min_count,
-                    drive_adv_category,
-                    time_stability,
-                    accessibility_inequality,
-                    edge_penalty
+                    accessibility_percentile
                 ]
                 
             else:

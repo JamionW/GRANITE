@@ -11,6 +11,9 @@ import geopandas as gpd
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
+from ..models.gnn import set_random_seed
+import random
+
 from ..data.loaders import DataLoader
 from ..visualization.plots import GRANITEResearchVisualizer
 from ..evaluation.spatial_diagnostics import SpatialLearningDiagnostics
@@ -59,6 +62,10 @@ class GRANITEPipeline:
     def run(self):
         """Main pipeline execution"""
         start_time = time.time()
+
+        seed = self.config.get('processing', {}).get('random_seed', 42)
+        set_random_seed(seed)
+        self._log(f"Random seed set to {seed} for reproducibility")     
         
         self._log("Starting GRANITE Accessibility SVI Pipeline...")
         
@@ -380,16 +387,19 @@ class GRANITEPipeline:
             from ..models.gnn import AccessibilitySVIGNN, MultiTractGNNTrainer, normalize_accessibility_features
             import torch
             import pandas as pd
+            import numpy as np  # NEEDED for np.mean()
             
             # Normalize features (same as single-tract)
             normalized_features, feature_scaler = normalize_accessibility_features(graph_data.x.numpy())
             graph_data.x = torch.FloatTensor(normalized_features)
             
             # Create model (same architecture as single-tract)
+            seed = self.config.get('processing', {}).get('random_seed', 42)
             model = AccessibilitySVIGNN(
                 accessibility_features_dim=graph_data.x.shape[1],
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
-                dropout=self.config.get('model', {}).get('dropout', 0.3)
+                dropout=self.config.get('model', {}).get('dropout', 0.3),
+                seed=seed  # STABILITY FIX
             )
             
             # Create tract masks for per-tract constraints
@@ -398,7 +408,11 @@ class GRANITEPipeline:
                 tract_masks[fips] = (addresses['tract_fips'] == fips).values
             
             # Create MULTI-TRACT trainer (new class)
-            trainer = MultiTractGNNTrainer(model, config=self.config.get('training', {}))
+            trainer = MultiTractGNNTrainer(
+                model, 
+                config=self.config.get('training', {}),
+                seed=seed  # STABILITY FIX
+            )
             
             # Training parameters
             epochs = self.config.get('model', {}).get('epochs', 100)
@@ -417,16 +431,18 @@ class GRANITEPipeline:
                 verbose=self.verbose
             )
             
-            # Store raw predictions with tract info
-            predictions = training_result['final_predictions']
+            # Get raw predictions from training
+            raw_predictions = training_result['final_predictions']
+            
+            # Store raw predictions with tract info (BEFORE any correction)
             self._stored_raw_predictions = pd.DataFrame({
-                'mean': predictions,
+                'mean': raw_predictions,
                 'x': addresses.geometry.x.values,
                 'y': addresses.geometry.y.values,
                 'tract_fips': addresses['tract_fips'].values
             })
             
-            # Report results
+            # Report training results
             overall_error = training_result['overall_constraint_error']
             spatial_std = training_result['final_spatial_std']
             
@@ -450,7 +466,7 @@ class GRANITEPipeline:
             
             return {
                 'success': True,
-                'raw_predictions': predictions,
+                'raw_predictions': raw_predictions,  # These are the model's raw outputs
                 'learned_accessibility': training_result.get('learned_accessibility'),
                 'model': model,
                 'edge_index': graph_data.edge_index,
@@ -1199,15 +1215,21 @@ class GRANITEPipeline:
             graph_data.x = torch.FloatTensor(normalized_features)
             
             # Create FIXED model with proper architecture
+            seed = self.config.get('processing', {}).get('random_seed', 42)
             model = AccessibilitySVIGNN(
                 accessibility_features_dim=graph_data.x.shape[1],
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
-                dropout=self.config.get('model', {}).get('dropout', 0.3)
+                dropout=self.config.get('model', {}).get('dropout', 0.3),
+                seed=seed # Ensure reproducibility
             )
             
             # Create FIXED trainer
-            trainer = AccessibilityGNNTrainer(model, config=self.config.get('training', {}))
-            
+            trainer = AccessibilityGNNTrainer(
+                model, 
+                config=self.config.get('training', {}),
+                seed=seed  # STABILITY FIX
+            )     
+
             # Training parameters
             epochs = self.config.get('model', {}).get('epochs', 100)
             

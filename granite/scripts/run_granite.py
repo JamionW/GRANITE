@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--config', type=str, default=None, help='Config file path')
     parser.add_argument('--no-cache', action='store_true', help='Disable caching')
     parser.add_argument('--cache-dir', type=str, default='./granite_cache', help='Cache directory')
+    parser.add_argument('--skip-importance', action='store_true', help='Skip feature importance analysis') 
     
     args = parser.parse_args()
     
@@ -43,7 +44,8 @@ def main():
         'processing': {
             'verbose': args.verbose,
             'enable_caching': not args.no_cache,
-            'cache_dir': args.cache_dir
+            'cache_dir': args.cache_dir,
+            'skip_importance': args.skip_importance 
         }
     }
     

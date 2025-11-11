@@ -70,6 +70,18 @@ class GRANITEPipeline:
             return {'success': False, 'error': 'FIPS code required'}
         
         results = self._process_single_tract(target_fips, data)
+
+        # Run feature importance analysis (optional)
+        if results.get('success', False):
+            skip_importance = self.config.get('processing', {}).get('skip_importance', False)
+            
+            if not skip_importance:
+                self._log("\nRunning feature importance analysis...")
+                importance_results = self.analyze_feature_importance(results, n_repeats=10)
+                results['feature_importance'] = importance_results
+            else:
+                self._log("\nSkipping feature importance analysis (--skip-importance flag set)")
+                results['feature_importance'] = None
         
         elapsed_time = time.time() - start_time
         self._log(f"Pipeline completed in {elapsed_time:.2f} seconds")
@@ -187,17 +199,21 @@ class GRANITEPipeline:
         accessibility_features = self._compute_accessibility_features(
             tract_addresses, data
         )
-        
+
         if accessibility_features is None:
             return {'success': False, 'error': 'Failed to compute accessibility features'}
-        
+
         # Generate feature names
         feature_names = self._generate_feature_names(accessibility_features.shape[1])
-        
+                
         # Step 2: Build graph
         from ..models.gnn import normalize_accessibility_features
         normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
-        
+
+        # Store NORMALIZED features for feature importance in multi-tract mode
+        # CRITICAL: Must be after normalization so feature importance uses same scale as training
+        full_accessibility_features = normalized_features.copy() if n_neighbor_tracts > 0 else None  # ← ADD THIS LINE HERE
+
         graph_data = self.data_loader.create_spatial_accessibility_graph(
             addresses=tract_addresses,
             accessibility_features=normalized_features,
@@ -329,7 +345,8 @@ class GRANITEPipeline:
             'success': True,
             'predictions': final_predictions,
             'tract_info': {'FIPS': target_fips, 'RPL_THEMES': target_tract_svi},
-            'accessibility_features': target_access_features,
+            'accessibility_features': target_access_features,  # Target tract only
+            'full_accessibility_features': full_accessibility_features,  # All tracts (for feature importance)
             'training_result': training_result,
             'validation_results': validation_results,
             'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility → SVI',
@@ -426,6 +443,7 @@ class GRANITEPipeline:
                 'raw_predictions': predictions,
                 'learned_accessibility': training_result.get('learned_accessibility'),
                 'model': model,
+                'edge_index': graph_data.edge_index,
                 'training_history': training_result.get('training_history', {}),
                 'raw_constraint_error': overall_error,
                 'per_tract_errors': training_result['per_tract_errors'],
@@ -446,16 +464,14 @@ class GRANITEPipeline:
             }
     
     def _generate_feature_names(self, n_features):
-        """Generate feature names for n features (now 24 per destination type)"""
+        """Generate feature names for all features including base, modal, and socioeconomic"""
         
         feature_names = []
         
-        # We have 3 destination types × 24 features = 72 base features
-        # Plus 4 derived features = 76 total (before deduplication)
+        # Base accessibility features: 3 destination types × 10 features = 30
         dest_types = ['employment', 'healthcare', 'grocery']
         
         for dest_type in dest_types:
-            # Original 10 features
             feature_names.extend([
                 f'{dest_type}_min_time',
                 f'{dest_type}_mean_time',
@@ -469,8 +485,54 @@ class GRANITEPipeline:
                 f'{dest_type}_percentile',
             ])
         
-        # Return exactly n_features (handles deduplication)
-        return feature_names[:n_features]
+        # Modal features: 15 features
+        # (These come from compute_modal_features in modal_accessibility.py)
+        modal_names = [
+            'transit_mode_share',
+            'walk_mode_share', 
+            'drive_mode_share',
+            'modal_flexibility',
+            'transit_employment_access',
+            'transit_healthcare_access',
+            'transit_grocery_access',
+            'walk_employment_access',
+            'walk_healthcare_access',
+            'walk_grocery_access',
+            'car_dependency_employment',
+            'car_dependency_healthcare',
+            'car_dependency_grocery',
+            'no_vehicle_accessibility_penalty',
+            'modal_equity_index'
+        ]
+        feature_names.extend(modal_names)
+        
+        # Socioeconomic features: 9 features
+        # (These come from get_tract_socioeconomic_features)
+        socioeco_names = [
+            'pct_no_vehicle',
+            'pct_poverty',
+            'pct_unemployment', 
+            'pct_no_diploma',
+            'pct_elderly',
+            'pct_disabled',
+            'pct_single_parent',
+            'pct_minority',
+            'pct_limited_english'
+        ]
+        feature_names.extend(socioeco_names)
+        
+        # Total should be 30 + 15 + 9 = 54
+        
+        # Handle edge case where actual features don't match expected
+        if len(feature_names) != n_features:
+            self._log(f"WARNING: Generated {len(feature_names)} names but have {n_features} features")
+            # Pad with generic names if needed
+            while len(feature_names) < n_features:
+                feature_names.append(f'feature_{len(feature_names)}')
+            # Or truncate if too many
+            feature_names = feature_names[:n_features]
+        
+        return feature_names
 
     def _compute_accessibility_features(self, addresses, data):
         """
@@ -1184,6 +1246,7 @@ class GRANITEPipeline:
                 'raw_predictions': predictions,
                 'learned_accessibility': training_result.get('learned_accessibility'),
                 'model': model,
+                'edge_index': graph_data.edge_index,
                 'training_history': training_result.get('training_history', {}),
                 'raw_constraint_error': constraint_error,
                 'spatial_std': spatial_std,
@@ -1443,7 +1506,7 @@ class GRANITEPipeline:
             viz_data = {
                 'gnn_predictions': results['predictions'],
                 'accessibility_features': results['accessibility_features'],
-                'learned_accessibility': results['training_result'].get('learned_accessibility'),  # NEW
+                'learned_accessibility': results['accessibility_features'],
                 'traditional_accessibility': results['accessibility_features'],  # For comparison
                 'tract_svi': results['tract_svi'],
                 'validation_results': results['validation_results'],
@@ -1627,7 +1690,94 @@ class GRANITEPipeline:
             'time_features': time_features,
             'count_features': count_features
         }
-    
+
+    def analyze_feature_importance(self, results, n_repeats=10):
+        """
+        Run feature importance analysis on trained model.
+        
+        Args:
+            results: Training results containing model and data
+            n_repeats: Number of permutation repeats
+            
+        Returns:
+            Dictionary with importance analysis results
+        """
+        from ..evaluation.feature_importance import FeatureImportanceAnalyzer
+        
+        self._log("\n" + "="*60)
+        self._log("FEATURE IMPORTANCE ANALYSIS")
+        self._log("="*60)
+        
+        # Extract necessary data
+        model = results['training_result']['model']
+        edge_index = results['training_result']['edge_index']
+        tract_svi = results['tract_info']['RPL_THEMES']
+
+        # Use full training data if multi-tract, otherwise use target tract data
+        if 'full_accessibility_features' in results:
+            # Multi-tract mode: use all addresses from training
+            accessibility_features = results['full_accessibility_features']
+        else:
+            # Single-tract mode: use target tract only
+            accessibility_features = results['accessibility_features']
+
+        feature_names = self._generate_feature_names(accessibility_features.shape[1])
+        
+        # Initialize analyzer
+        analyzer = FeatureImportanceAnalyzer(model, device='cpu', verbose=self.verbose)
+        
+        # Run permutation importance
+        perm_results = analyzer.permutation_importance(
+            accessibility_features=accessibility_features,
+            edge_index=edge_index,
+            true_svi=tract_svi,
+            feature_names=feature_names,
+            n_repeats=n_repeats
+        )
+        
+        # Run gradient importance
+        grad_results = analyzer.gradient_importance(
+            accessibility_features=accessibility_features,
+            edge_index=edge_index,
+            feature_names=feature_names
+        )
+        
+        # Generate outputs
+        output_dir = os.path.join(self.output_dir, 'feature_importance')
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Plot
+        analyzer.plot_importance(
+            perm_results, 
+            output_path=os.path.join(output_dir, 'feature_importance.png'),
+            top_n=20
+        )
+        
+        # Report
+        analyzer.generate_report(
+            perm_results,
+            output_path=os.path.join(output_dir, 'importance_report.txt')
+        )
+        
+        # Save detailed results
+        perm_results['feature_importance'].to_csv(
+            os.path.join(output_dir, 'permutation_importance.csv'),
+            index=False
+        )
+        
+        grad_results['feature_importance'].to_csv(
+            os.path.join(output_dir, 'gradient_importance.csv'),
+            index=False
+        )
+        
+        self._log(f"\nFeature importance analysis complete!")
+        self._log(f"Results saved to {output_dir}")
+        
+        return {
+            'permutation': perm_results,
+            'gradient': grad_results
+        }
+        
     def _get_expected_correlation_direction(self, feature_name):
         """
         Determine theoretically expected correlation direction with vulnerability.
@@ -1673,7 +1823,6 @@ class GRANITEPipeline:
         
         # Unknown feature type
         return "UNKNOWN"
-
 
     def _create_accessibility_correlation_diagnostic(self, final_predictions, accessibility_features):
         """Create detailed correlation diagnostic with proper feature direction classification"""

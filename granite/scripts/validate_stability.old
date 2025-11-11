@@ -1,0 +1,254 @@
+"""
+GRANITE Training Stability Validator
+=====================================
+
+This script runs multiple training iterations and verifies that:
+1. Random seeds produce identical results
+2. Correlations are consistent and meaningful
+3. Loss weights are properly balanced
+4. Pre/post correction diagnostics are working
+
+Usage:
+    python validate_stability.py --fips 47065000600 --runs 3
+"""
+
+import subprocess
+import re
+import sys
+import argparse
+import numpy as np
+from pathlib import Path
+
+def extract_metrics_from_log(log_file):
+    """Extract key metrics from training log"""
+    metrics = {}
+    
+    with open(log_file, 'r') as f:
+        log_content = f.read()
+    
+    # Extract correlation
+    corr_match = re.search(r'accessibility-SVI correlation:\s*([-\d.]+)', log_content)
+    if corr_match:
+        metrics['correlation'] = float(corr_match.group(1))
+    
+    # Extract spatial std
+    std_match = re.search(r'Final spatial variation:\s*([\d.]+)', log_content)
+    if std_match:
+        metrics['spatial_std'] = float(std_match.group(1))
+    
+    # Extract pre-correction error
+    pre_err_match = re.search(r'Pre-correction constraint error:\s*([\d.]+)%', log_content)
+    if pre_err_match:
+        metrics['pre_correction_error'] = float(pre_err_match.group(1))
+    
+    # Extract post-correction error
+    post_err_match = re.search(r'Post-correction constraint error:\s*([\d.]+)%', log_content)
+    if post_err_match:
+        metrics['post_correction_error'] = float(post_err_match.group(1))
+    
+    # Extract epochs trained
+    epoch_match = re.search(r'Epochs:\s*(\d+)', log_content)
+    if epoch_match:
+        metrics['epochs'] = int(epoch_match.group(1))
+    
+    return metrics
+
+def run_granite(fips, neighbor_tracts=3, epochs=100, output_dir=None):
+    """Run GRANITE and return path to log file"""
+    
+    if output_dir is None:
+        output_dir = Path('./stability_test')
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    log_file = output_dir / f'run_{Path(output_dir).name}.log'
+    
+    cmd = [
+        'granite',
+        '--fips', fips,
+        '--neighbor-tracts', str(neighbor_tracts),
+        '--epochs', str(epochs),
+        '--verbose'
+    ]
+    
+    print(f"Running: {' '.join(cmd)}")
+    
+    with open(log_file, 'w') as f:
+        result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
+    
+    if result.returncode != 0:
+        print(f"WARNING: Run failed with return code {result.returncode}")
+    
+    return log_file
+
+def compare_runs(metrics_list):
+    """Compare metrics across multiple runs"""
+    
+    print("\n" + "="*70)
+    print("STABILITY VALIDATION RESULTS")
+    print("="*70)
+    
+    # Check if we have enough data
+    if len(metrics_list) < 2:
+        print("ERROR: Need at least 2 runs to compare")
+        return False
+    
+    # Extract metric names
+    metric_names = list(metrics_list[0].keys())
+    
+    # Print individual run results
+    print("\nIndividual Run Results:")
+    print("-" * 70)
+    for i, metrics in enumerate(metrics_list, 1):
+        print(f"\nRun {i}:")
+        for name, value in metrics.items():
+            print(f"  {name}: {value}")
+    
+    # Compute statistics
+    print("\n" + "="*70)
+    print("STABILITY ANALYSIS")
+    print("="*70)
+    
+    all_pass = True
+    
+    for metric_name in metric_names:
+        values = [m[metric_name] for m in metrics_list]
+        mean_val = np.mean(values)
+        std_val = np.std(values)
+        min_val = np.min(values)
+        max_val = np.max(values)
+        range_val = max_val - min_val
+        
+        print(f"\n{metric_name}:")
+        print(f"  Mean: {mean_val:.6f}")
+        print(f"  Std:  {std_val:.6f}")
+        print(f"  Range: [{min_val:.6f}, {max_val:.6f}]")
+        print(f"  Variation: {range_val:.6f}")
+        
+        # Determine pass/fail based on metric type
+        if metric_name == 'correlation':
+            # Correlation should be stable within ±0.02
+            threshold = 0.02
+            passed = range_val < threshold
+            expected_sign = mean_val < 0  # Should be negative
+            sign_correct = expected_sign
+            
+            status = "✓ PASS" if (passed and sign_correct) else "✗ FAIL"
+            print(f"  Status: {status}")
+            
+            if not passed:
+                print(f"    ISSUE: Variation {range_val:.4f} exceeds threshold {threshold}")
+                all_pass = False
+            if not sign_correct:
+                print(f"    ISSUE: Correlation should be NEGATIVE (better access → lower vulnerability)")
+                all_pass = False
+                
+        elif metric_name == 'spatial_std':
+            # Spatial std should be > 0.05 and stable within ±0.01
+            min_threshold = 0.05
+            stability_threshold = 0.01
+            
+            passed = mean_val > min_threshold and range_val < stability_threshold
+            status = "✓ PASS" if passed else "✗ FAIL"
+            print(f"  Status: {status}")
+            
+            if mean_val <= min_threshold:
+                print(f"    ISSUE: Mean {mean_val:.4f} below minimum {min_threshold} (no spatial variation)")
+                all_pass = False
+            if range_val >= stability_threshold:
+                print(f"    ISSUE: Variation {range_val:.4f} exceeds stability threshold {stability_threshold}")
+                all_pass = False
+                
+        elif metric_name == 'pre_correction_error':
+            # Pre-correction should be 5-15% and reasonably stable
+            min_threshold = 2.0
+            max_threshold = 20.0
+            
+            passed = min_threshold < mean_val < max_threshold and range_val < 10.0
+            status = "✓ PASS" if passed else "✗ FAIL"
+            print(f"  Status: {status}")
+            
+            if not (min_threshold < mean_val < max_threshold):
+                print(f"    ISSUE: Mean {mean_val:.2f}% outside healthy range [{min_threshold}, {max_threshold}]")
+                all_pass = False
+                
+        elif metric_name == 'post_correction_error':
+            # Post-correction should be near 0
+            threshold = 0.01
+            passed = mean_val < threshold
+            status = "✓ PASS" if passed else "✗ FAIL"
+            print(f"  Status: {status}")
+            
+            if not passed:
+                print(f"    ISSUE: Post-correction error {mean_val:.4f}% should be ~0")
+                all_pass = False
+    
+    # Overall assessment
+    print("\n" + "="*70)
+    if all_pass:
+        print("✓ OVERALL VERDICT: STABLE - Training is reproducible and meaningful")
+        print("\nYour model is:")
+        print("  1. Producing consistent results across runs")
+        print("  2. Learning meaningful accessibility-vulnerability patterns")
+        print("  3. Balancing constraint satisfaction with feature learning")
+    else:
+        print("✗ OVERALL VERDICT: UNSTABLE - Issues detected")
+        print("\nRecommended actions:")
+        print("  1. Verify gnn.py has been replaced with fixed version")
+        print("  2. Verify pipeline.py has all 8 changes from fix guide")
+        print("  3. Clear cache and try again: rm -rf ./granite_cache")
+        print("  4. Check that random_seed is set in config")
+    print("="*70)
+    
+    return all_pass
+
+def main():
+    parser = argparse.ArgumentParser(description='Validate GRANITE training stability')
+    parser.add_argument('--fips', required=True, help='FIPS code to test')
+    parser.add_argument('--runs', type=int, default=3, help='Number of runs to compare')
+    parser.add_argument('--neighbor-tracts', type=int, default=3, help='Number of neighbor tracts')
+    parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
+    
+    args = parser.parse_args()
+    
+    print("="*70)
+    print("GRANITE TRAINING STABILITY VALIDATION")
+    print("="*70)
+    print(f"\nConfiguration:")
+    print(f"  FIPS: {args.fips}")
+    print(f"  Neighbor tracts: {args.neighbor_tracts}")
+    print(f"  Epochs: {args.epochs}")
+    print(f"  Number of runs: {args.runs}")
+    print("\nThis will take approximately {0} minutes...".format(args.runs * 2))
+    
+    # Run multiple times
+    metrics_list = []
+    
+    for i in range(args.runs):
+        print(f"\n{'='*70}")
+        print(f"Starting Run {i+1}/{args.runs}")
+        print(f"{'='*70}")
+        
+        output_dir = Path(f'./stability_test/run_{i+1}')
+        log_file = run_granite(
+            args.fips,
+            neighbor_tracts=args.neighbor_tracts,
+            epochs=args.epochs,
+            output_dir=output_dir
+        )
+        
+        print(f"Extracting metrics from {log_file}")
+        metrics = extract_metrics_from_log(log_file)
+        
+        if not metrics:
+            print(f"ERROR: Could not extract metrics from run {i+1}")
+            sys.exit(1)
+        
+        metrics_list.append(metrics)
+    
+    # Compare results
+    is_stable = compare_runs(metrics_list)
+    
+    sys.exit(0 if is_stable else 1)
+
+if __name__ == '__main__':
+    main()

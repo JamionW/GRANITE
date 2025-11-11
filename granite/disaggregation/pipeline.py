@@ -15,6 +15,7 @@ from ..data.loaders import DataLoader
 from ..visualization.plots import GRANITEResearchVisualizer
 from ..evaluation.spatial_diagnostics import SpatialLearningDiagnostics
 from ..evaluation.accessibility_validator import validate_granite_accessibility_features, integrate_with_spatial_diagnostics
+from ..evaluation.baseline_comparisons import BaselineComparison
 
 class GRANITEPipeline:
     """
@@ -340,6 +341,14 @@ class GRANITEPipeline:
                 'tract_svi': target_tract_svi,
                 'training_result': training_result
             })
+
+        # Baseline comparisons
+        # baseline_results = self._run_baseline_comparisons(
+        #     addresses=target_addresses,
+        #     predictions_df=final_predictions,
+        #     tract_gdf=data['tracts'],
+        #     tract_svi=target_tract_svi
+        # )
         
         return {
             'success': True,
@@ -348,6 +357,7 @@ class GRANITEPipeline:
             'accessibility_features': target_access_features,  # Target tract only
             'full_accessibility_features': full_accessibility_features,  # All tracts (for feature importance)
             'training_result': training_result,
+            #'baseline_comparisons': baseline_results, 
             'validation_results': validation_results,
             'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility → SVI',
             'summary': {
@@ -1457,6 +1467,60 @@ class GRANITEPipeline:
         self._log(f"  Final accessibility-SVI correlation: {accessibility_svi_correlations.get('overall', 'N/A')}")
         
         return validation_results
+
+    def _run_baseline_comparisons(self, addresses, predictions_df, tract_gdf, tract_svi):
+        """Run baseline comparisons (Action Item 3)"""
+        
+        self._log("\nRunning baseline comparisons (Action Item 3)...")
+        
+        try:
+            from ..evaluation.baseline_comparisons import BaselineComparison
+            
+            # Prepare address GeoDataFrame - use existing CRS from addresses
+            address_gdf = addresses.copy()
+            address_gdf['SVI'] = predictions_df['mean'].values
+            
+            # Prepare tract GeoDataFrame - make sure it has 'SVI' column
+            tract_gdf = tract_gdf.copy()
+            if 'RPL_THEMES' in tract_gdf.columns and 'SVI' not in tract_gdf.columns:
+                tract_gdf['SVI'] = tract_gdf['RPL_THEMES']
+            
+            # Ensure both GeoDataFrames have the same CRS
+            if address_gdf.crs != tract_gdf.crs:
+                self._log(f"Reprojecting addresses from {address_gdf.crs} to {tract_gdf.crs}")
+                address_gdf = address_gdf.to_crs(tract_gdf.crs)
+            
+            # Run comparison - now both use 'SVI' column
+            comparison = BaselineComparison()
+            baseline_results = comparison.run_comparison(
+                tract_gdf=tract_gdf,
+                address_gdf=address_gdf,
+                gnn_predictions=predictions_df['mean'].values,
+                svi_column='SVI'  # ← BACK TO 'SVI' since both DataFrames now have it
+            )
+            
+            # Print summary
+            comparison.print_summary()
+            
+            # Save visualization
+            comparison.plot_comparison(
+                save_path=os.path.join(self.output_dir, 'baseline_comparison.png')
+            )
+            
+            # Save metrics
+            baseline_results['metrics'].to_csv(
+                os.path.join(self.output_dir, 'baseline_metrics.csv'),
+                index=False
+            )
+            
+            self._log("✓ Baseline comparisons complete")
+            return baseline_results
+            
+        except Exception as e:
+            self._log(f"Warning: Baseline comparison failed: {str(e)}")
+            import traceback
+            self._log(f"Traceback: {traceback.format_exc()}")
+            return {'error': str(e)}
     
     def _get_raw_predictions_for_diagnostics(self):
         """

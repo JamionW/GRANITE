@@ -68,6 +68,19 @@ class GRANITEPipeline:
         self._log(f"Random seed set to {seed} for reproducibility")     
         
         self._log("Starting GRANITE Accessibility SVI Pipeline...")
+
+        # NEW: Check for holdout validation mode
+        if self.config.get('validation', {}).get('holdout_mode', False):
+            target_fips = self.config.get('data', {}).get('target_fips')
+            neighbor_fips = self.config.get('validation', {}).get('neighbor_fips', [])
+            
+            if not neighbor_fips:
+                # Auto-discover neighbors if not provided
+                n_neighbors = self.config.get('data', {}).get('neighbor_tracts', 3)
+                all_fips = self.data_loader.get_neighboring_tracts(target_fips, n_neighbors)
+                neighbor_fips = [f for f in all_fips if f != target_fips]
+            
+            return self.run_holdout_validation(target_fips, neighbor_fips)
         
         # Load data
         data = self._load_spatial_data()
@@ -325,6 +338,14 @@ class GRANITEPipeline:
             final_predictions, target_tract_svi, target_access_features, 
             target_normalized_features
         )
+
+        # NEW: Optional unconstrained evaluation
+        if self.config.get('validation', {}).get('evaluate_unconstrained', False):
+            self._log("\nEvaluating unconstrained learning quality...")
+            unconstrained_metrics = self.evaluate_unconstrained_learning(
+                training_result, graph_data, target_tract_svi, target_addresses
+            )
+            validation_results['unconstrained_metrics'] = unconstrained_metrics
         
         # Integration
         if 'error' not in access_validation_results and 'spatial_diagnostics' in validation_results:
@@ -1384,6 +1405,227 @@ class GRANITEPipeline:
         final_predictions.reset_index(drop=True, inplace=True)
         
         return final_predictions
+
+    def evaluate_unconstrained_learning(self, training_result, graph_data, 
+                                        tract_svi, addresses):
+        """
+        Evaluate model's unconstrained predictions to assess true learning.
+        Tests if model naturally approaches correct mean without enforcement.
+        
+        This is run AFTER normal training to diagnose learning quality.
+        """
+        self._log("\n" + "="*80)
+        self._log("UNCONSTRAINED LEARNING EVALUATION")
+        self._log("="*80)
+        
+        # Get model from training result
+        model = training_result.get('model')
+        if model is None:
+            self._log("ERROR: No model available for evaluation")
+            return None
+        
+        # Generate unconstrained predictions
+        model.eval()
+        import torch
+        with torch.no_grad():
+            predictions, learned_accessibility = model(
+                graph_data.x,
+                graph_data.edge_index,
+                return_accessibility=True
+            )
+        
+        predictions_np = predictions.detach().numpy()
+        
+        # Metrics
+        predicted_mean = np.mean(predictions_np)
+        predicted_std = np.std(predictions_np)
+        mean_error_pct = abs(predicted_mean - tract_svi) / tract_svi * 100
+        natural_convergence = mean_error_pct < 20.0
+        
+        # Correlation with accessibility
+        learned_acc = learned_accessibility.detach().numpy()
+        acc_summary = learned_acc.mean(axis=1)
+        correlation = np.corrcoef(acc_summary, predictions_np)[0, 1]
+        
+        self._log(f"Actual tract SVI: {tract_svi:.4f}")
+        self._log(f"Predicted mean (unconstrained): {predicted_mean:.4f}")
+        self._log(f"Mean error: {mean_error_pct:.2f}%")
+        self._log(f"Natural convergence: {'YES ✓' if natural_convergence else 'NO ✗'}")
+        self._log(f"Prediction std: {predicted_std:.4f}")
+        self._log(f"Accessibility-SVI correlation: {correlation:.4f}")
+        
+        if not natural_convergence:
+            self._log("\n⚠ WARNING: Model does not naturally approach correct mean")
+            self._log("  This suggests constraints are masking poor learning")
+        
+        return {
+            'predicted_mean': predicted_mean,
+            'actual_svi': tract_svi,
+            'mean_error_pct': mean_error_pct,
+            'natural_convergence': natural_convergence,
+            'spatial_std': predicted_std,
+            'accessibility_svi_correlation': correlation,
+            'raw_predictions': predictions_np
+        }
+
+    def run_holdout_validation(self, target_fips, neighbor_fips_list):
+        """
+        True holdout validation: train on n-1 tracts, predict on nth.
+        
+        This tests whether the GNN learns meaningful accessibility-vulnerability
+        relationships WITHOUT constraint enforcement.
+        
+        Args:
+            target_fips: Tract to hold out and predict
+            neighbor_fips_list: List of neighboring tracts for training
+        
+        Returns:
+            dict with unconstrained predictions and learning quality metrics
+        """
+        self._log(f"\n{'='*80}")
+        self._log(f"HOLDOUT VALIDATION: Predicting tract {target_fips}")
+        self._log(f"Training on {len(neighbor_fips_list)} neighbor tracts")
+        self._log(f"{'='*80}\n")
+        
+        # 1. Load all spatial data
+        data = self._load_spatial_data()
+        
+        # 2. Load training tracts (neighbors only, exclude target)
+        train_addresses = []
+        train_tract_svis = {}
+        
+        for fips in neighbor_fips_list:
+            fips = str(fips).strip()
+            addresses = self.data_loader.get_addresses_for_tract(fips)
+            addresses['tract_fips'] = fips
+            train_addresses.append(addresses)
+            
+            tract_data = data['tracts'][data['tracts']['FIPS'] == fips]
+            train_tract_svis[fips] = float(tract_data.iloc[0]['RPL_THEMES'])
+        
+        train_addresses_df = pd.concat(train_addresses, ignore_index=True)
+        
+        self._log(f"Training set: {len(train_addresses_df)} addresses across {len(neighbor_fips_list)} tracts")
+        
+        # 3. Compute accessibility features for training set
+        train_features = self._compute_accessibility_features(train_addresses_df, data)
+        
+        # 4. Normalize features on training data
+        from ..models.gnn import normalize_accessibility_features
+        normalized_train_features, feature_scaler = normalize_accessibility_features(train_features)
+        
+        # 5. Build graph for training tracts
+        state_fips = target_fips[:2]
+        county_fips = target_fips[2:5]
+        
+        train_graph = self.data_loader.create_spatial_accessibility_graph(
+            addresses=train_addresses_df,
+            accessibility_features=normalized_train_features,
+            state_fips=state_fips,
+            county_fips=county_fips
+        )
+        
+        # 6. Create tract masks for training
+        train_tract_masks = {}
+        for fips in neighbor_fips_list:
+            train_tract_masks[fips] = (train_addresses_df['tract_fips'] == fips).values
+        
+        # 7. Train model WITHOUT constraints
+        from ..models.gnn import AccessibilitySVIGNN, MultiTractGNNTrainer
+        import torch
+        
+        seed = self.config.get('processing', {}).get('random_seed', 42)
+        set_random_seed(seed)
+        
+        model = AccessibilitySVIGNN(
+            accessibility_features_dim=train_graph.x.shape[1],
+            hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
+            dropout=self.config.get('model', {}).get('dropout', 0.3),
+            seed=seed
+        )
+        
+        # CRITICAL: Configure for unconstrained training
+        unconstrained_config = self.config.get('training', {}).copy()
+        unconstrained_config['enforce_constraints'] = False
+        unconstrained_config['constraint_weight'] = 0.0
+        
+        trainer = MultiTractGNNTrainer(model, config=unconstrained_config, seed=seed)
+        
+        self._log("Training WITHOUT constraint enforcement...")
+        training_result = trainer.train(
+            graph_data=train_graph,
+            tract_svis=train_tract_svis,
+            tract_masks=train_tract_masks,
+            epochs=self.config.get('model', {}).get('epochs', 150),
+            verbose=self.verbose
+        )
+        
+        # 8. Load holdout tract data
+        holdout_addresses = self.data_loader.get_addresses_for_tract(target_fips)
+        holdout_addresses['tract_fips'] = target_fips
+        
+        self._log(f"Holdout tract: {len(holdout_addresses)} addresses")
+        
+        # 9. Compute features for holdout tract
+        holdout_features = self._compute_accessibility_features(holdout_addresses, data)
+        
+        # CRITICAL: Apply same normalization from training data
+        normalized_holdout_features = feature_scaler.transform(holdout_features)
+        
+        # 10. Build graph for holdout tract
+        holdout_graph = self.data_loader.create_spatial_accessibility_graph(
+            addresses=holdout_addresses,
+            accessibility_features=normalized_holdout_features,
+            state_fips=state_fips,
+            county_fips=county_fips
+        )
+        
+        # 11. Predict on holdout tract (unconstrained)
+        unconstrained_result = trainer.predict_unconstrained(holdout_graph)
+        predictions = unconstrained_result['predictions']
+        
+        # 12. Get actual SVI for comparison
+        target_tract_data = data['tracts'][data['tracts']['FIPS'] == target_fips]
+        actual_svi = float(target_tract_data.iloc[0]['RPL_THEMES'])
+        
+        # 13. Compute learning quality metrics
+        predicted_mean = np.mean(predictions)
+        predicted_std = np.std(predictions)
+        mean_error_pct = abs(predicted_mean - actual_svi) / actual_svi * 100
+        natural_convergence = mean_error_pct < 20.0
+        
+        # Correlation with accessibility features
+        learned_accessibility = unconstrained_result['learned_accessibility']
+        accessibility_summary = learned_accessibility.mean(axis=1)
+        correlation = np.corrcoef(accessibility_summary, predictions)[0, 1]
+        
+        self._log(f"\n{'='*80}")
+        self._log(f"HOLDOUT VALIDATION RESULTS")
+        self._log(f"{'='*80}")
+        self._log(f"Actual tract SVI: {actual_svi:.4f}")
+        self._log(f"Predicted mean (unconstrained): {predicted_mean:.4f}")
+        self._log(f"Mean error: {mean_error_pct:.2f}%")
+        self._log(f"Natural convergence: {'YES' if natural_convergence else 'NO'}")
+        self._log(f"Prediction std: {predicted_std:.4f}")
+        self._log(f"Accessibility-SVI correlation: {correlation:.4f}")
+        
+        return {
+            'success': True,
+            'mode': 'holdout_validation',
+            'holdout_fips': target_fips,
+            'training_fips': neighbor_fips_list,
+            'actual_svi': actual_svi,
+            'predicted_mean': predicted_mean,
+            'predicted_std': predicted_std,
+            'mean_error_pct': mean_error_pct,
+            'natural_convergence': natural_convergence,
+            'accessibility_svi_correlation': correlation,
+            'predictions': predictions,
+            'learned_accessibility': learned_accessibility,
+            'training_history': training_result['training_history'],
+            'n_training_addresses': len(train_addresses_df),
+            'n_holdout_addresses': len(holdout_addresses)
+        }
 
     def _validate_predictions(self, predictions, tract_svi, accessibility_features, normalized_features):
         """Enhanced validation with spatial learning diagnostics"""

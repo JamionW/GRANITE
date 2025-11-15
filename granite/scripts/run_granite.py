@@ -21,7 +21,13 @@ def main():
     parser.add_argument('--no-cache', action='store_true', help='Disable caching')
     parser.add_argument('--cache-dir', type=str, default='./granite_cache', help='Cache directory')
     parser.add_argument('--skip-importance', action='store_true', help='Skip feature importance analysis') 
-    
+    parser.add_argument('--holdout-validation', action='store_true',
+                    help='Run holdout validation (train on neighbors, predict on target)')
+    parser.add_argument('--evaluate-unconstrained', action='store_true',
+                    help='Evaluate model without constraint enforcement')
+    parser.add_argument('--no-constraints', action='store_true',
+                    help='Train without constraint enforcement')
+
     args = parser.parse_args()
     
     # Load configuration
@@ -39,13 +45,19 @@ def main():
         },
         'training': {
             'learning_rate': 0.001,
-            'weight_decay': 1e-4
+            'weight_decay': 1e-4,
+            'enforce_constraints': not args.no_constraints
         },
         'processing': {
             'verbose': args.verbose,
             'enable_caching': not args.no_cache,
             'cache_dir': args.cache_dir,
             'skip_importance': args.skip_importance 
+        },
+        'validation': {
+            'holdout_mode': args.holdout_validation,
+            'evaluate_unconstrained': args.evaluate_unconstrained,
+            'neighbor_fips': []  # Auto-discovered in pipeline
         }
     }
     

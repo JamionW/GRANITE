@@ -178,6 +178,10 @@ class AccessibilityGNNTrainer:
         self.model = model
         self.config = config or {}
         self.seed = seed
+
+        self.enforce_constraints = config.get('enforce_constraints', True)
+        self.constraint_weight = config.get('constraint_weight', 
+                                        2.0 if self.enforce_constraints else 0.0)
         
         # Set seed for optimizer initialization
         set_random_seed(seed)
@@ -308,15 +312,10 @@ class AccessibilityGNNTrainer:
     
     def _compute_losses(self, predictions, target_svi, n_addresses):
         """
-        Single-tract loss computation with REBALANCED WEIGHTS.
+        Single-tract loss computation with CONFIGURABLE constraint enforcement.
         
-        KEY CHANGES:
-        - Constraint loss reduced from 3.0 -> 2.0
-        - Accessibility consistency increased from 0.2 -> 0.5
-        - Variation loss increased from 0.5 -> 1.0
-        
-        This encourages the model to learn accessibility patterns
-        rather than just fitting demographic means.
+        When enforce_constraints=False, model learns purely from accessibility
+        patterns without mean-matching pressure.
         """
         
         # 1. Constraint preservation loss
@@ -328,7 +327,7 @@ class AccessibilityGNNTrainer:
         min_variation = 0.02
         variation_loss = F.relu(min_variation - spatial_std)
         
-        # 3. Bounds enforcement
+        # 3. Bounds enforcement (always active)
         bounds_loss = torch.mean(F.relu(predictions - 1.0)) + torch.mean(F.relu(-predictions))
         
         # 4. Distribution regularization
@@ -342,14 +341,25 @@ class AccessibilityGNNTrainer:
         # 5. Accessibility consistency
         accessibility_consistency_loss = self._compute_accessibility_consistency_loss(predictions)
         
-        # REBALANCED weighted combination
-        total_loss = (
-            1.2 * constraint_loss +           # REDUCED from 3.0
-            1.5 * variation_loss +            # INCREASED from 0.5
-            1.0 * bounds_loss +               # Same
-            0.3 * range_loss +                # Same
-            0.5 * accessibility_consistency_loss  # INCREASED from 0.2
-        )
+        # NEW: Conditional weighting based on mode
+        if self.enforce_constraints:
+            # Standard constrained training
+            total_loss = (
+                self.constraint_weight * constraint_loss +     # Use configured weight
+                1.5 * variation_loss +
+                1.0 * bounds_loss +
+                0.3 * range_loss +
+                0.5 * accessibility_consistency_loss
+            )
+        else:
+            # Unconstrained: learn from structure only
+            total_loss = (
+                0.0 * constraint_loss +           # No constraint pressure
+                2.0 * variation_loss +            # Strong variation encouragement
+                1.0 * bounds_loss +               # Keep valid range
+                0.5 * range_loss +                # Distribution shape
+                1.0 * accessibility_consistency_loss  # Structure learning
+            )
         
         return {
             'total': total_loss,
@@ -376,6 +386,27 @@ class AccessibilityGNNTrainer:
         
         return gradient_loss
 
+    def predict_unconstrained(self, graph_data):
+        """
+        Generate predictions without any correction.
+        Returns raw model outputs for validation.
+        
+        Returns:
+            dict with 'predictions' and 'learned_accessibility'
+        """
+        self.model.eval()
+        with torch.no_grad():
+            predictions, learned_accessibility = self.model(
+                graph_data.x, 
+                graph_data.edge_index, 
+                return_accessibility=True
+            )
+        
+        return {
+            'predictions': predictions.detach().numpy(),
+            'learned_accessibility': learned_accessibility.detach().numpy()
+        }
+
 
 class MultiTractGNNTrainer:
     """
@@ -392,6 +423,11 @@ class MultiTractGNNTrainer:
         self.model = model
         self.config = config or {}
         self.seed = seed
+
+        # NEW: Training mode controls
+        self.enforce_constraints = config.get('enforce_constraints', True)
+        self.constraint_weight = config.get('constraint_weight', 
+                                        2.0 if self.enforce_constraints else 0.0)
         
         # Set seed for optimizer initialization
         set_random_seed(seed)
@@ -554,23 +590,15 @@ class MultiTractGNNTrainer:
         return results
     
     def _compute_multi_tract_losses(self, predictions, tract_targets, 
-                                     tract_masks, n_addresses):
+                                    tract_masks, n_addresses):
         """
-        Multi-tract loss computation with REBALANCED weights.
+        Multi-tract loss computation with configurable constraint enforcement.
         
-        KEY CHANGES FROM ORIGINAL:
-        - Constraint loss reduced from 5.0 -> 2.0
-        - Variation loss increased from 0.3 -> 0.8
-        - This prioritizes learning accessibility patterns over just
-          matching tract means
-        
-        RATIONALE:
-        With constraint weight at 5.0, the model ignores accessibility
-        and just learns to output the tract mean. With 2.0, it must
-        balance constraint satisfaction with learning real patterns.
+        When enforce_constraints=False, the model learns purely from
+        accessibility patterns without mean-matching pressure.
         """
         
-        # 1. Per-tract constraint losses
+        # 1. Per-tract constraint losses (weight controlled by config)
         constraint_losses = []
         
         for fips, target_svi in tract_targets.items():
@@ -603,19 +631,29 @@ class MultiTractGNNTrainer:
         else:
             variation_loss = torch.tensor(0.0)
         
-        # 3. Bounds enforcement
+        # 3. Bounds enforcement (always active)
         bounds_loss = torch.mean(F.relu(predictions - 1.0)) + torch.mean(F.relu(-predictions))
         
         # 4. Cross-tract smoothness
         smoothness_loss = self._compute_cross_tract_smoothness(predictions, tract_masks)
         
-        # REBALANCED weighted combination
-        total_loss = (
-            2.0 * constraint_loss +      # REDUCED from 5.0 - allows accessibility learning
-            0.8 * variation_loss +       # INCREASED from 0.3 - encourages spatial patterns
-            1.0 * bounds_loss +          # Same
-            0.1 * smoothness_loss        # Same
-        )
+        # NEW: Conditional weighting based on mode
+        if self.enforce_constraints:
+            # Standard constrained training
+            total_loss = (
+                self.constraint_weight * constraint_loss +
+                0.8 * variation_loss +
+                1.0 * bounds_loss +
+                0.1 * smoothness_loss
+            )
+        else:
+            # Unconstrained: learn from structure only
+            total_loss = (
+                0.0 * constraint_loss +     # No constraint pressure
+                2.0 * variation_loss +      # Strong variation encouragement
+                1.0 * bounds_loss +         # Keep valid range
+                0.5 * smoothness_loss       # Spatial structure
+            )
         
         return {
             'total': total_loss,
@@ -623,6 +661,27 @@ class MultiTractGNNTrainer:
             'variation': variation_loss,
             'bounds': bounds_loss,
             'smoothness': smoothness_loss
+        }
+
+    def predict_unconstrained(self, graph_data):
+        """
+        Generate predictions without any correction.
+        Returns raw model outputs for validation.
+        
+        Returns:
+            dict with 'predictions' and 'learned_accessibility'
+        """
+        self.model.eval()
+        with torch.no_grad():
+            predictions, learned_accessibility = self.model(
+                graph_data.x, 
+                graph_data.edge_index, 
+                return_accessibility=True
+            )
+        
+        return {
+            'predictions': predictions.detach().numpy(),
+            'learned_accessibility': learned_accessibility.detach().numpy()
         }
     
     def _compute_cross_tract_smoothness(self, predictions, tract_masks):

@@ -1346,26 +1346,34 @@ class GRANITEPipeline:
         self._log(f"  Target: {tract_svi:.4f}")  
         self._log(f"  Pre-correction constraint error: {pre_correction_error:.2f}%")
         
-        # Apply constraint correction
-        adjustment = tract_svi - current_mean
-        adjusted_predictions = predictions + adjustment
-        adjusted_predictions = np.clip(adjusted_predictions, 0.0, 1.0)
+        # POST-TRAINING CORRECTION DISABLED
+        # This correction was masking model learning quality and preventing proper diagnosis
+        # of whether the GNN is learning meaningful accessibility-vulnerability relationships.
+        # 
+        # # Apply constraint correction
+        # adjustment = tract_svi - current_mean
+        # adjusted_predictions = predictions + adjustment
+        # adjusted_predictions = np.clip(adjusted_predictions, 0.0, 1.0)
         
-        # Verify constraint is satisfied
+        # Use raw predictions without correction
+        adjusted_predictions = predictions
+        adjustment = 0.0
+        
+        # Verify raw prediction quality
         final_mean = np.mean(adjusted_predictions)
         final_error = abs(final_mean - tract_svi) / tract_svi * 100
         
-        self._log(f"Post-correction analysis:")
-        self._log(f"  Adjustment applied: {adjustment:.4f}")
-        self._log(f"  Final mean: {final_mean:.4f}")
-        self._log(f"  Post-correction constraint error: {final_error:.2f}%")
+        self._log(f"Raw prediction analysis (NO post-correction):")
+        self._log(f"  Raw mean: {final_mean:.4f}")
+        self._log(f"  Target: {tract_svi:.4f}")
+        self._log(f"  Constraint error: {final_error:.2f}%")
         
-        # Assess if correction is reasonable
-        if abs(adjustment) > 0.1:  # More than 10% of SVI scale
-            self._log(f"WARNING: Large adjustment ({adjustment:.4f}) suggests model is not learning appropriate scale")
+        # Assess raw prediction quality
+        if final_error > 10:
+            self._log(f"WARNING: High constraint error ({final_error:.2f}%) suggests model not learning tract mean")
         
-        if pre_correction_error > 50:  # More than 50% error
-            self._log(f"WARNING: Very high pre-correction error suggests fundamental model issues")
+        if pre_correction_error > 50:
+            self._log(f"WARNING: Very high error suggests fundamental model issues")
         
         # Extract coordinates
         x_coords = np.array([addr.geometry.x for _, addr in addresses.iterrows()])
@@ -1386,20 +1394,20 @@ class GRANITEPipeline:
         total_uncertainty = base_uncertainty + distance_uncertainty + spatial_uncertainty
         total_uncertainty = np.clip(total_uncertainty, 0.02, 0.15)
         
-        # Create DataFrame
+        # Create DataFrame (RAW predictions - No post-training correction applied)
         final_predictions = pd.DataFrame({
             'address_id': [addr.get('address_id', i) for i, (_, addr) in enumerate(addresses.iterrows())],
             'x': x_coords,
             'y': y_coords,
-            'mean': adjusted_predictions,
+            'mean': adjusted_predictions,  # Raw GNN output (adjustment = 0)
             'sd': total_uncertainty,
             'q025': np.clip(adjusted_predictions - 1.96 * total_uncertainty, 0.0, 1.0),
             'q975': np.clip(adjusted_predictions + 1.96 * total_uncertainty, 0.0, 1.0),
-            'raw_prediction': predictions,  # NEW: Include raw predictions for reference
-            'adjustment': adjustment  # NEW: Show the adjustment applied
+            'raw_prediction': predictions,  # Same as 'mean' (no correction)
+            'adjustment': adjustment  # Will be 0.0
         })
         
-        self._log(f"Finalized predictions: {len(final_predictions)} addresses")
+        self._log(f"Finalized predictions (RAW, uncorrected): {len(final_predictions)} addresses")
         self._log(f"  Final spatial std: {np.std(adjusted_predictions):.4f}")
         
         final_predictions.reset_index(drop=True, inplace=True)

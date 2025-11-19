@@ -163,6 +163,72 @@ class DataLoader:
         
         return features
 
+    def create_context_features_for_addresses(self, addresses: gpd.GeoDataFrame, 
+                                            svi_data: pd.DataFrame) -> np.ndarray:
+        """
+        Create context feature matrix for addresses.
+        Broadcasts tract-level socioeconomic features to all addresses in tract.
+        
+        Args:
+            addresses: GeoDataFrame with 'tract_fips' column
+            svi_data: SVI data with socioeconomic variables
+        
+        Returns:
+            context_features: [n_addresses, n_context_features] numpy array
+        """
+        n_addresses = len(addresses)
+        
+        # Define context features we'll extract
+        context_feature_list = []
+        
+        for idx, address in addresses.iterrows():
+            tract_fips = str(address['tract_fips']).strip()
+            
+            # Get socioeconomic features for this tract
+            tract_features = self.get_tract_socioeconomic_features(tract_fips, svi_data)
+            
+            # Extract key context features for gating
+            # CRITICAL: These determine which accessibility features matter
+            context_vec = [
+                tract_features['pct_no_vehicle'],    # Vehicle ownership (MOST IMPORTANT)
+                tract_features['pct_poverty'],        # Economic vulnerability
+                tract_features['pct_unemployed'],     # Employment access need
+                tract_features['pct_no_hs_diploma'],  # Education (correlates with transit dependency)
+                tract_features['population'] / 10000.0,  # Urban density proxy (scaled)
+            ]
+            
+            context_feature_list.append(context_vec)
+        
+        context_features = np.array(context_feature_list, dtype=np.float32)
+        
+        if self.verbose:
+            self._log(f"Created context features: {context_features.shape}")
+            self._log(f"  Features: vehicle_absence, poverty, unemployment, education, density")
+            self._log(f"  Mean vehicle absence: {context_features[:, 0].mean():.2f}%")
+            self._log(f"  Mean poverty: {context_features[:, 1].mean():.2f}%")
+        
+        return context_features
+
+    def normalize_context_features(self, context_features: np.ndarray) -> Tuple[np.ndarray, object]:
+        """
+        Normalize context features using robust scaling.
+        
+        Returns:
+            normalized_features: Scaled context features
+            scaler: Fitted scaler object (for consistency checks)
+        """
+        from sklearn.preprocessing import RobustScaler
+        
+        scaler = RobustScaler()
+        normalized = scaler.fit_transform(context_features)
+        
+        if self.verbose:
+            self._log(f"Normalized context features:")
+            self._log(f"  Shape: {normalized.shape}")
+            self._log(f"  Range: [{normalized.min():.2f}, {normalized.max():.2f}]")
+        
+        return normalized, scaler
+
     def _default_socioeconomic_features(self) -> Dict:
         """Default socioeconomic features when data is missing"""
         return {
@@ -198,9 +264,17 @@ class DataLoader:
         return travel_times
 
     def create_spatial_accessibility_graph(self, addresses, accessibility_features, 
-                                            state_fips='47', county_fips='065'):
+                                            state_fips='47', county_fips='065',
+                                            context_features=None):  # NEW PARAMETER
         """
-        FIXED: Create graph with improved edge validation
+        ENHANCED: Create graph with context features for context-aware learning
+        
+        Args:
+            addresses: Address GeoDataFrame
+            accessibility_features: Accessibility feature matrix [n_addresses, n_features]
+            state_fips: State FIPS code
+            county_fips: County FIPS code
+            context_features: Context feature matrix [n_addresses, n_context] (optional)
         """
         import torch
         from torch_geometric.data import Data
@@ -218,7 +292,7 @@ class DataLoader:
             self._log("No road network available, using geographic connectivity")
             edge_index, edge_weight = self._create_geographic_fallback_graph(addresses)
         
-        # CHANGE: Validate edge_index before creating graph
+        # Validate edge_index before creating graph
         if edge_index.shape[1] == 0:
             self._log("WARNING: No edges created, adding minimal connectivity")
             edge_index, edge_weight = self._create_minimal_connectivity(n_addresses)
@@ -226,12 +300,25 @@ class DataLoader:
         # Node features are the accessibility features
         node_features = torch.FloatTensor(accessibility_features)
         
-        # Create graph data
-        graph_data = Data(
-            x=node_features,
-            edge_index=edge_index,
-            edge_attr=edge_weight
-        )
+        # NEW: Add context features if provided
+        if context_features is not None:
+            context_tensor = torch.FloatTensor(context_features)
+            self._log(f"Added context features: {context_tensor.shape}")
+            
+            # Create graph data WITH context
+            graph_data = Data(
+                x=node_features,
+                context=context_tensor,  # NEW: Context features
+                edge_index=edge_index,
+                edge_attr=edge_weight
+            )
+        else:
+            # Backward compatibility: no context features
+            graph_data = Data(
+                x=node_features,
+                edge_index=edge_index,
+                edge_attr=edge_weight
+            )
         
         self._log(f"Created graph: {n_addresses} nodes, {edge_index.shape[1]//2} undirected edges")
         

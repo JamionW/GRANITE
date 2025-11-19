@@ -47,24 +47,35 @@ def set_random_seed(seed=42):
 
 class AccessibilitySVIGNN(nn.Module):
     """
-    Shared GNN model architecture for both single-tract and multi-tract training.
-    Learns accessibility-vulnerability relationships from graph-structured data.
+    Context-aware GNN for accessibility-vulnerability prediction.
     
-    STABILITY IMPROVEMENTS:
+    ENHANCEMENTS:
+    - Context-gated feature modulation for heterogeneous contexts
     - Deterministic weight initialization
     - Consistent random state for dropout
     """
-    def __init__(self, accessibility_features_dim, hidden_dim=64, dropout=0.3, seed=42):
+    def __init__(self, accessibility_features_dim, context_features_dim=5, 
+                 hidden_dim=64, dropout=0.3, seed=42, use_context_gating=True):
         super(AccessibilitySVIGNN, self).__init__()
         
         # Set seed for reproducible initialization
         set_random_seed(seed)
         
         self.accessibility_features_dim = accessibility_features_dim
+        self.context_features_dim = context_features_dim
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout
+        self.use_context_gating = use_context_gating  # NEW: Toggle for ablation
         
-        # Input normalization
+        # NEW: Context-gated feature modulation
+        if use_context_gating:
+            self.context_gate = ContextGatedFeatureModulator(
+                accessibility_dim=accessibility_features_dim,
+                context_dim=context_features_dim,
+                hidden_dim=32
+            )
+        
+        # Input normalization (applied to potentially modulated features)
         self.input_norm = nn.LayerNorm(accessibility_features_dim)
         
         # Feature encoding
@@ -121,24 +132,39 @@ class AccessibilitySVIGNN(nn.Module):
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
         
-    def forward(self, accessibility_features, edge_index, return_accessibility=False):
+    def forward(self, accessibility_features, edge_index, context_features=None, 
+                return_accessibility=False):
         """
-        Forward pass through the GNN.
+        Context-aware forward pass through the GNN.
         
         Args:
-            accessibility_features: Input node features
+            accessibility_features: Input node features [n_nodes, accessibility_dim]
             edge_index: Graph edge connectivity
-            return_accessibility: If True, return both predictions and learned accessibility
+            context_features: Context features for gating [n_nodes, context_dim]
+            return_accessibility: If True, return predictions, accessibility, and attention
         
         Returns:
             svi_predictions: Predicted SVI values [0,1]
             learned_accessibility: (optional) Learned accessibility representations
+            attention_weights: (optional) Context-gating attention weights
         """
-        # Input processing
-        x = self.input_norm(accessibility_features)
+        # NEW: Apply context-gating if available
+        attention_weights = None
+        if self.use_context_gating and context_features is not None:
+            # Modulate accessibility features based on context
+            modulated_features, attention_weights = self.context_gate(
+                accessibility_features,
+                context_features
+            )
+            # Use modulated features for rest of pipeline
+            x = self.input_norm(modulated_features)
+        else:
+            # Standard path (no context-gating)
+            x = self.input_norm(accessibility_features)
+        
         x = self.feature_encoder(x)
         
-        # Graph convolution
+        # Graph convolution (unchanged)
         x = self.spatial_conv1(x, edge_index)
         x = self.spatial_norm1(x)
         x = F.relu(x)
@@ -159,11 +185,50 @@ class AccessibilitySVIGNN(nn.Module):
         svi_predictions = self.prediction_layers(x)
         svi_predictions = torch.sigmoid(svi_predictions.squeeze())
         
+        # Return based on what's requested
         if return_accessibility:
-            return svi_predictions, learned_accessibility
+            return svi_predictions, learned_accessibility, attention_weights
         else:
             return svi_predictions
 
+class ContextGatedFeatureModulator(nn.Module):
+    """
+    Dynamically weight accessibility features based on socioeconomic context.
+    """
+    def __init__(self, accessibility_dim, context_dim, hidden_dim=32):
+        super(ContextGatedFeatureModulator, self).__init__()
+        
+        # Context encoder: Demographics → embedding
+        self.context_encoder = nn.Sequential(
+            nn.Linear(context_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
+        # Attention mechanism: Context → feature importance weights
+        self.attention = nn.Sequential(
+            nn.Linear(hidden_dim, accessibility_dim),
+            nn.Softmax(dim=-1)
+        )
+        
+        # Base feature importance (learned universal patterns)
+        self.base_importance = nn.Parameter(torch.ones(accessibility_dim))
+    
+    def forward(self, accessibility_features, context_features):
+        """Apply context-dependent feature weighting."""
+        # Encode context
+        context_embedding = self.context_encoder(context_features)
+        
+        # Compute feature importance weights from context
+        attention_weights = self.attention(context_embedding)
+        
+        # Combine with base importance
+        combined_weights = attention_weights * self.base_importance
+        
+        # Apply weights to features
+        modulated_features = accessibility_features * combined_weights
+        
+        return modulated_features, attention_weights
 
 class AccessibilityGNNTrainer:
     """
@@ -206,7 +271,8 @@ class AccessibilityGNNTrainer:
             'losses': [], 
             'constraint_errors': [], 
             'spatial_stds': [],
-            'raw_predictions_history': []  # NEW: Track raw predictions
+            'raw_predictions_history': [],
+            'attention_weights': [] 
         }
         
     def train(self, graph_data, tract_svi, epochs=100, verbose=True):
@@ -233,11 +299,22 @@ class AccessibilityGNNTrainer:
         
         for epoch in range(epochs):
             self.optimizer.zero_grad()
+
+            # Check if context features available
+            context = getattr(graph_data, 'context', None)
             
-            # Forward pass
-            predictions, learned_accessibility = self.model(
-                graph_data.x, graph_data.edge_index, return_accessibility=True
+            # Forward pass with context-gating
+            predictions, learned_accessibility, attention_weights = self.model(
+                graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
             )
+
+            # Optional: Track attention weights for analysis
+            if attention_weights is not None:
+                if epoch == 0:
+                    self.training_history['attention_weights'] = []
+                self.training_history['attention_weights'].append(
+                    attention_weights.detach().cpu().numpy()
+                )
             
             # Compute losses with REBALANCED weights
             losses = self._compute_losses(predictions, target_svi, n_addresses)
@@ -290,10 +367,10 @@ class AccessibilityGNNTrainer:
         
         # Final evaluation
         self.model.eval()
-        with torch.no_grad():
-            final_predictions, final_learned_accessibility = self.model(
-                graph_data.x, graph_data.edge_index, return_accessibility=True
-            )
+        context = getattr(graph_data, 'context', None)
+        final_predictions, final_learned_accessibility, attention_weights = self.model(
+            graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
+        )
         
         results = {
             'final_predictions': final_predictions.detach().numpy(),
@@ -395,11 +472,15 @@ class AccessibilityGNNTrainer:
             dict with 'predictions' and 'learned_accessibility'
         """
         self.model.eval()
+        # Check if context features available
+        context = getattr(graph_data, 'context', None)
+
         with torch.no_grad():
-            predictions, learned_accessibility = self.model(
+            predictions, learned_accessibility, attention_weights = self.model(  # ← RIGHT: unpacking 3
                 graph_data.x, 
                 graph_data.edge_index, 
-                return_accessibility=True
+                return_accessibility=True,
+                context_features=context
             )
         
         return {
@@ -453,7 +534,8 @@ class MultiTractGNNTrainer:
             'constraint_errors': [], 
             'spatial_stds': [],
             'per_tract_errors': {},
-            'raw_predictions_history': []  # NEW: Track raw predictions
+            'raw_predictions_history': [],
+            'attention_weights': [] 
         }
     
     def train(self, graph_data, tract_svis: Dict[str, float], 
@@ -494,11 +576,22 @@ class MultiTractGNNTrainer:
         
         for epoch in range(epochs):
             self.optimizer.zero_grad()
+
+            # Check if context features available
+            context = getattr(graph_data, 'context', None)
             
-            # Forward pass
-            predictions, learned_accessibility = self.model(
-                graph_data.x, graph_data.edge_index, return_accessibility=True
+            # Forward pass with context-gating
+            predictions, learned_accessibility, attention_weights = self.model(
+                graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
             )
+
+            # Optional: Track attention weights for analysis
+            if attention_weights is not None:
+                if epoch == 0:
+                    self.training_history['attention_weights'] = []
+                self.training_history['attention_weights'].append(
+                    attention_weights.detach().cpu().numpy()
+                )
             
             # Compute losses with REBALANCED weights
             losses = self._compute_multi_tract_losses(
@@ -562,10 +655,10 @@ class MultiTractGNNTrainer:
         
         # Final evaluation
         self.model.eval()
-        with torch.no_grad():
-            final_predictions, final_learned_accessibility = self.model(
-                graph_data.x, graph_data.edge_index, return_accessibility=True
-            )
+        context = getattr(graph_data, 'context', None)
+        final_predictions, final_learned_accessibility, attention_weights = self.model(
+            graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
+        )
         
         # Compute final metrics
         final_per_tract_errors = self._compute_per_tract_errors(
@@ -672,11 +765,16 @@ class MultiTractGNNTrainer:
             dict with 'predictions' and 'learned_accessibility'
         """
         self.model.eval()
+
+        # Check if context features available
+        context = getattr(graph_data, 'context', None)
+
         with torch.no_grad():
-            predictions, learned_accessibility = self.model(
+            predictions, learned_accessibility, attention_weights = self.model(
                 graph_data.x, 
                 graph_data.edge_index, 
-                return_accessibility=True
+                return_accessibility=True,
+                context_features=context
             )
         
         return {

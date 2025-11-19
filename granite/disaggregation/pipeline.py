@@ -227,20 +227,36 @@ class GRANITEPipeline:
         # Generate feature names
         feature_names = self._generate_feature_names(accessibility_features.shape[1])
                 
-        # Step 2: Build graph
+        # Step 2: Build graph with context features
         from ..models.gnn import normalize_accessibility_features
         normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
 
         # Store NORMALIZED features for feature importance in multi-tract mode
-        # CRITICAL: Must be after normalization so feature importance uses same scale as training
-        full_accessibility_features = normalized_features.copy() if n_neighbor_tracts > 0 else None  # ← ADD THIS LINE HERE
+        full_accessibility_features = normalized_features.copy() if n_neighbor_tracts > 0 else None
 
+        # NEW: Extract and normalize context features
+        self._log("Extracting context features for addresses...")
+        context_features = self.data_loader.create_context_features_for_addresses(
+            addresses=tract_addresses,
+            svi_data=data['svi']
+        )
+        normalized_context, context_scaler = self.data_loader.normalize_context_features(context_features)
+
+        # NEW: Store context for diagnostics
+        self._stored_context_features = normalized_context.copy()
+
+        # Create graph with both accessibility AND context features
         graph_data = self.data_loader.create_spatial_accessibility_graph(
             addresses=tract_addresses,
             accessibility_features=normalized_features,
+            context_features=normalized_context,  # NEW: Pass context
             state_fips=state_fips,
             county_fips=county_fips
         )
+
+        self._log(f"Built graph: {graph_data.x.shape[0]} nodes, {graph_data.edge_index.shape[1]} edges")
+        self._log(f"  Accessibility features: {graph_data.x.shape[1]}")
+        self._log(f"  Context features: {graph_data.context.shape[1]}")
         
         self._log(f"Built graph: {graph_data.x.shape[0]} nodes, {graph_data.edge_index.shape[1]} edges")
         
@@ -370,6 +386,16 @@ class GRANITEPipeline:
                 'training_result': training_result
             })
 
+        if self.verbose and hasattr(training_result, 'attention_weights'):
+            from ..visualization.attention_analysis import analyze_attention_patterns
+            
+            attention_results = analyze_attention_patterns(
+                attention_weights=training_result['attention_weights'][-1],  # Last epoch
+                context_features=self._stored_context_features,
+                feature_names=feature_names,
+                output_dir=os.path.join(self.output_dir, 'attention_analysis')
+            )
+
         # Baseline comparisons
         # baseline_results = self._run_baseline_comparisons(
         #     addresses=target_addresses,
@@ -416,12 +442,27 @@ class GRANITEPipeline:
             
             # Create model (same architecture as single-tract)
             seed = self.config.get('processing', {}).get('random_seed', 42)
+
+            # Determine if context features are available
+            has_context = hasattr(graph_data, 'context') and graph_data.context is not None
+            context_dim = graph_data.context.shape[1] if has_context else 5
+
+            # Enable context-gating if context features present
+            use_gating = self.config.get('model', {}).get('use_context_gating', True)
+
             model = AccessibilitySVIGNN(
                 accessibility_features_dim=graph_data.x.shape[1],
+                context_features_dim=context_dim,
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
                 dropout=self.config.get('model', {}).get('dropout', 0.3),
-                seed=seed  # STABILITY FIX
+                seed=seed,
+                use_context_gating=use_gating and has_context  # Only if both enabled and available
             )
+
+            if use_gating and has_context:
+                self._log("Context-gating ENABLED")
+            else:
+                self._log("Context-gating DISABLED (baseline mode)")
             
             # Create tract masks for per-tract constraints
             tract_masks = {}
@@ -1435,11 +1476,16 @@ class GRANITEPipeline:
         # Generate unconstrained predictions
         model.eval()
         import torch
+
+        # Check if context features available
+        context = getattr(graph_data, 'context', None)
+
         with torch.no_grad():
-            predictions, learned_accessibility = model(
+            predictions, learned_accessibility, attention_weights = model(
                 graph_data.x,
                 graph_data.edge_index,
-                return_accessibility=True
+                return_accessibility=True,
+                context_features=context
             )
         
         predictions_np = predictions.detach().numpy()
@@ -1522,23 +1568,32 @@ class GRANITEPipeline:
         from ..models.gnn import normalize_accessibility_features
         normalized_train_features, feature_scaler = normalize_accessibility_features(train_features)
         
-        # 5. Build graph for training tracts
+        # 5. Extract and normalize context features for training
+        self._log("Extracting context features for training addresses...")
+        train_context_features = self.data_loader.create_context_features_for_addresses(
+            addresses=train_addresses_df,
+            svi_data=data['svi']
+        )
+        normalized_train_context, context_scaler = self.data_loader.normalize_context_features(train_context_features)
+
+        # 6. Build graph for training tracts
         state_fips = target_fips[:2]
         county_fips = target_fips[2:5]
-        
+
         train_graph = self.data_loader.create_spatial_accessibility_graph(
             addresses=train_addresses_df,
             accessibility_features=normalized_train_features,
+            context_features=normalized_train_context,  # NEW: Pass context
             state_fips=state_fips,
             county_fips=county_fips
         )
         
-        # 6. Create tract masks for training
+        # 7. Create tract masks for training
         train_tract_masks = {}
         for fips in neighbor_fips_list:
             train_tract_masks[fips] = (train_addresses_df['tract_fips'] == fips).values
         
-        # 7. Train model WITHOUT constraints
+        # 8. Train model WITHOUT constraints
         from ..models.gnn import AccessibilitySVIGNN, MultiTractGNNTrainer
         import torch
         
@@ -1568,35 +1623,45 @@ class GRANITEPipeline:
             verbose=self.verbose
         )
         
-        # 8. Load holdout tract data
+        # 9. Load holdout tract data
         holdout_addresses = self.data_loader.get_addresses_for_tract(target_fips)
         holdout_addresses['tract_fips'] = target_fips
         
         self._log(f"Holdout tract: {len(holdout_addresses)} addresses")
         
-        # 9. Compute features for holdout tract
+        # 10. Compute features for holdout tract
         holdout_features = self._compute_accessibility_features(holdout_addresses, data)
         
         # CRITICAL: Apply same normalization from training data
         normalized_holdout_features = feature_scaler.transform(holdout_features)
         
-        # 10. Build graph for holdout tract
+        # 11. Extract context features for holdout tract
+        self._log("Extracting context features for holdout addresses...")
+        holdout_context_features = self.data_loader.create_context_features_for_addresses(
+            addresses=holdout_addresses,
+            svi_data=data['svi']
+        )
+        # CRITICAL: Apply same normalization from training context
+        normalized_holdout_context = context_scaler.transform(holdout_context_features)
+
+        # 12. Build graph for holdout tract
         holdout_graph = self.data_loader.create_spatial_accessibility_graph(
             addresses=holdout_addresses,
             accessibility_features=normalized_holdout_features,
+            context_features=normalized_holdout_context,  # NEW: Pass context
             state_fips=state_fips,
             county_fips=county_fips
         )
         
-        # 11. Predict on holdout tract (unconstrained)
+        # 13. Predict on holdout tract (unconstrained)
         unconstrained_result = trainer.predict_unconstrained(holdout_graph)
         predictions = unconstrained_result['predictions']
         
-        # 12. Get actual SVI for comparison
+        # 14. Get actual SVI for comparison
         target_tract_data = data['tracts'][data['tracts']['FIPS'] == target_fips]
         actual_svi = float(target_tract_data.iloc[0]['RPL_THEMES'])
         
-        # 13. Compute learning quality metrics
+        # 15. Compute learning quality metrics
         predicted_mean = np.mean(predictions)
         predicted_std = np.std(predictions)
         mean_error_pct = abs(predicted_mean - actual_svi) / actual_svi * 100

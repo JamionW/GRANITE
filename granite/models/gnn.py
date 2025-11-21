@@ -21,7 +21,7 @@ from torch_geometric.nn import GCNConv, GATConv, BatchNorm
 from torch_geometric.data import Data
 import numpy as np
 import random
-from typing import Dict
+from typing import Dict, Tuple, Optional
 
 def set_random_seed(seed=42):
     """
@@ -55,7 +55,9 @@ class AccessibilitySVIGNN(nn.Module):
     - Consistent random state for dropout
     """
     def __init__(self, accessibility_features_dim, context_features_dim=5, 
-                 hidden_dim=64, dropout=0.3, seed=42, use_context_gating=True):
+             hidden_dim=64, dropout=0.3, seed=42, use_context_gating=True,
+             use_multitask=True):
+
         super(AccessibilitySVIGNN, self).__init__()
         
         # Set seed for reproducible initialization
@@ -74,6 +76,8 @@ class AccessibilitySVIGNN(nn.Module):
                 context_dim=context_features_dim,
                 hidden_dim=32
             )
+
+        self.use_multitask = use_multitask
         
         # Input normalization (applied to potentially modulated features)
         self.input_norm = nn.LayerNorm(accessibility_features_dim)
@@ -106,13 +110,36 @@ class AccessibilitySVIGNN(nn.Module):
             nn.ReLU()
         )
         
-        # SVI prediction head
-        self.prediction_layers = nn.Sequential(
+        # PRIMARY TASK: SVI prediction head
+        self.svi_predictor = nn.Sequential(
             nn.Linear(hidden_dim//2, hidden_dim//4),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim//4, 1)
         )
+        
+        # AUXILIARY TASK HEADS (only if using multi-task)
+        if use_multitask:
+            self.accessibility_classifier = nn.Sequential(
+                nn.Linear(hidden_dim//2, hidden_dim//4),
+                nn.ReLU(),
+                nn.Dropout(dropout * 0.5),
+                nn.Linear(hidden_dim//4, 5)
+            )
+            
+            self.vehicle_predictor = nn.Sequential(
+                nn.Linear(hidden_dim//2, hidden_dim//4),
+                nn.ReLU(),
+                nn.Dropout(dropout * 0.5),
+                nn.Linear(hidden_dim//4, 1)
+            )
+            
+            self.employment_classifier = nn.Sequential(
+                nn.Linear(hidden_dim//2, hidden_dim//4),
+                nn.ReLU(),
+                nn.Dropout(dropout * 0.5),
+                nn.Linear(hidden_dim//4, 3)
+            )
         
         self._initialize_weights(seed)
         self.dropout = nn.Dropout(dropout)
@@ -133,7 +160,7 @@ class AccessibilitySVIGNN(nn.Module):
                     nn.init.constant_(module.bias, 0)
         
     def forward(self, accessibility_features, edge_index, context_features=None, 
-                return_accessibility=False):
+                return_accessibility=False, return_all_tasks=False):
         """
         Context-aware forward pass through the GNN.
         
@@ -182,14 +209,26 @@ class AccessibilitySVIGNN(nn.Module):
         learned_accessibility = self.accessibility_learner(x)
         
         # SVI prediction
-        svi_predictions = self.prediction_layers(x)
+        svi_predictions = self.svi_predictor(x)
         svi_predictions = torch.sigmoid(svi_predictions.squeeze())
         
         # Return based on what's requested
-        if return_accessibility:
-            return svi_predictions, learned_accessibility, attention_weights
-        else:
-            return svi_predictions
+        if not self.use_multitask or not return_all_tasks:
+            if return_accessibility:
+                return svi_predictions, learned_accessibility, attention_weights
+            else:
+                return svi_predictions
+        
+        # MULTI-TASK OUTPUT
+        return {
+            'svi': svi_predictions,
+            'accessibility_quintile_logits': self.accessibility_classifier(x),
+            'vehicle_ownership': torch.sigmoid(self.vehicle_predictor(x).squeeze()),
+            'employment_category_logits': self.employment_classifier(x),
+            'learned_accessibility': learned_accessibility,
+            'attention_weights': attention_weights,
+            'embeddings': x
+        }
 
 class ContextGatedFeatureModulator(nn.Module):
     """
@@ -243,6 +282,13 @@ class AccessibilityGNNTrainer:
         self.model = model
         self.config = config or {}
         self.seed = seed
+        
+        self.use_multitask = config.get('use_multitask', True)
+        self.multitask_weights = {
+            'accessibility': 0.3,
+            'vehicle': 0.3,
+            'employment': 0.2
+        }
 
         self.enforce_constraints = config.get('enforce_constraints', True)
         self.constraint_weight = config.get('constraint_weight', 
@@ -505,6 +551,14 @@ class MultiTractGNNTrainer:
         self.config = config or {}
         self.seed = seed
 
+        # Multi-task learning configuration
+        self.use_multitask = config.get('use_multitask', True)
+        self.multitask_weights = {
+            'accessibility': 0.3,
+            'vehicle': 0.3,
+            'employment': 0.2
+        }
+
         # NEW: Training mode controls
         self.enforce_constraints = config.get('enforce_constraints', True)
         self.constraint_weight = config.get('constraint_weight', 
@@ -539,7 +593,8 @@ class MultiTractGNNTrainer:
         }
     
     def train(self, graph_data, tract_svis: Dict[str, float], 
-              tract_masks: Dict[str, np.ndarray], epochs=100, verbose=True):
+          tract_masks: Dict[str, np.ndarray], epochs=100, verbose=True,
+          feature_names=None):
         """
         Train GNN across multiple tracts with per-tract constraints.
         
@@ -574,30 +629,139 @@ class MultiTractGNNTrainer:
         
         n_addresses = graph_data.x.shape[0]
         
+        # Generate auxiliary labels for multi-task learning
+        auxiliary_labels = None
+        if self.use_multitask:
+            if feature_names is None:
+                if verbose:
+                    print("WARNING: feature_names not provided, multi-task disabled")
+                self.use_multitask = False
+            else:
+                # Extract features as numpy
+                accessibility_np = graph_data.x.cpu().numpy()
+                context_np = graph_data.context.cpu().numpy()
+                
+                # Generate labels
+                labels_dict = generate_auxiliary_labels(
+                    accessibility_np, context_np, feature_names
+                )
+                
+                # Convert to tensors
+                device = graph_data.x.device
+                auxiliary_labels = {
+                    'accessibility_quintile': torch.tensor(
+                        labels_dict['accessibility_quintile'],
+                        dtype=torch.long, device=device
+                    ),
+                    'vehicle_ownership': torch.tensor(
+                        labels_dict['vehicle_ownership'],
+                        dtype=torch.float32, device=device
+                    ),
+                    'employment_category': torch.tensor(
+                        labels_dict['employment_category'],
+                        dtype=torch.long, device=device
+                    )
+                }
+                
+                if verbose:
+                    print("\n=== Multi-Task Learning Enabled ===")
+                    print(f"Generated auxiliary labels:")
+                    print(f"  Accessibility quintiles: {np.bincount(labels_dict['accessibility_quintile'])}")
+                    print(f"  Vehicle ownership range: [{labels_dict['vehicle_ownership'].min():.3f}, {labels_dict['vehicle_ownership'].max():.3f}]")
+                    print(f"  Employment categories: {np.bincount(labels_dict['employment_category'])}")
+                    print("=" * 40 + "\n")
+        
         for epoch in range(epochs):
             self.optimizer.zero_grad()
 
             # Check if context features available
             context = getattr(graph_data, 'context', None)
             
-            # Forward pass with context-gating
-            predictions, learned_accessibility, attention_weights = self.model(
-                graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
-            )
-
-            # Optional: Track attention weights for analysis
-            if attention_weights is not None:
-                if epoch == 0:
-                    self.training_history['attention_weights'] = []
-                self.training_history['attention_weights'].append(
-                    attention_weights.detach().cpu().numpy()
+            if self.use_multitask and auxiliary_labels is not None:
+                # === MULTI-TASK PATH ===
+                outputs = self.model(
+                    graph_data.x, 
+                    graph_data.edge_index,
+                    context_features=context,
+                    return_all_tasks=True
                 )
+                
+                predictions = outputs['svi']
+                learned_accessibility = outputs['learned_accessibility']
+                attention_weights = outputs['attention_weights']
+                
+                # Track attention weights
+                if attention_weights is not None:
+                    if epoch == 0:
+                        self.training_history['attention_weights'] = []
+                    self.training_history['attention_weights'].append(
+                        attention_weights.detach().cpu().numpy()
+                    )
+                
+                # Compute constraint losses
+                losses = self._compute_multi_tract_losses(
+                    predictions, tract_targets, tract_masks_tensor, n_addresses
+                )
+                
+                # Compute auxiliary losses
+                aux_loss_dict = compute_multitask_loss(
+                    outputs, auxiliary_labels, weights=self.multitask_weights
+                )
+                
+                # Combined loss
+                total_loss = losses['total'] + 1.0 * aux_loss_dict['total']
+                
+                # Enhanced logging every 10 epochs
+                if verbose and epoch % 10 == 0:
+                    print(f"\nEpoch {epoch}:")
+                    print(f"  Total Loss: {total_loss:.4f}")
+                    print(f"  Constraint: {losses['constraint']:.4f}")
+                    print(f"  Auxiliary Total: {aux_loss_dict['total']:.4f}")
+                    print(f"    - Accessibility cls: {aux_loss_dict['accessibility']:.4f}")
+                    print(f"    - Vehicle reg: {aux_loss_dict['vehicle']:.4f}")
+                    print(f"    - Employment cls: {aux_loss_dict['employment']:.4f}")
+                    
+                    # Evaluate auxiliary task accuracy
+                    with torch.no_grad():
+                        acc_pred = outputs['accessibility_quintile_logits'].argmax(dim=1)
+                        acc_acc = (acc_pred == auxiliary_labels['accessibility_quintile']).float().mean().item()
+                        
+                        emp_pred = outputs['employment_category_logits'].argmax(dim=1)
+                        emp_acc = (emp_pred == auxiliary_labels['employment_category']).float().mean().item()
+                        
+                        veh_corr = np.corrcoef(
+                            outputs['vehicle_ownership'].cpu().numpy(),
+                            auxiliary_labels['vehicle_ownership'].cpu().numpy()
+                        )[0, 1]
+                        
+                        print(f"  Auxiliary Performance:")
+                        print(f"    - Accessibility accuracy: {acc_acc:.3f} (target: >0.70)")
+                        print(f"    - Employment accuracy: {emp_acc:.3f} (target: >0.70)")
+                        print(f"    - Vehicle correlation: {veh_corr:.3f} (target: >0.80)")
             
-            # Compute losses with REBALANCED weights
-            losses = self._compute_multi_tract_losses(
-                predictions, tract_targets, tract_masks_tensor, n_addresses
-            )
-            total_loss = losses['total']
+            else:
+                # === SINGLE-TASK PATH (original) ===
+                predictions, learned_accessibility, attention_weights = self.model(
+                    graph_data.x, graph_data.edge_index, 
+                    return_accessibility=True, context_features=context
+                )
+
+                # Track attention weights
+                if attention_weights is not None:
+                    if epoch == 0:
+                        self.training_history['attention_weights'] = []
+                    self.training_history['attention_weights'].append(
+                        attention_weights.detach().cpu().numpy()
+                    )
+                
+                # Compute losses
+                losses = self._compute_multi_tract_losses(
+                    predictions, tract_targets, tract_masks_tensor, n_addresses
+                )
+                total_loss = losses['total']
+                
+                if verbose and epoch % 10 == 0:
+                    print(f"Epoch {epoch}: Loss={total_loss:.4f}")
             
             # Backward pass
             total_loss.backward()
@@ -894,3 +1058,95 @@ def normalize_accessibility_features(features, method='robust'):
         normalized_features = np.nan_to_num(normalized_features)
     
     return normalized_features, scaler
+
+def generate_auxiliary_labels(accessibility_features, context_features, feature_names):
+    """
+    Generate ground truth labels for auxiliary tasks.
+    
+    Args:
+        accessibility_features: [n_addresses, n_features] numpy array
+        context_features: [n_addresses, 5] numpy array
+        feature_names: List of feature names
+    
+    Returns:
+        dict with 'accessibility_quintile', 'vehicle_ownership', 'employment_category'
+    """
+    n_addresses = len(accessibility_features)
+    
+    # Task 1: Accessibility quintile from travel times
+    time_indices = [i for i, name in enumerate(feature_names) if 'min_time' in name]
+    if len(time_indices) > 0:
+        avg_travel_time = accessibility_features[:, time_indices].mean(axis=1)
+        quintiles = np.argsort(np.argsort(avg_travel_time)) // (n_addresses // 5)
+        quintiles = np.clip(quintiles, 0, 4).astype(np.int64)
+    else:
+        quintiles = np.random.randint(0, 5, size=n_addresses)
+    
+    # Task 2: Vehicle ownership from context features
+    vehicle_ownership = context_features[:, 0]  # First context feature
+    
+    # Task 3: Employment category from employment counts
+    emp_indices = [i for i, name in enumerate(feature_names) if 'employment_count' in name]
+    if len(emp_indices) > 0:
+        emp_access = accessibility_features[:, emp_indices].sum(axis=1)
+        low_thresh = np.percentile(emp_access, 33)
+        high_thresh = np.percentile(emp_access, 67)
+        
+        employment_category = np.zeros(n_addresses, dtype=np.int64)
+        employment_category[emp_access >= low_thresh] = 1
+        employment_category[emp_access >= high_thresh] = 2
+    else:
+        employment_category = np.random.randint(0, 3, size=n_addresses)
+    
+    return {
+        'accessibility_quintile': quintiles,
+        'vehicle_ownership': vehicle_ownership,
+        'employment_category': employment_category
+    }
+
+
+def compute_multitask_loss(outputs, auxiliary_targets, weights=None):
+    """
+    Compute auxiliary task losses.
+    
+    Args:
+        outputs: Dict from model forward pass with all task predictions
+        auxiliary_targets: Dict with ground truth tensors
+        weights: Optional dict of loss weights
+    
+    Returns:
+        dict with 'total' and individual task losses
+    """
+    if weights is None:
+        weights = {'accessibility': 0.3, 'vehicle': 0.3, 'employment': 0.2}
+    
+    # Classification losses
+    acc_loss = F.cross_entropy(
+        outputs['accessibility_quintile_logits'],
+        auxiliary_targets['accessibility_quintile']
+    )
+    
+    emp_loss = F.cross_entropy(
+        outputs['employment_category_logits'],
+        auxiliary_targets['employment_category']
+    )
+    
+    # Regression loss
+    vehicle_loss = F.mse_loss(
+        outputs['vehicle_ownership'],
+        auxiliary_targets['vehicle_ownership']
+    )
+    
+    # Weighted combination
+    total = (
+        weights['accessibility'] * acc_loss +
+        weights['vehicle'] * vehicle_loss +
+        weights['employment'] * emp_loss
+    )
+    
+    return {
+        'total': total,
+        'accessibility': acc_loss,
+        'vehicle': vehicle_loss,
+        'employment': emp_loss
+    }

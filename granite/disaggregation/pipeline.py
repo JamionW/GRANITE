@@ -472,7 +472,7 @@ class GRANITEPipeline:
             # Create MULTI-TRACT trainer (new class)
             trainer = MultiTractGNNTrainer(
                 model, 
-                config=self.config.get('training', {}),
+                config={**self.config.get('training', {}), 'use_multitask': True},
                 seed=seed  # STABILITY FIX
             )
             
@@ -490,7 +490,8 @@ class GRANITEPipeline:
                 tract_svis=tract_svis,
                 tract_masks=tract_masks,
                 epochs=epochs,
-                verbose=self.verbose
+                verbose=self.verbose,
+                feature_names=feature_names 
             )
             
             # Get raw predictions from training
@@ -1564,6 +1565,9 @@ class GRANITEPipeline:
         # 3. Compute accessibility features for training set
         train_features = self._compute_accessibility_features(train_addresses_df, data)
         
+        # Generate feature names for multi-task learning
+        train_feature_names = self._generate_feature_names(train_features.shape[1])
+
         # 4. Normalize features on training data
         from ..models.gnn import normalize_accessibility_features
         normalized_train_features, feature_scaler = normalize_accessibility_features(train_features)
@@ -1611,6 +1615,7 @@ class GRANITEPipeline:
         unconstrained_config = self.config.get('training', {}).copy()
         unconstrained_config['enforce_constraints'] = False
         unconstrained_config['constraint_weight'] = 0.0
+        unconstrained_config['use_multitask'] = True 
         
         trainer = MultiTractGNNTrainer(model, config=unconstrained_config, seed=seed)
         
@@ -1620,7 +1625,8 @@ class GRANITEPipeline:
             tract_svis=train_tract_svis,
             tract_masks=train_tract_masks,
             epochs=self.config.get('model', {}).get('epochs', 150),
-            verbose=self.verbose
+            verbose=self.verbose,
+            feature_names=train_feature_names 
         )
         
         # 9. Load holdout tract data

@@ -1040,10 +1040,10 @@ def normalize_accessibility_features(features, method='robust'):
     zero_var_mask = feature_stds < 1e-8
     
     if np.any(zero_var_mask):
-        print(f"Warning: {np.sum(zero_var_mask)} features have zero variance and will be removed")
-        features = features[:, ~zero_var_mask]
-        if features.shape[1] == 0:
-            raise ValueError("All features have zero variance")
+        print(f"Warning: {np.sum(zero_var_mask)} features have zero variance")
+        #features = features[:, ~zero_var_mask]
+        #if features.shape[1] == 0:
+        #    raise ValueError("All features have zero variance")
     
     # Apply normalization
     normalized_features = scaler.fit_transform(features)

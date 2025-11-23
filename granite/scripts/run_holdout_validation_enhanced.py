@@ -152,7 +152,8 @@ def run_comprehensive_validation(test_tracts, neighbor_count=3, seed=42):
             'processing': {
                 'verbose': True,
                 'enable_caching': True,
-                'random_seed': seed
+                'random_seed': seed,
+                'clear_cache_per_tract': True  # Force cache clear between tracts
             }
         }
         
@@ -175,9 +176,27 @@ def run_comprehensive_validation(test_tracts, neighbor_count=3, seed=42):
                 })
                 
                 print(f"\n✓ Validation complete: Error={result['mean_error_pct']:.1f}%, Correlation={result['accessibility_svi_correlation']:.3f}")
+            else:
+                print(f"✗ Validation failed for tract {target_fips}")
             
         except Exception as e:
-            print(f"ERROR: {str(e)}")
+            print(f"ERROR on tract {target_fips}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            # Log failure but continue
+            results.append({
+                'fips': target_fips,
+                'actual_svi': None,
+                'predicted_mean': None,
+                'mean_error_pct': None,
+                'natural_convergence': False,
+                'correlation': None,
+                'std': None,
+                'n_training_tracts': 0,
+                'n_holdout_addresses': 0,
+                'error': str(e)
+            })
             continue
     
     # Summary

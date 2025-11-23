@@ -813,7 +813,7 @@ class GRANITEPipeline:
                     zero_var_count = np.sum(zero_var_mask)
 
                     if zero_var_count > 0:
-                        self._log(f"WARNING: {dest_type} has {zero_var_count} zero-variance features, removing them")
+                        self._log(f"WARNING: {dest_type} has {zero_var_count} zero-variance features (keeping for consistency)")
                         
                         # Identify which features
                         feature_names_temp = [
@@ -826,10 +826,10 @@ class GRANITEPipeline:
                             if has_zero_var and i < len(feature_names_temp):
                                 self._log(f"  Zero variance: {dest_type}_{feature_names_temp[i]}")
                         
-                        # Keep only features with variance
-                        valid_features_mask = ~zero_var_mask
-                        dest_features = dest_features[:, valid_features_mask]
-                        self._log(f"  Kept {dest_features.shape[1]} features with variance")
+                        # KEEP all features - do NOT remove zero-variance features
+                        # valid_features_mask = ~zero_var_mask
+                        # dest_features = dest_features[:, valid_features_mask]
+                        self._log(f"  Keeping all {dest_features.shape[1]} features (including zero-variance)")
                         
                         # If we removed all features, that's a real error
                         if dest_features.shape[1] == 0:
@@ -845,14 +845,8 @@ class GRANITEPipeline:
                         'drive_advantage', 'dispersion', 'time_range', 'percentile'
                     ]
 
-                    # Only add names for features that made it through
-                    if zero_var_count > 0:
-                        # Keep only the names of features we kept
-                        kept_feature_names = [name for i, name in enumerate(base_feature_names) if not zero_var_mask[i]]
-                        feature_names.extend([f'{dest_type}_{name}' for name in kept_feature_names])
-                    else:
-                        # All features kept
-                        feature_names.extend([f'{dest_type}_{name}' for name in base_feature_names])
+                    # ALWAYS add names for ALL features (no filtering)
+                    feature_names.extend([f'{dest_type}_{name}' for name in base_feature_names])
                     
                     successful_computations += 1
                     self._log(f"  ✓ {dest_type}: {dest_features.shape} features computed successfully")
@@ -1007,26 +1001,26 @@ class GRANITEPipeline:
             zero_var_count = np.sum(zero_var_mask)
 
             if zero_var_count > 0:
-                self._log(f"WARNING: {zero_var_count} features have zero variance, removing them")
+                self._log(f"WARNING: {zero_var_count} features have zero variance (keeping for consistency)")
                 
                 # Debug zero variance features
                 for i in range(final_features.shape[1]):
                     if zero_var_mask[i]:
                         feature_name = complete_feature_names[i] if i < len(complete_feature_names) else f"feature_{i}"
                         unique_vals = len(np.unique(final_features[:, i]))
-                        self._log(f"  Removing {feature_name}: {unique_vals} unique values, std={np.std(final_features[:, i]):.8f}")
+                        self._log(f"  Zero-variance feature: {feature_name}: {unique_vals} unique values, std={np.std(final_features[:, i]):.8f}")
                 
-                # Remove zero-variance features
-                valid_feature_mask = ~zero_var_mask
-                final_features = final_features[:, valid_feature_mask]
-                complete_feature_names = [name for i, name in enumerate(complete_feature_names) if valid_feature_mask[i]]
+                # KEEP all features - do NOT remove zero-variance features
+                # valid_feature_mask = ~zero_var_mask
+                # final_features = final_features[:, valid_feature_mask]
+                # complete_feature_names = [name for i, name in enumerate(complete_feature_names) if valid_feature_mask[i]]
                 
-                # Check if we have enough features remaining
-                if final_features.shape[1] < 10:
-                    self._log(f"CRITICAL ERROR: Only {final_features.shape[1]} features remaining after removing zero-variance")
-                    return None
+                # No need to check feature count since we're keeping all features
+                # if final_features.shape[1] < 10:
+                #     self._log(f"CRITICAL ERROR: Only {final_features.shape[1]} features remaining after removing zero-variance")
+                #     return None
                 
-                self._log(f"Continuing with {final_features.shape[1]} valid features")
+                self._log(f"Keeping all {final_features.shape[1]} features (including {zero_var_count} zero-variance)")
             
             # Check for excessive negative values (some can be negative, like drive_advantage)
             negative_features = []

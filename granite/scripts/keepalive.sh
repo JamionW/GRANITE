@@ -10,7 +10,7 @@ echo ""
 
 while true; do
     # Check if any GRANITE-related process is running
-    if ps aux | grep -v grep | grep -q "run_granite\|granite\|GRANITE|run_holdout\|validation"; then
+    if ps aux | grep -v grep | grep -q "run_granite\|granite\|GRANITE|run_holdout\|test\|validation"; then
         timestamp=$(date '+%Y-%m-%d %H:%M:%S')
         echo "[$timestamp] ✓ GRANITE running - keeping session alive..."
         sleep 60  # Wait 1 minute

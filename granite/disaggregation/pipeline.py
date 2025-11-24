@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from datetime import datetime
+from typing import List, Dict, Optional
 warnings.filterwarnings('ignore')
 
 from ..models.gnn import set_random_seed
@@ -69,18 +70,30 @@ class GRANITEPipeline:
         
         self._log("Starting GRANITE Accessibility SVI Pipeline...")
 
-        # NEW: Check for holdout validation mode
-        if self.config.get('validation', {}).get('holdout_mode', False):
+        # NEW: Support both per-tract holdout AND global training
+        validation_mode = self.config.get('validation', {}).get('mode', None)
+
+        if validation_mode == 'holdout':
+            # Per-tract holdout (old approach)
             target_fips = self.config.get('data', {}).get('target_fips')
             neighbor_fips = self.config.get('validation', {}).get('neighbor_fips', [])
             
             if not neighbor_fips:
-                # Auto-discover neighbors if not provided
                 n_neighbors = self.config.get('data', {}).get('neighbor_tracts', 3)
                 all_fips = self.data_loader.get_neighboring_tracts(target_fips, n_neighbors)
                 neighbor_fips = [f for f in all_fips if f != target_fips]
             
             return self.run_holdout_validation(target_fips, neighbor_fips)
+
+        elif validation_mode == 'global':
+            # Global training (new approach)
+            training_fips = self.config.get('validation', {}).get('training_fips', [])
+            test_fips = self.config.get('validation', {}).get('test_fips', [])
+            
+            if not training_fips:
+                return {'success': False, 'error': 'Global mode requires training_fips'}
+            
+            return self.run_global_training(training_fips, test_fips)
         
         # Load data
         data = self._load_spatial_data()
@@ -629,6 +642,18 @@ class GRANITEPipeline:
         """
         self._log("Computing enhanced accessibility features...")
 
+        # Detect multi-tract scenario
+        n_tracts = addresses['tract_fips'].nunique() if 'tract_fips' in addresses.columns else 1
+        is_multi_tract = n_tracts > 1
+        
+        if is_multi_tract:
+            self._log(f"Multi-tract mode detected ({n_tracts} tracts, {len(addresses)} addresses)")
+            self._log("⚠️  Skipping cache lookup for aggregated multi-tract data")
+            # Force disable cache for this computation
+            skip_cache_lookup = True
+        else:
+            skip_cache_lookup = False
+
         def _generate_cache_key(addresses_gdf, destinations_dict):
             """Generate stable cache key from addresses and destinations"""
             import hashlib
@@ -706,7 +731,7 @@ class GRANITEPipeline:
             
             destinations = validated_destinations
 
-            if accessibility_computer.cache is not None:
+            if not skip_cache_lookup and accessibility_computer.cache is not None:
                 addr_hash, dest_hashes = _generate_cache_key(addresses, destinations)
                 cache_key = f"{addr_hash}_complete"
                 
@@ -731,7 +756,7 @@ class GRANITEPipeline:
                 
                 try:
                     # ADD THIS: Check cache for this specific destination type
-                    if accessibility_computer.cache is not None:
+                    if not skip_cache_lookup and accessibility_computer.cache is not None:
                         addr_hash, dest_hashes = _generate_cache_key(addresses, {dest_type: dest_gdf})
                         dest_cache_key = f"{addr_hash}_{dest_hashes[dest_type]}"
                         
@@ -2300,6 +2325,212 @@ class GRANITEPipeline:
             self._log("\n⚠️  WARNING: No features with known expected directions found")
         
         return correlations
+
+    def run_global_training(self, training_fips_list: List[str], test_fips_list: List[str] = None):
+        """
+        Global training: Train ONE model on diverse tracts, test on separate holdouts.
+        
+        This is fundamentally different from per-tract training:
+        - Trains a single model on ALL training tracts
+        - Model learns cross-context accessibility-vulnerability relationships
+        - Can predict on any new tract without retraining
+        
+        Args:
+            training_fips_list: List of diverse training tract FIPS codes
+            test_fips_list: Optional list of test tract FIPS codes for validation
+        
+        Returns:
+            dict with trained model and evaluation results
+        """
+        self._log(f"\n{'='*80}")
+        self._log(f"GLOBAL TRAINING MODE")
+        self._log(f"Training on {len(training_fips_list)} diverse tracts")
+        if test_fips_list:
+            self._log(f"Testing on {len(test_fips_list)} holdout tracts")
+        self._log(f"{'='*80}\n")
+        
+        # 1. Load all spatial data
+        data = self._load_spatial_data()
+        
+        # 2. Load ALL training tract addresses
+        train_addresses = []
+        train_tract_svis = {}
+        
+        for fips in training_fips_list:
+            fips = str(fips).strip()
+            print(f"[DEBUG] Loading tract {fips}...") 
+            addresses = self.data_loader.get_addresses_for_tract(fips)
+            addresses['tract_fips'] = fips
+            train_addresses.append(addresses)
+            print(f"[DEBUG] ✓ Loaded {len(addresses)} addresses from {fips}") 
+            
+            tract_data = data['tracts'][data['tracts']['FIPS'] == fips]
+            train_tract_svis[fips] = float(tract_data.iloc[0]['RPL_THEMES'])
+        
+        train_addresses_df = pd.concat(train_addresses, ignore_index=True)
+        
+        self._log(f"Global training set: {len(train_addresses_df)} addresses")
+        self._log(f"SVI range: {min(train_tract_svis.values()):.3f} - {max(train_tract_svis.values()):.3f}")
+        
+        # 3. Compute accessibility features for ALL training addresses
+        train_features = self._compute_accessibility_features(train_addresses_df, data)
+        train_feature_names = self._generate_feature_names(train_features.shape[1])
+        
+        # 4. Normalize features on global training data
+        from ..models.gnn import normalize_accessibility_features
+        normalized_train_features, feature_scaler = normalize_accessibility_features(train_features)
+        
+        # 5. Extract context features for training
+        self._log("Extracting context features for global training...")
+        train_context_features = self.data_loader.create_context_features_for_addresses(
+            addresses=train_addresses_df,
+            svi_data=data['svi']
+        )
+        normalized_train_context, context_scaler = self.data_loader.normalize_context_features(
+            train_context_features
+        )
+        
+        # 6. Build GLOBAL graph with all training addresses
+        state_fips = training_fips_list[0][:2]
+        county_fips = training_fips_list[0][2:5]
+        
+        train_graph = self.data_loader.create_spatial_accessibility_graph(
+            addresses=train_addresses_df,
+            accessibility_features=normalized_train_features,
+            context_features=normalized_train_context,
+            state_fips=state_fips,
+            county_fips=county_fips
+        )
+        
+        self._log(f"Built global graph: {train_graph.x.shape[0]} nodes, {train_graph.edge_index.shape[1]} edges")
+        
+        # 7. Create tract masks for multi-tract training
+        train_tract_masks = {}
+        for fips in training_fips_list:
+            train_tract_masks[fips] = (train_addresses_df['tract_fips'] == fips).values
+        
+        # 8. Train GLOBAL model
+        from ..models.gnn import AccessibilitySVIGNN, MultiTractGNNTrainer
+        
+        seed = self.config.get('processing', {}).get('random_seed', 42)
+        set_random_seed(seed)
+        
+        model = AccessibilitySVIGNN(
+            accessibility_features_dim=train_graph.x.shape[1],
+            hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
+            dropout=self.config.get('model', {}).get('dropout', 0.3),
+            seed=seed
+        )
+        
+        # Configure for multi-task learning without strict constraints
+        training_config = self.config.get('training', {}).copy()
+        training_config['enforce_constraints'] = True
+        training_config['constraint_weight'] = 1.0  # Lower weight for diverse data
+        training_config['use_multitask'] = True
+        
+        trainer = MultiTractGNNTrainer(model, config=training_config, seed=seed)
+        
+        self._log("Training GLOBAL model on diverse tracts...")
+        training_result = trainer.train(
+            graph_data=train_graph,
+            tract_svis=train_tract_svis,
+            tract_masks=train_tract_masks,
+            epochs=self.config.get('model', {}).get('epochs', 150),
+            verbose=self.verbose,
+            feature_names=train_feature_names
+        )
+        
+        # 9. If test tracts provided, evaluate on them
+        test_results = {}
+        if test_fips_list:
+            self._log(f"\nEvaluating on {len(test_fips_list)} holdout tracts...")
+            
+            for test_fips in test_fips_list:
+                result = self._evaluate_on_holdout_tract(
+                    test_fips, data, trainer, feature_scaler, context_scaler
+                )
+                test_results[test_fips] = result
+                
+                self._log(f"  {test_fips}: Error={result['mean_error_pct']:.1f}%, Corr={result['correlation']:.3f}")
+        
+        return {
+            'success': True,
+            'mode': 'global_training',
+            'model': model,
+            'trainer': trainer,
+            'training_fips': training_fips_list,
+            'training_svi_range': (min(train_tract_svis.values()), max(train_tract_svis.values())),
+            'training_result': training_result,
+            'feature_scaler': feature_scaler,
+            'context_scaler': context_scaler,
+            'test_results': test_results,
+            'n_training_addresses': len(train_addresses_df)
+        }
+
+    def _evaluate_on_holdout_tract(self, test_fips, data, trainer, feature_scaler, context_scaler):
+        """Evaluate trained global model on a single holdout tract"""
+        
+        # Load holdout tract
+        holdout_addresses = self.data_loader.get_addresses_for_tract(test_fips)
+
+        if len(holdout_addresses) == 0:
+            self._log(f"WARNING: Tract {test_fips} has no addresses, skipping")
+            return {
+                'actual_svi': None,
+                'predicted_mean': None,
+                'mean_error_pct': None,
+                'correlation': None,
+                'predictions': None,
+                'error': 'No addresses in tract'
+            }
+
+        holdout_addresses['tract_fips'] = test_fips
+        
+        # Compute and normalize features using training scalers
+        holdout_features = self._compute_accessibility_features(holdout_addresses, data)
+        normalized_holdout_features = feature_scaler.transform(holdout_features)
+        
+        holdout_context_features = self.data_loader.create_context_features_for_addresses(
+            addresses=holdout_addresses,
+            svi_data=data['svi']
+        )
+        normalized_holdout_context = context_scaler.transform(holdout_context_features)
+        
+        # Build holdout graph
+        state_fips = test_fips[:2]
+        county_fips = test_fips[2:5]
+        
+        holdout_graph = self.data_loader.create_spatial_accessibility_graph(
+            addresses=holdout_addresses,
+            accessibility_features=normalized_holdout_features,
+            context_features=normalized_holdout_context,
+            state_fips=state_fips,
+            county_fips=county_fips
+        )
+        
+        # Predict
+        unconstrained_result = trainer.predict_unconstrained(holdout_graph)
+        predictions = unconstrained_result['predictions']
+        
+        # Get actual SVI
+        target_tract_data = data['tracts'][data['tracts']['FIPS'] == test_fips]
+        actual_svi = float(target_tract_data.iloc[0]['RPL_THEMES'])
+        
+        # Compute metrics
+        predicted_mean = np.mean(predictions)
+        mean_error_pct = abs(predicted_mean - actual_svi) / actual_svi * 100
+        
+        learned_accessibility = unconstrained_result['learned_accessibility']
+        accessibility_summary = learned_accessibility.mean(axis=1)
+        correlation = np.corrcoef(accessibility_summary, predictions)[0, 1]
+        
+        return {
+            'actual_svi': actual_svi,
+            'predicted_mean': predicted_mean,
+            'mean_error_pct': mean_error_pct,
+            'correlation': correlation,
+            'predictions': predictions
+        }
     
     def _validate_final_feature_relationships(self, features: np.ndarray, addresses) -> bool:
         """NEW: Final validation of accessibility-vulnerability relationship"""

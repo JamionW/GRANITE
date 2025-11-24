@@ -20,13 +20,19 @@ class EnhancedAccessibilityComputer:
     def __init__(self, verbose=True, enable_caching=True, cache_dir='./granite_cache'):
         self.verbose = verbose
 
-        # ADD THIS: Initialize caching
         self.enable_caching = enable_caching
+        self.cache = None  # Default to None
+
         if enable_caching:
-            from granite.cache import AccessibilityCache
-            self.cache = AccessibilityCache(cache_dir=cache_dir)
-        else:
-            self.cache = None
+            try:
+                from granite.cache import AccessibilityCache
+                self.cache = AccessibilityCache(cache_dir=cache_dir)
+                if self.verbose:
+                    print(f"[EnhancedAccessibility] ✓ Cache enabled at {cache_dir}")
+            except ImportError:
+                if self.verbose:
+                    print(f"[EnhancedAccessibility] Cache module not found, disabling caching")
+                self.cache = None
         
         # FIXED: More realistic speed parameters
         self.speed_params = {

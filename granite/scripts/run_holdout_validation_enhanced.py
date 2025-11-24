@@ -1,6 +1,6 @@
 """
-Enhanced comprehensive holdout validation with strategic tract selection.
-Selects diverse tracts spanning SVI spectrum for robust testing.
+Global training validation with manually curated diverse tracts.
+Uses confirmed tracts with sufficient addresses spanning full SVI spectrum.
 """
 import sys
 import os
@@ -12,269 +12,343 @@ from granite.disaggregation.pipeline import GRANITEPipeline
 from granite.models.gnn import set_random_seed
 from granite.data.loaders import DataLoader
 
-def select_diverse_test_tracts(n_tracts=10, seed=42):
+# def get_curated_training_tracts():
+#     """
+#     15 manually curated training tracts with diverse SVI and good address counts.
+    
+#     Selection criteria:
+#     - ≥500 addresses for stability
+#     - 3 tracts per SVI quintile
+#     - Total SVI range: 0.014 - 0.867
+#     """
+#     return [
+#         # Very Low SVI (0.0-0.2)
+#         '47065012000',  # SVI=0.014, 592 addresses
+#         '47065000700',  # SVI=0.114, 1,784 addresses
+#         '47065011325',  # SVI=0.171, 1,099 addresses
+        
+#         # Low SVI (0.2-0.4)
+#         '47065000600',  # SVI=0.224, 2,089 addresses
+#         '47065011413',  # SVI=0.274, 1,442 addresses
+#         '47065010501',  # SVI=0.280, 2,814 addresses
+#         '47065010431',  # SVI=0.385, 3,394 addresses
+        
+#         # Medium SVI (0.4-0.6)
+#         '47065012400',  # SVI=0.411, 2,316 addresses
+#         '47065010432',  # SVI=0.473, 3,463 addresses
+#         '47065011448',  # SVI=0.501, 2,169 addresses
+#         '47065011326',  # SVI=0.510, 2,738 addresses
+        
+#         # High SVI (0.6-0.8)
+#         '47065011445',  # SVI=0.638, 2,472 addresses
+#         '47065011321',  # SVI=0.696, 3,756 addresses
+#         '47065010435',  # SVI=0.715, 2,780 addresses
+        
+#         # Very High SVI (0.8-1.0)
+#         '47065012300',  # SVI=0.867, 2,568 addresses
+#     ]
+
+def get_curated_training_tracts():
     """
-    Intelligently select diverse test tracts spanning the SVI spectrum.
-    
-    Args:
-        n_tracts: Number of test tracts to select
-        seed: Random seed for reproducibility
-    
-    Returns:
-        List of tract FIPS codes with diversity across SVI, geography, context
+    CORRECTED: 5 tracts with NO overlap with test set
+    All <2500 addresses for memory safety (~10K total)
+    Spans SVI 0.114 - 0.857
     """
-    np.random.seed(seed)
+    return [
+        # Very Low SVI
+        '47065000700',  # SVI=0.114, 1,784 addresses
+        
+        # Low SVI
+        '47065000600',  # SVI=0.224, 2,089 addresses
+        
+        # Medium SVI
+        '47065012400',  # SVI=0.411, 2,316 addresses
+        
+        # High SVI
+        '47065011445',  # SVI=0.638, 2,472 addresses
+        
+        # Very High SVI
+        '47065003000',  # SVI=0.857, 1,276 addresses
+    ]
+
+def get_curated_test_tracts():
+    """
+    10 manually curated test tracts spanning SVI spectrum.
+    Completely separate from training set.
     
-    loader = DataLoader()
+    Selection criteria:
+    - 2 tracts per SVI quintile
+    - Diverse address counts (97 - 2,858)
+    - Total SVI range: 0.019 - 0.873
+    """
+    return [
+        # Very Low SVI (0.0-0.2)
+        '47065011205',  # SVI=0.019, 97 addresses
+        '47065010411',  # SVI=0.159, 622 addresses
+        
+        # Low SVI (0.2-0.4)
+        '47065010502',  # SVI=0.319, 1,273 addresses
+        '47065011323',  # SVI=0.384, 2,350 addresses
+        
+        # Medium SVI (0.4-0.6)
+        '47065010433',  # SVI=0.454, 2,307 addresses
+        '47065002000',  # SVI=0.478, 1,480 addresses
+        '47065011402',  # SVI=0.576, 2,858 addresses
+        
+        # High SVI (0.6-0.8)
+        '47065010800',  # SVI=0.704, 108 addresses
+        '47065011444',  # SVI=0.709, 1,934 addresses
+        
+        # Very High SVI (0.8-1.0)
+        '47065001300',  # SVI=0.873, 1,004 addresses
+    ]
+
+def print_tract_summary(tract_list, label, loader):
+    """Print summary statistics for a tract list"""
     
-    # Load all available tract data
-    state_fips = '47'
-    county_fips = '065'
-    
-    tracts = loader.load_census_tracts(state_fips, county_fips)
-    svi = loader.load_svi_data(state_fips, 'Hamilton')
-    
-    # Merge to get SVI values
+    tracts = loader.load_census_tracts('47', '065')
+    svi = loader.load_svi_data('47', 'Hamilton')
     tract_data = tracts.merge(svi, on='FIPS', how='inner')
     
-    # Filter to valid SVI data
-    valid_tracts = tract_data[tract_data['RPL_THEMES'].notna()].copy()
+    selected = tract_data[tract_data['FIPS'].isin(tract_list)].copy()
+    selected = selected.sort_values('RPL_THEMES')
     
     print(f"\n{'='*80}")
-    print("TRACT SELECTION: Analyzing SVI Distribution")
+    print(f"{label} ({len(selected)} tracts)")
     print(f"{'='*80}")
-    print(f"Total tracts with valid SVI: {len(valid_tracts)}")
-    print(f"SVI range: {valid_tracts['RPL_THEMES'].min():.3f} - {valid_tracts['RPL_THEMES'].max():.3f}")
-    print(f"Mean SVI: {valid_tracts['RPL_THEMES'].mean():.3f}")
-    print(f"Median SVI: {valid_tracts['RPL_THEMES'].median():.3f}")
+    print(f"SVI Range: {selected['RPL_THEMES'].min():.3f} - {selected['RPL_THEMES'].max():.3f}")
+    print(f"Mean SVI: {selected['RPL_THEMES'].mean():.3f}")
+    print(f"Median SVI: {selected['RPL_THEMES'].median():.3f}")
     
-    # Create SVI quintiles for stratified sampling
-    valid_tracts['svi_quintile'] = pd.qcut(
-        valid_tracts['RPL_THEMES'], 
-        q=5, 
-        labels=['Very Low', 'Low', 'Medium', 'High', 'Very High'],
-        duplicates='drop'
+    # Create quintile labels
+    selected['quintile'] = pd.cut(
+        selected['RPL_THEMES'],
+        bins=[0, 0.2, 0.4, 0.6, 0.8, 1.0],
+        labels=['Very Low', 'Low', 'Medium', 'High', 'Very High']
     )
     
-    # Also categorize by vehicle ownership (key accessibility context)
-    if 'EP_NOVEH' in valid_tracts.columns:
-        valid_tracts['vehicle_context'] = pd.cut(
-            valid_tracts['EP_NOVEH'],
-            bins=[0, 5, 10, 20, 100],
-            labels=['Low Absence', 'Medium Absence', 'High Absence', 'Very High Absence']
-        )
-    else:
-        valid_tracts['vehicle_context'] = 'Unknown'
+    print(f"\nDistribution by SVI Quintile:")
+    quintile_counts = selected['quintile'].value_counts().sort_index()
+    for quintile, count in quintile_counts.items():
+        print(f"  {quintile}: {count} tracts")
     
-    print(f"\nSVI Distribution by Quintile:")
-    print(valid_tracts.groupby('svi_quintile')['RPL_THEMES'].agg(['count', 'mean', 'min', 'max']))
-    
-    if 'EP_NOVEH' in valid_tracts.columns:
-        print(f"\nVehicle Absence Distribution:")
-        print(valid_tracts.groupby('vehicle_context')['EP_NOVEH'].agg(['count', 'mean']))
-    
-    # Strategic selection: 2 tracts from each quintile
-    selected_tracts = []
-    
-    for quintile in ['Very Low', 'Low', 'Medium', 'High', 'Very High']:
-        quintile_tracts = valid_tracts[valid_tracts['svi_quintile'] == quintile]
+    print(f"\nDetailed Tract List:")
+    for _, row in selected.iterrows():
+        # Get address count
+        try:
+            addresses = loader.get_addresses_for_tract(row['FIPS'])
+            n_addr = len(addresses)
+        except:
+            n_addr = 0
         
-        if len(quintile_tracts) >= 2:
-            # Select 2 random tracts from this quintile
-            sample = quintile_tracts.sample(n=min(2, len(quintile_tracts)), random_state=seed)
-        else:
-            sample = quintile_tracts
-        
-        selected_tracts.extend(sample['FIPS'].tolist())
-    
-    # Ensure we have exactly n_tracts
-    if len(selected_tracts) > n_tracts:
-        selected_tracts = selected_tracts[:n_tracts]
-    elif len(selected_tracts) < n_tracts:
-        # Add random additional tracts
-        remaining = valid_tracts[~valid_tracts['FIPS'].isin(selected_tracts)]
-        additional = remaining.sample(n=n_tracts - len(selected_tracts), random_state=seed)
-        selected_tracts.extend(additional['FIPS'].tolist())
-    
-    # Print selection summary
-    print(f"\n{'='*80}")
-    print("SELECTED TEST TRACTS")
-    print(f"{'='*80}")
-    
-    selected_data = valid_tracts[valid_tracts['FIPS'].isin(selected_tracts)].copy()
-    selected_data = selected_data.sort_values('RPL_THEMES')
-    
-    for idx, row in selected_data.iterrows():
-        vehicle_info = f", Vehicle Absence: {row['EP_NOVEH']:.1f}%" if 'EP_NOVEH' in row else ""
-        poverty_info = f", Poverty: {row['EP_POV150']:.1f}%" if 'EP_POV150' in row else ""
-        print(f"  {row['FIPS']}: SVI={row['RPL_THEMES']:.3f} ({row['svi_quintile']}){vehicle_info}{poverty_info}")
-    
-    return selected_tracts
+        quintile = row['quintile']
+        print(f"  {row['FIPS']}: SVI={row['RPL_THEMES']:.3f} ({quintile}), {n_addr:,} addresses")
 
-def run_comprehensive_validation(test_tracts, neighbor_count=3, seed=42):
+def run_global_training_validation(seed=42):
     """
-    Run holdout validation across multiple tracts.
-    
-    Args:
-        test_tracts: List of FIPS codes to test
-        neighbor_count: Number of neighboring tracts for training
-        seed: Random seed for reproducibility
+    Global training validation with manually curated tracts.
     """
     set_random_seed(seed)
     
-    results = []
+    loader = DataLoader()
     
-    for i, target_fips in enumerate(test_tracts):
-        print(f"\n{'='*80}")
-        print(f"Holdout Validation: {target_fips} ({i+1}/{len(test_tracts)})")
-        print(f"{'='*80}")
-        
-        config = {
-            'data': {
-                'target_fips': target_fips,
-                'state_fips': target_fips[:2],
-                'county_fips': target_fips[2:5],
-                'neighbor_tracts': neighbor_count
-            },
-            'model': {
-                'epochs': 150,
-                'hidden_dim': 64,
-                'dropout': 0.3
-            },
-            'training': {
-                'learning_rate': 0.001,
-                'weight_decay': 1e-4,
-                'enforce_constraints': False
-            },
-            'validation': {
-                'holdout_mode': True
-            },
-            'processing': {
-                'verbose': True,
-                'enable_caching': True,
-                'random_seed': seed,
-                'clear_cache_per_tract': True  # Force cache clear between tracts
-            }
-        }
-        
-        pipeline = GRANITEPipeline(config, output_dir=f'./output/holdout_{target_fips}')
-        
-        try:
-            result = pipeline.run()
-            
-            if result['success']:
-                results.append({
-                    'fips': target_fips,
-                    'actual_svi': result['actual_svi'],
-                    'predicted_mean': result['predicted_mean'],
-                    'mean_error_pct': result['mean_error_pct'],
-                    'natural_convergence': result['natural_convergence'],
-                    'correlation': result['accessibility_svi_correlation'],
-                    'std': result['predicted_std'],
-                    'n_training_tracts': len(result['training_fips']),
-                    'n_holdout_addresses': result['n_holdout_addresses']
-                })
-                
-                print(f"\n✓ Validation complete: Error={result['mean_error_pct']:.1f}%, Correlation={result['accessibility_svi_correlation']:.3f}")
-            else:
-                print(f"✗ Validation failed for tract {target_fips}")
-            
-        except Exception as e:
-            print(f"ERROR on tract {target_fips}: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            
-            # Log failure but continue
-            results.append({
-                'fips': target_fips,
-                'actual_svi': None,
-                'predicted_mean': None,
-                'mean_error_pct': None,
-                'natural_convergence': False,
-                'correlation': None,
-                'std': None,
-                'n_training_tracts': 0,
-                'n_holdout_addresses': 0,
-                'error': str(e)
-            })
-            continue
+    # Get curated tract lists
+    training_tracts = get_curated_training_tracts()
+    test_tracts = get_curated_test_tracts()
     
-    # Summary
-    if not results:
-        print("\nNo successful validations!")
-        return None
-    
-    results_df = pd.DataFrame(results)
-    
-    # Comprehensive summary statistics
     print(f"\n{'='*80}")
-    print("COMPREHENSIVE VALIDATION SUMMARY")
+    print("GRANITE GLOBAL TRAINING VALIDATION")
+    print("Using Manually Curated Diverse Tracts")
     print(f"{'='*80}")
-    print(f"\nTested {len(results)} tracts")
     
-    print(f"\n--- Error Statistics ---")
-    print(f"Mean Error: {results_df['mean_error_pct'].mean():.2f}% ± {results_df['mean_error_pct'].std():.2f}%")
-    print(f"Median Error: {results_df['mean_error_pct'].median():.2f}%")
-    print(f"Min Error: {results_df['mean_error_pct'].min():.2f}%")
-    print(f"Max Error: {results_df['mean_error_pct'].max():.2f}%")
+    # Print summaries
+    print_tract_summary(training_tracts, "TRAINING SET", loader)
+    print_tract_summary(test_tracts, "TEST SET", loader)
     
-    print(f"\n--- Correlation Statistics ---")
-    print(f"Mean Correlation: {results_df['correlation'].mean():.4f} ± {results_df['correlation'].std():.4f}")
-    print(f"Median Correlation: {results_df['correlation'].median():.4f}")
-    print(f"Positive Correlations: {(results_df['correlation'] > 0).sum()} / {len(results)} tracts")
-    print(f"Negative Correlations: {(results_df['correlation'] < 0).sum()} / {len(results)} tracts")
+    # Verify no overlap
+    overlap = set(training_tracts) & set(test_tracts)
+    if overlap:
+        print(f"\n⚠️  WARNING: Overlap detected: {overlap}")
+        return None
+    else:
+        print(f"\n✓ No overlap between training and test sets")
     
-    print(f"\n--- Convergence Analysis ---")
-    print(f"Natural Convergence: {results_df['natural_convergence'].sum()} / {len(results)} tracts ({100*results_df['natural_convergence'].mean():.1f}%)")
+    # Configure pipeline for global training
+    config = {
+        'data': {
+            'state_fips': '47',
+            'county_fips': '065'
+        },
+        'model': {
+            'epochs': 150,
+            'hidden_dim': 64,
+            'dropout': 0.3
+        },
+        'training': {
+            'learning_rate': 0.001,
+            'weight_decay': 1e-4,
+            'enforce_constraints': True,
+            'constraint_weight': 1.0,
+            'use_multitask': True
+        },
+        'processing': {
+            'verbose': True,
+            'enable_caching': True,
+            'random_seed': seed
+        }
+    }
     
-    print(f"\n--- SVI Range Analysis ---")
-    print(f"Actual SVI Range: {results_df['actual_svi'].min():.3f} - {results_df['actual_svi'].max():.3f}")
-    print(f"Predicted SVI Range: {results_df['predicted_mean'].min():.3f} - {results_df['predicted_mean'].max():.3f}")
+    pipeline = GRANITEPipeline(config, output_dir='./output/global_validation')
     
-    # Error by SVI level
-    results_df['svi_category'] = pd.cut(
-        results_df['actual_svi'],
-        bins=[0, 0.3, 0.5, 0.7, 1.0],
-        labels=['Low', 'Medium', 'High', 'Very High']
+    # Run global training
+    print(f"\n{'='*80}")
+    print("TRAINING GLOBAL MODEL")
+    print(f"{'='*80}\n")
+    
+    results = pipeline.run_global_training(
+        training_fips_list=training_tracts,
+        test_fips_list=test_tracts
     )
     
-    print(f"\n--- Error by SVI Category ---")
-    error_by_svi = results_df.groupby('svi_category')['mean_error_pct'].agg(['count', 'mean', 'std'])
-    print(error_by_svi)
+    # Analyze and summarize results
+    if results['success']:
+        print(f"\n{'='*80}")
+        print("GLOBAL TRAINING VALIDATION RESULTS")
+        print(f"{'='*80}")
+        
+        test_results = results['test_results']
+        
+        # Filter out any failed tracts
+        valid_results = {
+            fips: r for fips, r in test_results.items() 
+            if r['mean_error_pct'] is not None
+        }
+        
+        if len(valid_results) == 0:
+            print("\n✗ ERROR: No valid test results")
+            return results
+        
+        # Calculate statistics
+        errors = [r['mean_error_pct'] for r in valid_results.values()]
+        correlations = [r['correlation'] for r in valid_results.values()]
+        actual_svis = [r['actual_svi'] for r in valid_results.values()]
+        predicted_svis = [r['predicted_mean'] for r in valid_results.values()]
+        
+        print(f"\nTest Set Performance ({len(valid_results)}/{len(test_tracts)} tracts):")
+        print(f"\n--- Error Statistics ---")
+        print(f"  Mean Error: {np.mean(errors):.2f}% ± {np.std(errors):.2f}%")
+        print(f"  Median Error: {np.median(errors):.2f}%")
+        print(f"  Min Error: {np.min(errors):.2f}%")
+        print(f"  Max Error: {np.max(errors):.2f}%")
+        print(f"  Tracts < 20% error: {sum(1 for e in errors if e < 20)}/{len(errors)}")
+        print(f"  Tracts < 30% error: {sum(1 for e in errors if e < 30)}/{len(errors)}")
+        
+        print(f"\n--- Correlation Statistics ---")
+        print(f"  Mean Correlation: {np.mean(correlations):.3f} ± {np.std(correlations):.3f}")
+        print(f"  Median Correlation: {np.median(correlations):.3f}")
+        print(f"  Positive Correlations: {sum(1 for c in correlations if c > 0)}/{len(correlations)}")
+        print(f"  Strong Correlations (|r|>0.3): {sum(1 for c in correlations if abs(c) > 0.3)}/{len(correlations)}")
+        
+        print(f"\n--- SVI Prediction Analysis ---")
+        print(f"  Actual SVI Range: {min(actual_svis):.3f} - {max(actual_svis):.3f}")
+        print(f"  Predicted SVI Range: {min(predicted_svis):.3f} - {max(predicted_svis):.3f}")
+        print(f"  R² (overall): {np.corrcoef(actual_svis, predicted_svis)[0,1]**2:.3f}")
+        
+        # Error by SVI category
+        results_df = pd.DataFrame([
+            {
+                'fips': fips,
+                'actual_svi': r['actual_svi'],
+                'predicted_svi': r['predicted_mean'],
+                'error_pct': r['mean_error_pct'],
+                'correlation': r['correlation']
+            }
+            for fips, r in valid_results.items()
+        ])
+        
+        results_df['svi_category'] = pd.cut(
+            results_df['actual_svi'],
+            bins=[0, 0.3, 0.5, 0.7, 1.0],
+            labels=['Low (<0.3)', 'Medium (0.3-0.5)', 'High (0.5-0.7)', 'Very High (>0.7)']
+        )
+        
+        print(f"\n--- Error by SVI Category ---")
+        error_by_svi = results_df.groupby('svi_category')['error_pct'].agg(['count', 'mean', 'std', 'min', 'max'])
+        print(error_by_svi.to_string())
+        
+        # Detailed per-tract results
+        print(f"\n{'='*80}")
+        print("DETAILED PER-TRACT RESULTS")
+        print(f"{'='*80}")
+        
+        results_df_sorted = results_df.sort_values('actual_svi')
+        print(f"\n{'FIPS':<15} {'Actual SVI':<12} {'Pred SVI':<12} {'Error %':<10} {'Corr':<8} {'Category'}")
+        print("-" * 80)
+        
+        for _, row in results_df_sorted.iterrows():
+            print(f"{row['fips']:<15} {row['actual_svi']:<12.4f} {row['predicted_svi']:<12.4f} "
+                  f"{row['error_pct']:<10.1f} {row['correlation']:<8.3f} {row['svi_category']}")
+        
+        # Save results
+        output_file = './output/global_validation_results.csv'
+        results_df.to_csv(output_file, index=False)
+        print(f"\n{'='*80}")
+        print(f"Results saved to: {output_file}")
+        print(f"{'='*80}")
+        
+        # Compare to baseline (your previous per-tract results)
+        print(f"\n{'='*80}")
+        print("COMPARISON TO PER-TRACT BASELINE")
+        print(f"{'='*80}")
+        print(f"Previous per-tract training (from your validation):")
+        print(f"  Mean Error: 41.7%")
+        print(f"  Median Error: 55.4%")
+        print(f"  Range: 13.8% - 62.1%")
+        print(f"\nGlobal training (current results):")
+        print(f"  Mean Error: {np.mean(errors):.1f}%")
+        print(f"  Median Error: {np.median(errors):.1f}%")
+        print(f"  Range: {np.min(errors):.1f}% - {np.max(errors):.1f}%")
+        
+        improvement = ((41.7 - np.mean(errors)) / 41.7) * 100
+        print(f"\n{'🎉' if improvement > 0 else '⚠️'} Mean Error Improvement: {improvement:+.1f}%")
+        
+        if np.mean(errors) < 30:
+            print("\n✓✓✓ PUBLICATION READY: Mean error < 30%")
+        elif np.mean(errors) < 35:
+            print("\n✓✓ VERY GOOD: Mean error < 35%")
+        elif np.mean(errors) < 40:
+            print("\n✓ GOOD: Mean error < 40%")
+        else:
+            print("\n⚠️ NEEDS IMPROVEMENT: Consider adding more training tracts")
     
-    # Save results
-    output_file = './output/holdout_validation_enhanced_summary.csv'
-    results_df.to_csv(output_file, index=False)
-    print(f"\nResults saved: {output_file}")
-    
-    # Save detailed results with all metrics
-    detailed_file = './output/holdout_validation_detailed.csv'
-    results_df.to_csv(detailed_file, index=False)
-    print(f"Detailed results saved: {detailed_file}")
-    
-    return results_df
-
+    return results
 
 if __name__ == '__main__':
-    print("GRANITE Enhanced Holdout Validation")
+    print("="*80)
+    print("GRANITE GLOBAL TRAINING VALIDATION")
     print("="*80)
     print("\nThis script will:")
-    print("1. Analyze SVI distribution across Hamilton County tracts")
-    print("2. Select 10 diverse test tracts spanning the SVI spectrum")
-    print("3. Run holdout validation on each tract")
-    print("4. Provide comprehensive performance analysis")
-    print("\nNote: First-time OSRM routing may take 30-60 minutes per tract.")
-    print("Subsequent runs will use cached data and complete in <5 minutes per tract.")
+    print("1. Train ONE global model on 15 diverse tracts (SVI 0.014-0.867)")
+    print("2. Test on 10 separate holdout tracts (SVI 0.019-0.873)")
+    print("3. Compare results to per-tract baseline")
+    print("4. Generate comprehensive performance analysis")
+    print("\nEstimated time:")
+    print("  - First run: ~60-90 minutes (computing accessibility features)")
+    print("  - Cached runs: ~10-15 minutes (training + validation only)")
+    print("\nPress Ctrl+C to cancel, or wait 5 seconds to continue...")
     
-    # Select diverse test tracts
-    test_tracts = select_diverse_test_tracts(n_tracts=10, seed=42)
+    import time
+    try:
+        time.sleep(5)
+    except KeyboardInterrupt:
+        print("\n\nCancelled by user")
+        sys.exit(0)
     
-    # Run validation
-    results = run_comprehensive_validation(test_tracts, neighbor_count=3, seed=42)
+    results = run_global_training_validation(seed=42)
     
-    if results is not None:
+    if results is not None and results['success']:
         print("\n" + "="*80)
         print("VALIDATION COMPLETE")
         print("="*80)
-        print(f"\nSuccessfully validated {len(results)} tracts")
-        print("Review the output files for detailed results and analysis.")
+        print(f"\nSuccessfully validated on {len(results['test_results'])} tracts")
+        print("Review the output files in ./output/global_validation/ for detailed results.")

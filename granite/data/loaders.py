@@ -1392,6 +1392,75 @@ class DataLoader:
             ])
         
         return np.array(derived, dtype=np.float64)
+
+    def select_diverse_training_tracts(self, state_fips: str, county_fips: str, 
+                                    n_tracts: int = 12, seed: int = 42,
+                                    exclude_fips: List[str] = None) -> List[str]:
+        """
+        Select diverse tracts spanning SVI spectrum for global training.
+        
+        This replaces geographic neighbor selection with SVI-stratified sampling.
+        
+        Args:
+            state_fips: State FIPS code
+            county_fips: County FIPS code  
+            n_tracts: Number of training tracts to select
+            seed: Random seed for reproducibility
+            exclude_fips: List of tract FIPS codes to exclude (e.g., test tracts)
+        
+        Returns:
+            List of tract FIPS codes spanning SVI distribution
+        """
+        np.random.seed(seed)
+        
+        # Load all tracts with SVI data
+        all_tracts = self.load_census_tracts(state_fips, county_fips)
+        county_name = self._get_county_name(state_fips, county_fips)
+        svi_data = self.load_svi_data(state_fips, county_name)
+        
+        tracts_with_svi = all_tracts.merge(svi_data, on='FIPS', how='inner')
+        tracts_with_svi = tracts_with_svi[tracts_with_svi['RPL_THEMES'].notna()].copy()
+        
+        # Exclude specified tracts (holdout sets)
+        if exclude_fips:
+            tracts_with_svi = tracts_with_svi[~tracts_with_svi['FIPS'].isin(exclude_fips)]
+        
+        # Create SVI quintiles
+        tracts_with_svi['svi_quintile'] = pd.qcut(
+            tracts_with_svi['RPL_THEMES'],
+            q=5,
+            labels=['Very Low', 'Low', 'Medium', 'High', 'Very High'],
+            duplicates='drop'
+        )
+        
+        # Stratified sampling: take proportionally from each quintile
+        selected_tracts = []
+        tracts_per_quintile = max(2, n_tracts // 5)
+        
+        for quintile in ['Very Low', 'Low', 'Medium', 'High', 'Very High']:
+            quintile_tracts = tracts_with_svi[tracts_with_svi['svi_quintile'] == quintile]
+            
+            if len(quintile_tracts) > 0:
+                n_sample = min(tracts_per_quintile, len(quintile_tracts))
+                sample = quintile_tracts.sample(n=n_sample, random_state=seed)
+                selected_tracts.extend(sample['FIPS'].tolist())
+        
+        # If we need more tracts to reach n_tracts, add random ones
+        if len(selected_tracts) < n_tracts:
+            remaining = tracts_with_svi[~tracts_with_svi['FIPS'].isin(selected_tracts)]
+            additional = remaining.sample(n=n_tracts - len(selected_tracts), random_state=seed)
+            selected_tracts.extend(additional['FIPS'].tolist())
+        
+        # Trim if we have too many
+        selected_tracts = selected_tracts[:n_tracts]
+        
+        self._log(f"Selected {len(selected_tracts)} diverse training tracts:")
+        for fips in selected_tracts:
+            tract_svi = tracts_with_svi[tracts_with_svi['FIPS'] == fips]['RPL_THEMES'].iloc[0]
+            quintile = tracts_with_svi[tracts_with_svi['FIPS'] == fips]['svi_quintile'].iloc[0]
+            self._log(f"  {fips}: SVI={tract_svi:.3f} ({quintile})")
+        
+        return selected_tracts
     
     def _remove_spatial_duplicates(self, destinations_gdf, min_distance_m=100):
         """Remove spatially duplicate destinations"""

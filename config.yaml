@@ -129,6 +129,25 @@ processing:
   detailed_logging: true
   save_intermediate_results: true
 
+# Enable MoE mode
+training:
+  use_mixture: true
+  epochs: 150
+  gate_epochs: 100
+  finetune_epochs: 50
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  enforce_constraints: true
+
+# Mixture settings
+mixture:
+  svi_boundaries:
+    low: [0.01, 0.40]
+    medium: [0.30, 0.70]
+    high: [0.55, 1.00]
+  expert_hidden_dim: 64
+  gate_hidden_dim: 32
+
 # NEW: Research documentation
 research_documentation:
   methodology: "Two-stage Graph Neural Network approach for accessibility-SVI integration"

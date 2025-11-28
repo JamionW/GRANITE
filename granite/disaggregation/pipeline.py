@@ -89,11 +89,15 @@ class GRANITEPipeline:
             # Global training (new approach)
             training_fips = self.config.get('validation', {}).get('training_fips', [])
             test_fips = self.config.get('validation', {}).get('test_fips', [])
+            use_mixture = self.config.get('training', {}).get('use_mixture', False)
             
             if not training_fips:
                 return {'success': False, 'error': 'Global mode requires training_fips'}
             
-            return self.run_global_training(training_fips, test_fips)
+            if use_mixture:
+                return self.run_mixture_training(training_fips, test_fips)
+            else:
+                return self.run_global_training(training_fips, test_fips)
         
         # Load data
         data = self._load_spatial_data()
@@ -2709,6 +2713,112 @@ class GRANITEPipeline:
             'context_scaler': context_scaler,
             'test_results': test_results,
             'n_training_addresses': len(train_addresses_df)
+        }
+
+    def run_mixture_training(self, training_fips_list, test_fips_list):
+        """
+        Train using Mixture of Experts for context-dependent accessibility-vulnerability.
+        Each expert specializes in different SVI ranges, overcoming contradiction where
+        good accessibility indicates high vulnerability in cities but low in suburbs.
+        """
+        from granite.models.mixture_of_experts import (
+            create_moe_model, MixtureOfExpertsTrainer, MoEInferenceAnalyzer
+        )
+        
+        start_time = time.time()
+        self._log("Starting Mixture of Experts Training...")
+        
+        # Load training data
+        self._log(f"Loading {len(training_fips_list)} training tracts...")
+        training_graphs = []
+        training_svis = []
+        
+        for fips in training_fips_list:
+            try:
+                tract_data = self._process_single_tract(fips, {})
+                if tract_data['success']:
+                    # Extract graph and SVI
+                    svi = tract_data['summary'].get('target_svi')
+                    training_svis.append(svi)
+                    # You'll need to return graph_data from _process_single_tract
+                    self._log(f"  {fips}: SVI={svi:.3f}, {tract_data['summary']['addresses_processed']} addresses")
+                else:
+                    self._log(f"  {fips}: FAILED - {tract_data.get('error')}", level='WARNING')
+            except Exception as e:
+                self._log(f"  {fips}: ERROR - {str(e)}", level='ERROR')
+        
+        if len(training_graphs) < 3:
+            return {
+                'success': False,
+                'error': f'Insufficient training data: {len(training_graphs)} tracts (need 3+)'
+            }
+        
+        # Create MoE model
+        self._log("Creating Mixture of Experts model...")
+        moe_model = create_moe_model(
+            accessibility_features_dim=54,
+            context_features_dim=5,
+            hidden_dim=64,
+            dropout=0.3,
+            seed=self.config.get('processing', {}).get('random_seed', 42)
+        )
+        
+        # Configure MoE training
+        moe_config = {
+            'learning_rate': float(self.config.get('training', {}).get('learning_rate', 0.001)),
+            'weight_decay': float(self.config.get('training', {}).get('weight_decay', 1e-4)),
+            'expert_epochs': self.config.get('training', {}).get('epochs', 150),
+            'gate_epochs': self.config.get('training', {}).get('gate_epochs', 100),
+            'finetune_epochs': self.config.get('training', {}).get('finetune_epochs', 50),
+            'enforce_constraints': self.config.get('training', {}).get('enforce_constraints', True)
+        }
+        
+        # Train MoE
+        self._log("Training Mixture of Experts...")
+        trainer = MixtureOfExpertsTrainer(moe_model, moe_config, seed=42)
+        
+        training_results = trainer.train(
+            graph_data_list=training_graphs,
+            tract_svi_list=training_svis,
+            finetune=True,
+            verbose=self.verbose
+        )
+        
+        # Evaluate on test set
+        self._log(f"Evaluating on {len(test_fips_list)} test tracts...")
+        test_results = {}
+        
+        moe_model.eval()
+        with torch.no_grad():
+            for fips in test_fips_list:
+                try:
+                    tract_data = self._process_single_tract(fips, {})
+                    if tract_data['success']:
+                        svi = tract_data['summary'].get('target_svi')
+                        # Inference here...
+                        test_results[fips] = {
+                            'actual_svi': svi,
+                            'predicted_mean': None,  # Fill with MoE prediction
+                            'mean_error_pct': None,
+                            'correlation': None
+                        }
+                except Exception as e:
+                    self._log(f"Test {fips}: ERROR - {str(e)}", level='ERROR')
+        
+        # Analyze expert usage
+        analyzer = MoEInferenceAnalyzer(moe_model, verbose=self.verbose)
+        usage_stats = analyzer.analyze_expert_usage(training_graphs, training_svis)
+        
+        elapsed = time.time() - start_time
+        
+        return {
+            'success': True,
+            'model': moe_model,
+            'training_results': training_results,
+            'test_results': test_results,
+            'expert_usage': usage_stats,
+            'elapsed_time': elapsed,
+            'strategy': 'mixture_of_experts'
         }
 
     def _evaluate_on_holdout_tract(self, test_fips, data, trainer, feature_scaler, context_scaler):

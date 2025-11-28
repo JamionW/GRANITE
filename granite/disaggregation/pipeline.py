@@ -648,9 +648,10 @@ class GRANITEPipeline:
         
         if is_multi_tract:
             self._log(f"Multi-tract mode detected ({n_tracts} tracts, {len(addresses)} addresses)")
-            self._log("⚠️  Skipping cache lookup for aggregated multi-tract data")
+            #self._log("⚠️  Skipping cache lookup for aggregated multi-tract data")
             # Force disable cache for this computation
-            skip_cache_lookup = True
+            #skip_cache_lookup = True
+            skip_cache_lookup = False
         else:
             skip_cache_lookup = False
 
@@ -2351,21 +2352,46 @@ class GRANITEPipeline:
         
         # 1. Load all spatial data
         data = self._load_spatial_data()
-        
+
         # 2. Load ALL training tract addresses
+        self._log("Pre-loading full address dataset...")
+        all_addresses = data['addresses'].copy()
+        tracts_gdf = data['tracts'].copy()
+
+        # Do spatial join ONCE to assign tract IDs to all addresses
+        self._log("Performing one-time spatial join to assign tract IDs...")
+        addresses_with_tracts = gpd.sjoin(
+            all_addresses, 
+            tracts_gdf[['FIPS', 'geometry']], 
+            how='left', 
+            predicate='within'
+        )
+
         train_addresses = []
         train_tract_svis = {}
         
         for fips in training_fips_list:
             fips = str(fips).strip()
-            print(f"[DEBUG] Loading tract {fips}...") 
-            addresses = self.data_loader.get_addresses_for_tract(fips)
+            print(f"[DEBUG] Filtering tract {fips}...")
+            
+            # Now we can filter efficiently in memory
+            tract_mask = addresses_with_tracts['FIPS'] == fips
+            addresses = addresses_with_tracts[tract_mask].copy()
+            
+            if len(addresses) == 0:
+                self._log(f"WARNING: No addresses found for tract {fips}")
+                continue
+            
+            # Keep only original columns + tract_fips
+            addresses = addresses[['address_id', 'geometry', 'full_address']].copy()
             addresses['tract_fips'] = fips
             train_addresses.append(addresses)
-            print(f"[DEBUG] ✓ Loaded {len(addresses)} addresses from {fips}") 
-            
+            print(f"[DEBUG] ✓ Filtered {len(addresses)} addresses from {fips}")
+
+            # Store tract SVI
             tract_data = data['tracts'][data['tracts']['FIPS'] == fips]
-            train_tract_svis[fips] = float(tract_data.iloc[0]['RPL_THEMES'])
+            if len(tract_data) > 0:
+                train_tract_svis[fips] = float(tract_data.iloc[0]['RPL_THEMES'])
         
         train_addresses_df = pd.concat(train_addresses, ignore_index=True)
         

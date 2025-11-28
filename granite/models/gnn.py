@@ -1150,3 +1150,27 @@ def compute_multitask_loss(outputs, auxiliary_targets, weights=None):
         'vehicle': vehicle_loss,
         'employment': emp_loss
     }
+
+# ============================================================================
+# MIXTURE OF EXPERTS SUPPORT
+# ============================================================================
+# These functions enable MoE usage while keeping single-model code unchanged
+
+def create_standard_model(accessibility_features_dim, context_features_dim=5,
+                         hidden_dim=64, dropout=0.3, seed=42):
+    """Factory for standard single-expert GNN."""
+    return AccessibilitySVIGNN(
+        accessibility_features_dim=accessibility_features_dim,
+        context_features_dim=context_features_dim,
+        hidden_dim=hidden_dim,
+        dropout=dropout,
+        seed=seed,
+        use_context_gating=True,
+        use_multitask=True
+    )
+
+
+def get_model_type(config):
+    """Determine if training single model or mixture."""
+    use_mixture = config.get('training', {}).get('use_mixture', False)
+    return 'mixture' if use_mixture else 'standard'

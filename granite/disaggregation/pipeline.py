@@ -1178,6 +1178,206 @@ class GRANITEPipeline:
             self._log(f"Full traceback: {traceback.format_exc()}")
             return None
 
+    def _compute_features_batched(self, addresses_df, data, batch_size=3):
+        """
+        Compute accessibility features in batches by tract to avoid memory overflow.
+        
+        Memory-efficient approach:
+        - Groups addresses by tract FIPS code
+        - Processes 3-4 tracts per batch (~7500 addresses = ~900MB OSRM)
+        - Caches individual batch results with tract-prefixed keys
+        - Concatenates all batches to create global feature matrix
+        
+        Args:
+            addresses_df: DataFrame with address_id, geometry, full_address, tract_fips
+            data: dict with destinations, road network, etc.
+            batch_size: Number of tracts to process per batch (default 3)
+        
+        Returns:
+            Combined feature matrix (n_addresses, n_features)
+        """
+        self._log(f"\n{'='*80}")
+        self._log(f"BATCHED FEATURE COMPUTATION (batch_size={batch_size} tracts)")
+        self._log(f"{'='*80}")
+        
+        import hashlib
+        
+        # Group addresses by tract for efficient batch processing
+        tracts = addresses_df['tract_fips'].unique()
+        self._log(f"Processing {len(tracts)} tracts in batches of {batch_size}")
+        
+        all_batch_features = []
+        
+        # Process tracts in batches
+        n_batches = (len(tracts) + batch_size - 1) // batch_size
+        for batch_idx, start_idx in enumerate(range(0, len(tracts), batch_size)):
+            batch_tracts = tracts[start_idx:start_idx + batch_size]
+            batch_key = f"batch_{batch_idx:02d}_" + "_".join(batch_tracts)
+            
+            self._log(f"\nBatch {batch_idx + 1}/{n_batches}: {len(batch_tracts)} tracts")
+            self._log(f"  Tracts: {', '.join(batch_tracts)}")
+            
+            # Filter addresses for this batch
+            batch_mask = addresses_df['tract_fips'].isin(batch_tracts)
+            batch_addresses = addresses_df[batch_mask].copy()
+            
+            self._log(f"  Addresses: {len(batch_addresses)}")
+            
+            # Try to load cached batch result
+            batch_features = self._load_batch_cache(batch_addresses, batch_key, data)
+            
+            if batch_features is not None:
+                self._log(f"  ✓ Loaded from batch cache ({batch_features.shape})")
+                all_batch_features.append(batch_features)
+                continue
+            
+            # Compute features for this batch
+            try:
+                self._log(f"  Computing accessibility features...")
+                batch_features = self._compute_accessibility_features(batch_addresses, data)
+                
+                if batch_features is None or batch_features.size == 0:
+                    self._log(f"  ERROR: Failed to compute features for batch {batch_idx}")
+                    return None
+                
+                # Validate dimensions
+                if batch_features.shape[0] != len(batch_addresses):
+                    self._log(f"  ERROR: Feature count mismatch for batch {batch_idx}")
+                    return None
+                
+                self._log(f"  ✓ Computed {batch_features.shape} features")
+                
+                # Cache the batch result
+                self._save_batch_cache(batch_addresses, batch_features, batch_key)
+                
+                all_batch_features.append(batch_features)
+                
+            except Exception as e:
+                self._log(f"  ERROR: Failed to process batch {batch_idx}: {str(e)}")
+                import traceback
+                self._log(f"  Traceback: {traceback.format_exc()}")
+                return None
+        
+        # Concatenate all batch results
+        if len(all_batch_features) == 0:
+            self._log("ERROR: No batches processed successfully")
+            return None
+        
+        self._log(f"\n{'='*80}")
+        self._log(f"Concatenating {len(all_batch_features)} batch results...")
+        
+        combined_features = np.vstack(all_batch_features)
+        
+        self._log(f"✓ Combined features: {combined_features.shape}")
+        self._log(f"{'='*80}\n")
+        
+        return combined_features
+
+    def _load_batch_cache(self, batch_addresses, batch_key, data):
+        """
+        Try to load cached features for a batch of tracts.
+        
+        Cache key format: {batch_key}_{address_hash}_{dest_hashes}
+        """
+        import hashlib
+        
+        if self.accessibility_computer.cache is None:
+            return None
+        
+        try:
+            # Generate consistent hash for addresses in this batch
+            addr_coords = sorted(
+                batch_addresses.geometry.apply(lambda g: (round(g.x, 6), round(g.y, 6))).tolist()
+            )
+            addr_hash = hashlib.md5(str(addr_coords).encode()).hexdigest()[:8]
+            
+            # Generate hashes for destinations
+            dest_hashes = {}
+            for dtype in ['employment', 'healthcare', 'grocery']:
+                dgdf = data.get(f'{dtype}_destinations')
+                if dgdf is not None and len(dgdf) > 0:
+                    dest_coords = sorted(dgdf.geometry.apply(lambda g: (round(g.x, 6), round(g.y, 6))).tolist())
+                    dest_hashes[dtype] = hashlib.md5(str(dest_coords).encode()).hexdigest()[:8]
+            
+            # Build full cache key
+            dest_key = "_".join([dest_hashes.get(dt, 'none') for dt in ['employment', 'healthcare', 'grocery']])
+            cache_key = f"{batch_key}_{addr_hash}_{dest_key}"
+            
+            # Attempt to load
+            cached_features = self.accessibility_computer.cache.get_absolute(
+                mode='batch',
+                dest_type='complete',
+                threshold=0,
+                origins_hash=cache_key
+            )
+            
+            return cached_features
+        
+        except Exception as e:
+            if self.verbose:
+                self._log(f"  Cache lookup failed: {str(e)}")
+            return None
+
+    def _save_batch_cache(self, batch_addresses, batch_features, batch_key):
+        """
+        Save computed batch features to cache with tract-aware key.
+        """
+        import hashlib
+        
+        if self.accessibility_computer.cache is None:
+            return
+        
+        try:
+            # Generate consistent hash for addresses in this batch
+            addr_coords = sorted(
+                batch_addresses.geometry.apply(lambda g: (round(g.x, 6), round(g.y, 6))).tolist()
+            )
+            addr_hash = hashlib.md5(str(addr_coords).encode()).hexdigest()[:8]
+            
+            # Build full cache key (same format as _load_batch_cache)
+            cache_key = f"{batch_key}_{addr_hash}"
+            
+            # Save to cache
+            self.accessibility_computer.cache.set_absolute(
+                batch_features,
+                mode='batch',
+                dest_type='complete',
+                threshold=0,
+                origins_hash=cache_key
+            )
+            
+            self._log(f"  ✓ Cached batch features")
+        
+        except Exception as e:
+            if self.verbose:
+                self._log(f"  Cache save failed: {str(e)}")
+
+    def _estimate_optimal_batch_size(self, num_addresses_total, num_tracts, available_memory_gb=14):
+        """
+        Estimate optimal batch size based on address count and available memory.
+        
+        Memory profile:
+        - Per 2,500 addresses (1 avg tract): ~1.5M OSRM routes = ~300MB
+        - Safe batch: ~7,500 addresses = 900MB (3 avg tracts)
+        
+        Strategy: Calculate average addresses per tract, determine how many
+        tracts fit in 900MB budget, return that as batch_size (capped at 4).
+        """
+        if num_tracts == 0:
+            return 1
+        
+        # Calculate average addresses per tract
+        avg_addresses_per_tract = num_addresses_total / num_tracts
+        
+        # Safe batch size: 900MB ≈ 7,500 addresses for typical Hamilton County data
+        safe_addresses_per_batch = 7500
+        
+        # How many tracts of avg size fit in safe batch?
+        batch_size = max(1, int(safe_addresses_per_batch / avg_addresses_per_tract))
+        
+        # Cap at 4 for safety margin (4 tracts × 2,500 avg = 10K addresses = 1.2GB)
+        return min(batch_size, 4)
+
     def _extract_accessibility_features(self, addresses, travel_times, dest_type):
         """Extract 8 accessibility features for one destination type"""
         
@@ -2399,7 +2599,25 @@ class GRANITEPipeline:
         self._log(f"SVI range: {min(train_tract_svis.values()):.3f} - {max(train_tract_svis.values()):.3f}")
         
         # 3. Compute accessibility features for ALL training addresses
-        train_features = self._compute_accessibility_features(train_addresses_df, data)
+        n_training_tracts = len(training_fips_list)
+        n_training_addresses = len(train_addresses_df)
+        
+        if n_training_tracts > 5:
+            self._log(f"\nMulti-tract training detected ({n_training_tracts} tracts, {n_training_addresses} addresses)")
+            batch_size = self._estimate_optimal_batch_size(n_training_addresses, n_training_tracts)
+            self._log(f"Using batched feature computation with batch_size={batch_size} tracts")
+            train_features = self._compute_features_batched(train_addresses_df, data, batch_size=batch_size)
+        else:
+            self._log(f"\nStandard training ({n_training_tracts} tracts, {n_training_addresses} addresses)")
+            self._log(f"Computing accessibility features for all addresses at once...")
+            train_features = self._compute_accessibility_features(train_addresses_df, data)
+        
+        # Validate feature computation succeeded
+        if train_features is None or train_features.size == 0:
+            return {
+                'success': False,
+                'error': 'Failed to compute training features'
+            }
         train_feature_names = self._generate_feature_names(train_features.shape[1])
         
         # 4. Normalize features on global training data

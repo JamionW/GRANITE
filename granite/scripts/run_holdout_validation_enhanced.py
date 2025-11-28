@@ -13,33 +13,23 @@ from granite.models.gnn import set_random_seed
 from granite.data.loaders import DataLoader
 
 def get_curated_training_tracts():
-    """
-    MINIMAL BUT COMPLETE: 5 tracts, ~12K addresses
-    Proves concept, then scale up if needed
-    """
+    """12 non-overlapping training tracts with balanced SVI coverage"""
     return [
-        '47065012000',  # SVI=0.014, 592 addresses  ← Critical low end
-        '47065000700',  # SVI=0.114, 1,784 addresses
-        '47065012400',  # SVI=0.411, 2,316 addresses
-        '47065011445',  # SVI=0.638, 2,472 addresses
-        '47065012300',  # SVI=0.867, 2,568 addresses
+        '47065012000', '47065011205', '47065011100',  # Very Low
+        '47065000600', '47065010413', '47065010501',  # Low
+        '47065012400', '47065002800',                  # Medium
+        '47065010902', '47065011442',                  # High
+        '47065003000', '47065001300',                  # Very High
     ]
 
 def get_curated_test_tracts():
-    """
-    10 diverse holdout tracts
-    """
+    """10 non-overlapping test tracts with balanced SVI coverage"""
     return [
-        '47065011205',  # SVI=0.019, 97 addresses
-        '47065010411',  # SVI=0.159, 622 addresses
-        '47065010502',  # SVI=0.319, 1,273 addresses
-        '47065011323',  # SVI=0.384, 2,350 addresses
-        '47065010433',  # SVI=0.454, 2,307 addresses
-        '47065002000',  # SVI=0.478, 1,480 addresses
-        '47065011402',  # SVI=0.576, 2,858 addresses
-        '47065010800',  # SVI=0.704, 108 addresses
-        '47065011444',  # SVI=0.709, 1,934 addresses
-        '47065001300',  # SVI=0.873, 1,004 addresses
+        '47065000700', '47065010411',                  # Very Low
+        '47065011900', '47065010502',                  # Low
+        '47065010433', '47065000800',                  # Medium
+        '47065011206', '47065011444',                  # High
+        '47065000400', '47065012300',                  # Very High
     ]
 
 def print_tract_summary(tract_list, label, loader):

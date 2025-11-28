@@ -12,94 +12,33 @@ from granite.disaggregation.pipeline import GRANITEPipeline
 from granite.models.gnn import set_random_seed
 from granite.data.loaders import DataLoader
 
-# def get_curated_training_tracts():
-#     """
-#     15 manually curated training tracts with diverse SVI and good address counts.
-    
-#     Selection criteria:
-#     - ≥500 addresses for stability
-#     - 3 tracts per SVI quintile
-#     - Total SVI range: 0.014 - 0.867
-#     """
-#     return [
-#         # Very Low SVI (0.0-0.2)
-#         '47065012000',  # SVI=0.014, 592 addresses
-#         '47065000700',  # SVI=0.114, 1,784 addresses
-#         '47065011325',  # SVI=0.171, 1,099 addresses
-        
-#         # Low SVI (0.2-0.4)
-#         '47065000600',  # SVI=0.224, 2,089 addresses
-#         '47065011413',  # SVI=0.274, 1,442 addresses
-#         '47065010501',  # SVI=0.280, 2,814 addresses
-#         '47065010431',  # SVI=0.385, 3,394 addresses
-        
-#         # Medium SVI (0.4-0.6)
-#         '47065012400',  # SVI=0.411, 2,316 addresses
-#         '47065010432',  # SVI=0.473, 3,463 addresses
-#         '47065011448',  # SVI=0.501, 2,169 addresses
-#         '47065011326',  # SVI=0.510, 2,738 addresses
-        
-#         # High SVI (0.6-0.8)
-#         '47065011445',  # SVI=0.638, 2,472 addresses
-#         '47065011321',  # SVI=0.696, 3,756 addresses
-#         '47065010435',  # SVI=0.715, 2,780 addresses
-        
-#         # Very High SVI (0.8-1.0)
-#         '47065012300',  # SVI=0.867, 2,568 addresses
-#     ]
-
 def get_curated_training_tracts():
     """
-    CORRECTED: 5 tracts with NO overlap with test set
-    All <2500 addresses for memory safety (~10K total)
-    Spans SVI 0.114 - 0.857
+    MINIMAL BUT COMPLETE: 5 tracts, ~12K addresses
+    Proves concept, then scale up if needed
     """
     return [
-        # Very Low SVI
+        '47065012000',  # SVI=0.014, 592 addresses  ← Critical low end
         '47065000700',  # SVI=0.114, 1,784 addresses
-        
-        # Low SVI
-        '47065000600',  # SVI=0.224, 2,089 addresses
-        
-        # Medium SVI
         '47065012400',  # SVI=0.411, 2,316 addresses
-        
-        # High SVI
         '47065011445',  # SVI=0.638, 2,472 addresses
-        
-        # Very High SVI
-        '47065003000',  # SVI=0.857, 1,276 addresses
+        '47065012300',  # SVI=0.867, 2,568 addresses
     ]
 
 def get_curated_test_tracts():
     """
-    10 manually curated test tracts spanning SVI spectrum.
-    Completely separate from training set.
-    
-    Selection criteria:
-    - 2 tracts per SVI quintile
-    - Diverse address counts (97 - 2,858)
-    - Total SVI range: 0.019 - 0.873
+    10 diverse holdout tracts
     """
     return [
-        # Very Low SVI (0.0-0.2)
         '47065011205',  # SVI=0.019, 97 addresses
         '47065010411',  # SVI=0.159, 622 addresses
-        
-        # Low SVI (0.2-0.4)
         '47065010502',  # SVI=0.319, 1,273 addresses
         '47065011323',  # SVI=0.384, 2,350 addresses
-        
-        # Medium SVI (0.4-0.6)
         '47065010433',  # SVI=0.454, 2,307 addresses
         '47065002000',  # SVI=0.478, 1,480 addresses
         '47065011402',  # SVI=0.576, 2,858 addresses
-        
-        # High SVI (0.6-0.8)
         '47065010800',  # SVI=0.704, 108 addresses
         '47065011444',  # SVI=0.709, 1,934 addresses
-        
-        # Very High SVI (0.8-1.0)
         '47065001300',  # SVI=0.873, 1,004 addresses
     ]
 

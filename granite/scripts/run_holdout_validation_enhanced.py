@@ -118,7 +118,11 @@ def run_global_training_validation(seed=42):
             'weight_decay': 1e-4,
             'enforce_constraints': True,
             'constraint_weight': 1.0,
-            'use_multitask': True
+            'use_multitask': True,
+            'use_mixture': True,        # ADD THIS
+            'epochs': 150,              # ADD THIS (for expert training)
+            'gate_epochs': 100,         # ADD THIS
+            'finetune_epochs': 50       # ADD THIS
         },
         'processing': {
             'verbose': True,
@@ -134,7 +138,7 @@ def run_global_training_validation(seed=42):
     print("TRAINING GLOBAL MODEL")
     print(f"{'='*80}\n")
     
-    results = pipeline.run_global_training(
+    results = pipeline.run_mixture_training(
         training_fips_list=training_tracts,
         test_fips_list=test_tracts
     )

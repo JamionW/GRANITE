@@ -8,6 +8,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+import torch
 from datetime import datetime
 from typing import List, Dict, Optional
 warnings.filterwarnings('ignore')
@@ -20,6 +21,8 @@ from ..visualization.plots import GRANITEResearchVisualizer
 from ..evaluation.spatial_diagnostics import SpatialLearningDiagnostics
 from ..evaluation.accessibility_validator import validate_granite_accessibility_features, integrate_with_spatial_diagnostics
 from ..evaluation.baseline_comparisons import BaselineComparison
+from granite.models.mixture_of_experts import create_moe_model, MixtureOfExpertsTrainer
+
 
 class GRANITEPipeline:
     """
@@ -2718,64 +2721,168 @@ class GRANITEPipeline:
     def run_mixture_training(self, training_fips_list, test_fips_list):
         """
         Train using Mixture of Experts for context-dependent accessibility-vulnerability.
-        Each expert specializes in different SVI ranges, overcoming contradiction where
-        good accessibility indicates high vulnerability in cities but low in suburbs.
+        
+        Each expert specializes in different SVI ranges:
+        - Expert_Low: SVI < 0.40 (suburban, car-dependent)
+        - Expert_Medium: SVI 0.30-0.70 (transition zones)
+        - Expert_High: SVI > 0.55 (urban cores)
         """
         from granite.models.mixture_of_experts import (
             create_moe_model, MixtureOfExpertsTrainer, MoEInferenceAnalyzer
         )
+        from granite.models.gnn import normalize_accessibility_features, set_random_seed
+        from torch_geometric.data import Data
         
         start_time = time.time()
-        self._log("Starting Mixture of Experts Training...")
+        seed = self.config.get('processing', {}).get('random_seed', 42)
+        set_random_seed(seed)
         
-        # Load training data
-        self._log(f"Loading {len(training_fips_list)} training tracts...")
+        self._log(f"\n{'='*80}")
+        self._log("MIXTURE OF EXPERTS TRAINING")
+        self._log(f"Training on {len(training_fips_list)} diverse tracts")
+        if test_fips_list:
+            self._log(f"Testing on {len(test_fips_list)} holdout tracts")
+        self._log(f"{'='*80}\n")
+        
+        # 1. Load all spatial data (same as run_global_training)
+        data = self._load_spatial_data()
+        
+        # 2. Load ALL training tract addresses with spatial join
+        self._log("Pre-loading full address dataset...")
+        all_addresses = data['addresses'].copy()
+        tracts_gdf = data['tracts'].copy()
+        
+        import geopandas as gpd
+        addresses_with_tracts = gpd.sjoin(
+            all_addresses, 
+            tracts_gdf[['FIPS', 'geometry']], 
+            how='left', 
+            predicate='within'
+        )
+        
+        # 3. Process each training tract individually (MoE needs per-tract graphs)
         training_graphs = []
         training_svis = []
+        training_fips_processed = []
+        
+        # First pass: collect all addresses for batch feature computation
+        all_train_addresses = []
+        tract_address_counts = {}
         
         for fips in training_fips_list:
-            try:
-                tract_data = self._process_single_tract(fips, {})
-                if tract_data['success']:
-                    # Extract graph and SVI
-                    svi = tract_data['summary'].get('target_svi')
-                    training_svis.append(svi)
-                    # You'll need to return graph_data from _process_single_tract
-                    self._log(f"  {fips}: SVI={svi:.3f}, {tract_data['summary']['addresses_processed']} addresses")
-                else:
-                    self._log(f"  {fips}: FAILED - {tract_data.get('error')}", level='WARNING')
-            except Exception as e:
-                self._log(f"  {fips}: ERROR - {str(e)}", level='ERROR')
+            fips = str(fips).strip()
+            tract_mask = addresses_with_tracts['FIPS'] == fips
+            addresses = addresses_with_tracts[tract_mask].copy()
+            
+            if len(addresses) == 0:
+                self._log(f"WARNING: No addresses found for tract {fips}")
+                continue
+                
+            addresses = addresses[['address_id', 'geometry', 'full_address']].copy()
+            addresses['tract_fips'] = fips
+            all_train_addresses.append(addresses)
+            tract_address_counts[fips] = len(addresses)
+            
+            # Get tract SVI
+            tract_data = data['tracts'][data['tracts']['FIPS'] == fips]
+            if len(tract_data) > 0:
+                svi = float(tract_data.iloc[0]['RPL_THEMES'])
+                training_svis.append(svi)
+                training_fips_processed.append(fips)
+                self._log(f"  {fips}: SVI={svi:.3f}, {len(addresses)} addresses")
         
-        if len(training_graphs) < 3:
+        if len(all_train_addresses) < 3:
             return {
                 'success': False,
-                'error': f'Insufficient training data: {len(training_graphs)} tracts (need 3+)'
+                'error': f'Insufficient training data: {len(all_train_addresses)} tracts (need 3+)'
             }
         
-        # Create MoE model
-        self._log("Creating Mixture of Experts model...")
+        import pandas as pd
+        train_addresses_df = pd.concat(all_train_addresses, ignore_index=True)
+        self._log(f"\nTotal training addresses: {len(train_addresses_df)}")
+        
+        # 4. Compute accessibility features for all training addresses
+        n_training_tracts = len(training_fips_processed)
+        n_training_addresses = len(train_addresses_df)
+        
+        if n_training_tracts > 5:
+            batch_size = self._estimate_optimal_batch_size(n_training_addresses, n_training_tracts)
+            self._log(f"Using batched feature computation (batch_size={batch_size})")
+            train_features = self._compute_features_batched(train_addresses_df, data, batch_size=batch_size)
+        else:
+            self._log("Computing accessibility features...")
+            train_features = self._compute_accessibility_features(train_addresses_df, data)
+        
+        if train_features is None or train_features.size == 0:
+            return {'success': False, 'error': 'Failed to compute training features'}
+        
+        # 5. Normalize features globally
+        normalized_train_features, feature_scaler = normalize_accessibility_features(train_features)
+        
+        # 6. Extract and normalize context features
+        train_context_features = self.data_loader.create_context_features_for_addresses(
+            addresses=train_addresses_df,
+            svi_data=data['svi']
+        )
+        normalized_train_context, context_scaler = self.data_loader.normalize_context_features(
+            train_context_features
+        )
+        
+        # 7. Create per-tract graphs for MoE training
+        self._log("\nCreating per-tract graphs for MoE...")
+        
+        current_idx = 0
+        for i, fips in enumerate(training_fips_processed):
+            n_addresses = tract_address_counts[fips]
+            
+            # Extract this tract's data
+            tract_features = normalized_train_features[current_idx:current_idx + n_addresses]
+            tract_context = normalized_train_context[current_idx:current_idx + n_addresses]
+            tract_addresses = train_addresses_df.iloc[current_idx:current_idx + n_addresses]
+            
+            # Create graph for this tract
+            state_fips = fips[:2]
+            county_fips = fips[2:5]
+            
+            tract_graph = self.data_loader.create_spatial_accessibility_graph(
+                addresses=tract_addresses,
+                accessibility_features=tract_features,
+                context_features=tract_context,
+                state_fips=state_fips,
+                county_fips=county_fips
+            )
+            
+            # Store context in graph for MoE gate network
+            tract_graph.context = torch.tensor(tract_context, dtype=torch.float32)
+            tract_graph.tract_fips = fips
+            tract_graph.tract_svi = training_svis[i]
+            
+            training_graphs.append(tract_graph)
+            current_idx += n_addresses
+            
+            self._log(f"  {fips}: {tract_graph.x.shape[0]} nodes, {tract_graph.edge_index.shape[1]} edges")
+        
+        # 8. Create MoE model
+        self._log("\nCreating Mixture of Experts model...")
         moe_model = create_moe_model(
-            accessibility_features_dim=54,
+            accessibility_features_dim=training_graphs[0].x.shape[1],
             context_features_dim=5,
             hidden_dim=64,
             dropout=0.3,
-            seed=self.config.get('processing', {}).get('random_seed', 42)
+            seed=seed
         )
         
-        # Configure MoE training
+        # 9. Configure and run MoE training
         moe_config = {
             'learning_rate': float(self.config.get('training', {}).get('learning_rate', 0.001)),
             'weight_decay': float(self.config.get('training', {}).get('weight_decay', 1e-4)),
             'expert_epochs': self.config.get('training', {}).get('epochs', 150),
             'gate_epochs': self.config.get('training', {}).get('gate_epochs', 100),
             'finetune_epochs': self.config.get('training', {}).get('finetune_epochs', 50),
-            'enforce_constraints': self.config.get('training', {}).get('enforce_constraints', True)
         }
         
-        # Train MoE
         self._log("Training Mixture of Experts...")
-        trainer = MixtureOfExpertsTrainer(moe_model, moe_config, seed=42)
+        trainer = MixtureOfExpertsTrainer(moe_model, moe_config, seed=seed)
         
         training_results = trainer.train(
             graph_data_list=training_graphs,
@@ -2784,39 +2891,118 @@ class GRANITEPipeline:
             verbose=self.verbose
         )
         
-        # Evaluate on test set
-        self._log(f"Evaluating on {len(test_fips_list)} test tracts...")
+        # 10. Evaluate on test set
         test_results = {}
-        
-        moe_model.eval()
-        with torch.no_grad():
-            for fips in test_fips_list:
+        if test_fips_list:
+            self._log(f"\nEvaluating on {len(test_fips_list)} test tracts...")
+            moe_model.eval()
+            
+            for test_fips in test_fips_list:
+                test_fips = str(test_fips).strip()
                 try:
-                    tract_data = self._process_single_tract(fips, {})
-                    if tract_data['success']:
-                        svi = tract_data['summary'].get('target_svi')
-                        # Inference here...
-                        test_results[fips] = {
-                            'actual_svi': svi,
-                            'predicted_mean': None,  # Fill with MoE prediction
-                            'mean_error_pct': None,
-                            'correlation': None
-                        }
+                    # Get test tract addresses
+                    tract_mask = addresses_with_tracts['FIPS'] == test_fips
+                    test_addresses = addresses_with_tracts[tract_mask].copy()
+                    
+                    if len(test_addresses) == 0:
+                        self._log(f"  {test_fips}: No addresses, skipping")
+                        continue
+                    
+                    test_addresses = test_addresses[['address_id', 'geometry', 'full_address']].copy()
+                    test_addresses['tract_fips'] = test_fips
+                    
+                    # Compute and normalize features using training scalers
+                    test_features = self._compute_accessibility_features(test_addresses, data)
+                    normalized_test_features = feature_scaler.transform(test_features)
+                    
+                    test_context = self.data_loader.create_context_features_for_addresses(
+                        addresses=test_addresses,
+                        svi_data=data['svi']
+                    )
+                    normalized_test_context = context_scaler.transform(test_context)
+                    
+                    # Create test graph
+                    state_fips = test_fips[:2]
+                    county_fips = test_fips[2:5]
+                    
+                    test_graph = self.data_loader.create_spatial_accessibility_graph(
+                        addresses=test_addresses,
+                        accessibility_features=normalized_test_features,
+                        context_features=normalized_test_context,
+                        state_fips=state_fips,
+                        county_fips=county_fips
+                    )
+                    test_graph.context = torch.tensor(normalized_test_context, dtype=torch.float32)
+                    
+                    # Get actual SVI
+                    tract_data = data['tracts'][data['tracts']['FIPS'] == test_fips]
+                    actual_svi = float(tract_data.iloc[0]['RPL_THEMES'])
+                    
+                    # MoE inference
+                    with torch.no_grad():
+                        predictions, gate_weights = moe_model(
+                            test_graph.x, 
+                            test_graph.edge_index,
+                            context_features=test_graph.context,
+                            return_gate_weights=True
+                        )
+                    
+                    predictions_np = predictions.cpu().numpy()
+                    predicted_mean = float(np.mean(predictions_np))
+                    mean_error_pct = abs(predicted_mean - actual_svi) / actual_svi * 100
+                    
+                    # Correlation between predictions and some accessibility metric
+                    accessibility_summary = test_graph.x.mean(dim=1).cpu().numpy()
+                    correlation = float(np.corrcoef(accessibility_summary, predictions_np)[0, 1])
+                    
+                    # Gate analysis
+                    gate_weights_np = gate_weights.cpu().numpy()
+                    dominant_expert = int(np.argmax(gate_weights_np.mean(axis=0)))
+                    expert_names = ['Low', 'Medium', 'High']
+                    
+                    test_results[test_fips] = {
+                        'actual_svi': actual_svi,
+                        'predicted_mean': predicted_mean,
+                        'mean_error_pct': mean_error_pct,
+                        'correlation': correlation,
+                        'dominant_expert': expert_names[dominant_expert],
+                        'gate_weights': gate_weights_np.mean(axis=0).tolist(),
+                        'predictions': predictions_np
+                    }
+                    
+                    self._log(f"  {test_fips}: Error={mean_error_pct:.1f}%, Expert={expert_names[dominant_expert]}, Corr={correlation:.3f}")
+                    
                 except Exception as e:
-                    self._log(f"Test {fips}: ERROR - {str(e)}", level='ERROR')
+                    self._log(f"  {test_fips}: ERROR - {str(e)}", level='ERROR')
+                    import traceback
+                    traceback.print_exc()
         
-        # Analyze expert usage
+        # 11. Analyze expert usage
         analyzer = MoEInferenceAnalyzer(moe_model, verbose=self.verbose)
         usage_stats = analyzer.analyze_expert_usage(training_graphs, training_svis)
         
         elapsed = time.time() - start_time
         
+        # 12. Summary
+        if test_results:
+            errors = [r['mean_error_pct'] for r in test_results.values()]
+            self._log(f"\n{'='*80}")
+            self._log("MoE VALIDATION RESULTS")
+            self._log(f"{'='*80}")
+            self._log(f"Mean Error: {np.mean(errors):.1f}% ± {np.std(errors):.1f}%")
+            self._log(f"Median Error: {np.median(errors):.1f}%")
+            self._log(f"Best: {min(errors):.1f}%, Worst: {max(errors):.1f}%")
+            self._log(f"Elapsed: {elapsed:.1f}s")
+        
         return {
             'success': True,
             'model': moe_model,
+            'trainer': trainer,
             'training_results': training_results,
             'test_results': test_results,
             'expert_usage': usage_stats,
+            'feature_scaler': feature_scaler,
+            'context_scaler': context_scaler,
             'elapsed_time': elapsed,
             'strategy': 'mixture_of_experts'
         }

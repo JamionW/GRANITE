@@ -317,12 +317,15 @@ class MixtureOfExpertsTrainer:
                 
                 # Constraint loss: match tract SVI mean
                 constraint_loss = torch.abs(predictions.mean() - tract_svi)
-                
-                # SVI prediction loss
-                svi_loss = F.mse_loss(predictions, 
-                                     torch.full_like(predictions, tract_svi))
-                
-                loss = svi_loss + 2.0 * constraint_loss
+
+                # Variation loss: encourage spread, penalize constant output
+                pred_std = predictions.std()
+                variation_loss = torch.exp(-pred_std * 10)  # Penalize low variance
+
+                # Bounds loss: keep predictions in valid SVI range [0, 1]
+                bounds_loss = (F.relu(-predictions) + F.relu(predictions - 1)).mean()
+
+                loss = 2.0 * constraint_loss + 0.5 * variation_loss + bounds_loss
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(expert.parameters(), max_norm=1.0)
                 optimizer.step()
@@ -409,7 +412,7 @@ class MixtureOfExpertsTrainer:
                     torch.sum(gate_weights * torch.log(gate_weights + 1e-8), dim=1)
                 )
                 
-                total_loss = gate_loss + 0.01 * gate_entropy
+                total_loss = gate_loss - 2.00 * gate_entropy
                 total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.gate_network.parameters(),
                                               max_norm=1.0)
@@ -417,6 +420,9 @@ class MixtureOfExpertsTrainer:
                 
                 epoch_loss += gate_loss.item()
                 epoch_entropy += gate_entropy.item()
+
+                if epoch == 0:
+                    print(f"  DEBUG: raw gate_entropy={gate_entropy.item():.4f}")
             
             epoch_loss /= len(graph_data_list)
             epoch_entropy /= len(graph_data_list)

@@ -18,11 +18,17 @@ from .models import gnn
 from .disaggregation import pipeline
 from .visualization import plots
 
+# New disaggregation modules
+from .evaluation import disaggregation_baselines
+from .visualization import disaggregation_plots
+
 # Package metadata
 __all__ = [
     "loaders",
     "gnn", 
     "interface",
     "pipeline",
-    "plots"
+    "plots",
+    "disaggregation_baselines",
+    "disaggregation_plots"
 ]

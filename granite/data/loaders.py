@@ -164,21 +164,14 @@ class DataLoader:
         return features
 
     def create_context_features_for_addresses(self, addresses: gpd.GeoDataFrame, 
-                                            svi_data: pd.DataFrame) -> np.ndarray:
+                                            svi_data: pd.DataFrame,
+                                            include_tract_svi: bool = False) -> np.ndarray:
         """
         Create context feature matrix for addresses.
-        Broadcasts tract-level socioeconomic features to all addresses in tract.
         
-        Args:
-            addresses: GeoDataFrame with 'tract_fips' column
-            svi_data: SVI data with socioeconomic variables
-        
-        Returns:
-            context_features: [n_addresses, n_context_features] numpy array
+        UPDATED: Now includes tract SVI as primary context feature for disaggregation.
         """
         n_addresses = len(addresses)
-        
-        # Define context features we'll extract
         context_feature_list = []
         
         for idx, address in addresses.iterrows():
@@ -187,15 +180,28 @@ class DataLoader:
             # Get socioeconomic features for this tract
             tract_features = self.get_tract_socioeconomic_features(tract_fips, svi_data)
             
-            # Extract key context features for gating
-            # CRITICAL: These determine which accessibility features matter
-            context_vec = [
-                tract_features['pct_no_vehicle'],    # Vehicle ownership (MOST IMPORTANT)
-                tract_features['pct_poverty'],        # Economic vulnerability
-                tract_features['pct_unemployed'],     # Employment access need
-                tract_features['pct_no_hs_diploma'],  # Education (correlates with transit dependency)
-                tract_features['population'] / 10000.0,  # Urban density proxy (scaled)
-            ]
+            # Get tract SVI
+            tract_svi = self._get_tract_svi(tract_fips, svi_data)
+            
+            # Build context vector with tract SVI as first feature
+            if include_tract_svi:
+                context_vec = [
+                    tract_svi,
+                    tract_features['pct_no_vehicle'],       # Vehicle ownership
+                    tract_features['pct_poverty'],          # Economic vulnerability
+                    tract_features['pct_unemployed'],       # Employment access need
+                    tract_features['pct_no_hs_diploma'],    # Education level
+                    tract_features['population'] / 10000.0, # Urban density proxy
+                ]
+            else:
+                # Original 5-feature version
+                context_vec = [
+                    tract_features['pct_no_vehicle'],
+                    tract_features['pct_poverty'],
+                    tract_features['pct_unemployed'],
+                    tract_features['pct_no_hs_diploma'],
+                    tract_features['population'] / 10000.0,
+                ]
             
             context_feature_list.append(context_vec)
         
@@ -203,11 +209,26 @@ class DataLoader:
         
         if self.verbose:
             self._log(f"Created context features: {context_features.shape}")
-            self._log(f"  Features: vehicle_absence, poverty, unemployment, education, density")
-            self._log(f"  Mean vehicle absence: {context_features[:, 0].mean():.2f}%")
-            self._log(f"  Mean poverty: {context_features[:, 1].mean():.2f}%")
+            if include_tract_svi:
+                self._log(f"  Tract SVI range: {context_features[:, 0].min():.3f} - {context_features[:, 0].max():.3f}")
         
         return context_features
+
+
+    def _get_tract_svi(self, tract_fips: str, svi_data: pd.DataFrame) -> float:
+        """Get tract-level SVI value for a given FIPS code."""
+        tract_fips = str(tract_fips).strip()
+        tract_data = svi_data[svi_data['FIPS'].astype(str).str.strip() == tract_fips]
+        
+        if len(tract_data) == 0:
+            self._log(f"WARNING: No SVI data for tract {tract_fips}, using default 0.5")
+            return 0.5
+        
+        svi = tract_data.iloc[0].get('RPL_THEMES', 0.5)
+        if pd.isna(svi) or svi < 0:
+            return 0.5
+        
+        return float(svi)
 
     def normalize_context_features(self, context_features: np.ndarray) -> Tuple[np.ndarray, object]:
         """

@@ -34,7 +34,7 @@ class EnhancedAccessibilityComputer:
                     print(f"[EnhancedAccessibility] Cache module not found, disabling caching")
                 self.cache = None
         
-        # FIXED: More realistic speed parameters
+        # Speed parameters
         self.speed_params = {
             'walk': {'base': 5.0, 'std': 0.8, 'min': 3.5, 'max': 6.5},
             'drive': {'base': 25.0, 'std': 7.0, 'min': 15.0, 'max': 45.0},  
@@ -48,7 +48,7 @@ class EnhancedAccessibilityComputer:
             'edge': 1.05
         }
 
-        # Initialize OSRM router (auto-detects local servers)
+        # Initialize OSRM router 
         try:
             from ..routing.osrm_router import OSRMRouter
             self.osrm_router = OSRMRouter(verbose=self.verbose)
@@ -271,12 +271,12 @@ class EnhancedAccessibilityComputer:
         # Compute routes
         travel_times_df = self.router.compute_multimodal_travel_times(origins, destinations)
         
-        # VERIFY no fallback was used
+        # Verify no fallback was used
         different_times = (travel_times_df['walk_time'] != travel_times_df['drive_time']).sum()
         total_routes = len(travel_times_df)
         
         if different_times == 0:
-            self.log("⚠️  WARNING: OSRM may be using fallback (all walk == drive times)")
+            self.log("WARNING: OSRM may be using fallback (all walk == drive times)")
         else:
             pct = 100 * different_times / total_routes
             self.log(f"✓ OSRM verified: {pct:.1f}% of routes have mode-specific times")
@@ -284,7 +284,7 @@ class EnhancedAccessibilityComputer:
         return travel_times_df
     
     def _calculate_mode_times_fixed(self, distance_km: float, time_period: str) -> Dict[str, float]:
-        """FIXED: More realistic travel time calculation with proper bounds"""
+        """Travel time calculation with guardrails"""
         
         # Validate input distance
         if distance_km < 0 or distance_km > 50:  # Sanity check
@@ -292,7 +292,7 @@ class EnhancedAccessibilityComputer:
         
         times = {}
         
-        # More realistic base speeds (km/h)
+        # Base speeds (km/h)
         base_speeds = {
             'walk': 4.5,    # Reduced from 5.0 - more realistic urban walking
             'drive': 20.0,  # Reduced from 25.0 - realistic urban driving with stops
@@ -316,12 +316,11 @@ class EnhancedAccessibilityComputer:
                 }.get(time_period, 1.2)
                 
                 parking_time = np.random.uniform(2, 6)  # 2-6 minutes parking
-                variation = np.random.normal(0, 1.5)    # More driving variation
+                variation = np.random.normal(0, 1.5)    # driving variation
                 
                 final_time = max(3.0, (base_time * traffic_multiplier) + parking_time + variation)
                 
             else:  # transit
-                # Transit: add wait time, transfer penalties
                 base_wait = np.random.uniform(8, 15)  # 8-15 min average wait
                 
                 # Transfer penalty for longer trips
@@ -372,7 +371,6 @@ class EnhancedAccessibilityComputer:
             if len(addr_times) > 0:
                 combined_times = addr_times['combined_time'].values
                 
-                # === ORIGINAL 10 FEATURES ===
                 min_time = float(combined_times.min())
                 mean_time = float(combined_times.mean())
                 median_time = float(np.median(combined_times))
@@ -381,7 +379,7 @@ class EnhancedAccessibilityComputer:
                 count_10min = int((combined_times <= 10).sum())
                 count_15min = int((combined_times <= 15).sum())
                 
-                # Drive advantage (fixed version)
+                # Drive advantage 
                 drive_advantage = 0.0
                 if 'walk_time' in addr_times.columns and 'drive_time' in addr_times.columns:
                     walk_times = addr_times['walk_time'].values
@@ -445,7 +443,7 @@ class EnhancedAccessibilityComputer:
         
         feature_array = np.array(features, dtype=np.float64)
         
-        # Compute percentiles (FIXED: lower percentile = better accessibility)
+        # Compute percentiles (lower percentile = better accessibility)
         if len(feature_array) > 1:
             mean_times = feature_array[:, 1]
             for i in range(len(feature_array)):
@@ -468,7 +466,7 @@ class EnhancedAccessibilityComputer:
     
     def _validate_intra_tract_features_fixed(self, features: np.ndarray, dest_type: str, 
                                         available_destinations: int):
-        """UPDATED: Enhanced validation accounting for variable destination counts per address"""
+        """Enhanced validation accounting for variable destination counts per address"""
         
         feature_names = [
             'min_time', 'mean_time', 'median_time',
@@ -489,7 +487,7 @@ class EnhancedAccessibilityComputer:
             
             self.log(f"{name}: std={std_val:.4f}, range=[{min_val:.2f}, {max_val:.2f}]")
             
-            # UPDATED: Check count features against maximum possible (6 destinations per address)
+            # Check count features against maximum possible (6 destinations per address)
             if 'count' in name:
                 max_possible_per_address = 6  # We limit each address to 6 destinations
                 if max_val > max_possible_per_address:
@@ -515,17 +513,17 @@ class EnhancedAccessibilityComputer:
                 self.log(f"WARNING: Correlation should be negative, got {corr:.3f}")
                 validation_passed = False
             else:
-                self.log("✓ Correlation direction is correct (negative)")
+                self.log("Correlation direction is correct (negative)")
         
         if validation_passed:
-            self.log("✓ Validation passed")
+            self.log("Validation passed")
         else:
-            self.log("✗ Validation FAILED - fix required")
+            self.log("Validation FAILED - fix required")
         
         return validation_passed
     
     def _validate_travel_times_fixed(self, travel_df: pd.DataFrame):
-        """FIXED: Enhanced travel time validation"""
+        """Enhanced travel time validation"""
         
         for mode in ['walk_time', 'drive_time', 'transit_time', 'combined_time']:
             if mode in travel_df.columns:
@@ -607,9 +605,7 @@ class EnhancedAccessibilityComputer:
         from sklearn.neighbors import BallTree
         
         # Import road loading functionality from loaders
-        # You'll need to extract this or pass road_graph from loaders
         try:
-            # Attempt to load roads (adapt paths as needed)
             from ..data.loaders import DataLoader
             loader = DataLoader()  # You may need to pass config
             
@@ -781,7 +777,7 @@ class EnhancedAccessibilityComputer:
         return straight_km * 1.3, False
 
     def _process_origin_batch(self, orig_id, orig_coord, destinations, road_graph, address_mapping, time_period):
-        """FIXED: Use OSRM routing when available, fallback to synthetic"""
+        """Use OSRM routing when available, fallback to synthetic"""
         
         # If OSRM is available, use it for real routing
         if self.osrm_router is not None:
@@ -872,7 +868,7 @@ class EnhancedAccessibilityComputer:
         return max(5.0, base_time + wait_time + transfer_time)
     
     def _process_origin_batch_synthetic(self, orig_id, orig_coord, destinations, road_graph, address_mapping, time_period):
-        """FIXED: Variable destination selection for proper variance"""
+        """Variable destination selection for proper variance"""
         
         # Calculate distances to all destinations
         dest_distances = []
@@ -893,7 +889,7 @@ class EnhancedAccessibilityComputer:
         # Sort by distance
         dest_distances.sort(key=lambda x: x['straight_km'])
         
-        # CRITICAL FIX: Variable selection based on distance
+        # Variable selection based on distance
         selected = []
         
         for dest_info in dest_distances:
@@ -956,7 +952,7 @@ class EnhancedAccessibilityComputer:
         return batch_results
     
     def _validate_distance_time_relationship(self, travel_df: pd.DataFrame) -> bool:
-        """NEW: Validate that distance-time relationships make sense"""
+        """Validate that distance-time relationships make sense"""
         
         validation_passed = True
         
@@ -992,7 +988,7 @@ class EnhancedAccessibilityComputer:
             self.log(f"{mode} vs distance correlation: {correlation:.3f}")
             
             # Minimum acceptable correlation
-            min_correlation = 0.4  # Stricter than before
+            min_correlation = 0.4 
             
             if correlation < min_correlation:
                 self.log(f"ERROR: {mode} correlation too low ({correlation:.3f} < {min_correlation})")
@@ -1002,7 +998,7 @@ class EnhancedAccessibilityComputer:
                 self.log(f"  Distance range: {clean_distances.min():.2f} - {clean_distances.max():.2f} km")
                 self.log(f"  Time range: {clean_times.min():.1f} - {clean_times.max():.1f} min")
             else:
-                self.log(f"✓ {mode} correlation acceptable")
+                self.log(f"{mode} correlation acceptable")
         
         return validation_passed
     
@@ -1015,7 +1011,7 @@ class EnhancedAccessibilityComputer:
             'drive_advantage', 'dispersion', 'time_range', 'accessibility_percentile'
         ]
         
-        # FIXED: Correct synthetic vulnerability
+        # Synthetic vulnerability
         synthetic_vuln = (
             0.3 * features[:, 1] +      # mean_time (POSITIVE)
             -0.2 * features[:, 4] +     # count_10min (NEGATIVE)
@@ -1038,7 +1034,7 @@ class EnhancedAccessibilityComputer:
                 
             correlation = np.corrcoef(values, synthetic_vuln)[0, 1]
             
-            # FIXED: Correct expected directions
+            # Expected directions
             if name in ['min_time', 'mean_time', 'median_time', 'drive_advantage', 
                         'dispersion', 'time_range', 'accessibility_percentile']:
                 expected_positive = True
@@ -1056,12 +1052,12 @@ class EnhancedAccessibilityComputer:
                 issues_found += 1
         
         if issues_found > 0:
-            self.log(f"⚠️  {issues_found} features may have wrong correlation directions")
+            self.log(f"{issues_found} features may have wrong correlation directions")
         
         return issues_found == 0
     
     def _validate_destination_counts_fixed(self, travel_df: pd.DataFrame, max_expected: int = 10):
-        """NEW: Validate destination counts don't exceed realistic limits"""
+        """Validate destination counts don't exceed realistic limits"""
         
         # Count destinations per origin
         origin_dest_counts = travel_df.groupby('origin_id')['dest_id'].nunique()
@@ -1073,18 +1069,13 @@ class EnhancedAccessibilityComputer:
         # Check for addresses with too many destinations
         excessive_addresses = origin_dest_counts[origin_dest_counts > max_expected]
         
-        #if len(excessive_addresses) > 0:
-        #    self.log(f"ERROR: {len(excessive_addresses)} addresses have >{max_expected} destinations")
-        #    self.log(f"Max destinations found: {origin_dest_counts.max()}")
-        #    return False
-        
         # Check for addresses with too few destinations  
         sparse_addresses = origin_dest_counts[origin_dest_counts < 2]
         
         if len(sparse_addresses) > len(origin_dest_counts) * 0.1:  # >10% of addresses
             self.log(f"WARNING: {len(sparse_addresses)} addresses have <2 destinations")
         
-        self.log("✅ Destination counts within expected range")
+        self.log("Destination counts within expected range")
         return True
     
     def debug_employment_travel_times(self, origins, destinations, time_period='morning'):
@@ -1123,11 +1114,11 @@ class EnhancedAccessibilityComputer:
                 
                 # Flag anomalies
                 if times['drive'] < 1.0 or times['drive'] > 60.0:
-                    print(f"  ⚠️ ANOMALY: Drive time out of bounds")
+                    print(f"ANOMALY: Drive time out of bounds")
                 
                 implied_speed = straight_km / (times['drive'] / 60)
                 if implied_speed < 10 or implied_speed > 60:
-                    print(f"  ⚠️ ANOMALY: Implied speed unrealistic ({implied_speed:.1f} km/h)")
+                    print(f"ANOMALY: Implied speed unrealistic ({implied_speed:.1f} km/h)")
 
     def debug_mode_times(self, distance_km, time_period='morning'):
         """Debug travel time calculation"""
@@ -1143,8 +1134,8 @@ class EnhancedAccessibilityComputer:
             
             # Flag anomalies
             if mode == 'drive' and (speed_kmh < 15 or speed_kmh > 50):
-                print(f"  ⚠️ Unrealistic driving speed")
+                print(f"Unrealistic driving speed")
             if mode == 'walk' and (speed_kmh < 3 or speed_kmh > 7):
-                print(f"  ⚠️ Unrealistic walking speed")
+                print(f"Unrealistic walking speed")
         
         return times

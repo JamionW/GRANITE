@@ -1,0 +1,261 @@
+"""
+Enhanced comprehensive holdout validation with strategic tract selection.
+Selects diverse tracts spanning SVI spectrum for robust testing.
+"""
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pandas as pd
+import numpy as np
+from granite.disaggregation.pipeline import GRANITEPipeline
+from granite.models.gnn import set_random_seed
+from granite.data.loaders import DataLoader
+
+def select_diverse_test_tracts(n_tracts=10, seed=42):
+    """
+    Intelligently select diverse test tracts spanning the SVI spectrum.
+    
+    Args:
+        n_tracts: Number of test tracts to select
+        seed: Random seed for reproducibility
+    
+    Returns:
+        List of tract FIPS codes with diversity across SVI, geography, context
+    """
+    np.random.seed(seed)
+    
+    loader = DataLoader()
+    
+    # Load all available tract data
+    state_fips = '47'
+    county_fips = '065'
+    
+    tracts = loader.load_census_tracts(state_fips, county_fips)
+    svi = loader.load_svi_data(state_fips, 'Hamilton')
+    
+    # Merge to get SVI values
+    tract_data = tracts.merge(svi, on='FIPS', how='inner')
+    
+    # Filter to valid SVI data
+    valid_tracts = tract_data[tract_data['RPL_THEMES'].notna()].copy()
+    
+    print(f"\n{'='*80}")
+    print("TRACT SELECTION: Analyzing SVI Distribution")
+    print(f"{'='*80}")
+    print(f"Total tracts with valid SVI: {len(valid_tracts)}")
+    print(f"SVI range: {valid_tracts['RPL_THEMES'].min():.3f} - {valid_tracts['RPL_THEMES'].max():.3f}")
+    print(f"Mean SVI: {valid_tracts['RPL_THEMES'].mean():.3f}")
+    print(f"Median SVI: {valid_tracts['RPL_THEMES'].median():.3f}")
+    
+    # Create SVI quintiles for stratified sampling
+    valid_tracts['svi_quintile'] = pd.qcut(
+        valid_tracts['RPL_THEMES'], 
+        q=5, 
+        labels=['Very Low', 'Low', 'Medium', 'High', 'Very High'],
+        duplicates='drop'
+    )
+    
+    # Also categorize by vehicle ownership (key accessibility context)
+    if 'EP_NOVEH' in valid_tracts.columns:
+        valid_tracts['vehicle_context'] = pd.cut(
+            valid_tracts['EP_NOVEH'],
+            bins=[0, 5, 10, 20, 100],
+            labels=['Low Absence', 'Medium Absence', 'High Absence', 'Very High Absence']
+        )
+    else:
+        valid_tracts['vehicle_context'] = 'Unknown'
+    
+    print(f"\nSVI Distribution by Quintile:")
+    print(valid_tracts.groupby('svi_quintile')['RPL_THEMES'].agg(['count', 'mean', 'min', 'max']))
+    
+    if 'EP_NOVEH' in valid_tracts.columns:
+        print(f"\nVehicle Absence Distribution:")
+        print(valid_tracts.groupby('vehicle_context')['EP_NOVEH'].agg(['count', 'mean']))
+    
+    # Strategic selection: 2 tracts from each quintile
+    selected_tracts = []
+    
+    for quintile in ['Very Low', 'Low', 'Medium', 'High', 'Very High']:
+        quintile_tracts = valid_tracts[valid_tracts['svi_quintile'] == quintile]
+        
+        if len(quintile_tracts) >= 2:
+            # Select 2 random tracts from this quintile
+            sample = quintile_tracts.sample(n=min(2, len(quintile_tracts)), random_state=seed)
+        else:
+            sample = quintile_tracts
+        
+        selected_tracts.extend(sample['FIPS'].tolist())
+    
+    # Ensure we have exactly n_tracts
+    if len(selected_tracts) > n_tracts:
+        selected_tracts = selected_tracts[:n_tracts]
+    elif len(selected_tracts) < n_tracts:
+        # Add random additional tracts
+        remaining = valid_tracts[~valid_tracts['FIPS'].isin(selected_tracts)]
+        additional = remaining.sample(n=n_tracts - len(selected_tracts), random_state=seed)
+        selected_tracts.extend(additional['FIPS'].tolist())
+    
+    # Print selection summary
+    print(f"\n{'='*80}")
+    print("SELECTED TEST TRACTS")
+    print(f"{'='*80}")
+    
+    selected_data = valid_tracts[valid_tracts['FIPS'].isin(selected_tracts)].copy()
+    selected_data = selected_data.sort_values('RPL_THEMES')
+    
+    for idx, row in selected_data.iterrows():
+        vehicle_info = f", Vehicle Absence: {row['EP_NOVEH']:.1f}%" if 'EP_NOVEH' in row else ""
+        poverty_info = f", Poverty: {row['EP_POV150']:.1f}%" if 'EP_POV150' in row else ""
+        print(f"  {row['FIPS']}: SVI={row['RPL_THEMES']:.3f} ({row['svi_quintile']}){vehicle_info}{poverty_info}")
+    
+    return selected_tracts
+
+def run_comprehensive_validation(test_tracts, neighbor_count=3, seed=42):
+    """
+    Run holdout validation across multiple tracts.
+    
+    Args:
+        test_tracts: List of FIPS codes to test
+        neighbor_count: Number of neighboring tracts for training
+        seed: Random seed for reproducibility
+    """
+    set_random_seed(seed)
+    
+    results = []
+    
+    for i, target_fips in enumerate(test_tracts):
+        print(f"\n{'='*80}")
+        print(f"Holdout Validation: {target_fips} ({i+1}/{len(test_tracts)})")
+        print(f"{'='*80}")
+        
+        config = {
+            'data': {
+                'target_fips': target_fips,
+                'state_fips': target_fips[:2],
+                'county_fips': target_fips[2:5],
+                'neighbor_tracts': neighbor_count
+            },
+            'model': {
+                'epochs': 150,
+                'hidden_dim': 64,
+                'dropout': 0.3
+            },
+            'training': {
+                'learning_rate': 0.001,
+                'weight_decay': 1e-4,
+                'enforce_constraints': False
+            },
+            'validation': {
+                'holdout_mode': True
+            },
+            'processing': {
+                'verbose': True,
+                'enable_caching': True,
+                'random_seed': seed
+            }
+        }
+        
+        pipeline = GRANITEPipeline(config, output_dir=f'./output/holdout_{target_fips}')
+        
+        try:
+            result = pipeline.run()
+            
+            if result['success']:
+                results.append({
+                    'fips': target_fips,
+                    'actual_svi': result['actual_svi'],
+                    'predicted_mean': result['predicted_mean'],
+                    'mean_error_pct': result['mean_error_pct'],
+                    'natural_convergence': result['natural_convergence'],
+                    'correlation': result['accessibility_svi_correlation'],
+                    'std': result['predicted_std'],
+                    'n_training_tracts': len(result['training_fips']),
+                    'n_holdout_addresses': result['n_holdout_addresses']
+                })
+                
+                print(f"\n✓ Validation complete: Error={result['mean_error_pct']:.1f}%, Correlation={result['accessibility_svi_correlation']:.3f}")
+            
+        except Exception as e:
+            print(f"ERROR: {str(e)}")
+            continue
+    
+    # Summary
+    if not results:
+        print("\nNo successful validations!")
+        return None
+    
+    results_df = pd.DataFrame(results)
+    
+    # Comprehensive summary statistics
+    print(f"\n{'='*80}")
+    print("COMPREHENSIVE VALIDATION SUMMARY")
+    print(f"{'='*80}")
+    print(f"\nTested {len(results)} tracts")
+    
+    print(f"\n--- Error Statistics ---")
+    print(f"Mean Error: {results_df['mean_error_pct'].mean():.2f}% ± {results_df['mean_error_pct'].std():.2f}%")
+    print(f"Median Error: {results_df['mean_error_pct'].median():.2f}%")
+    print(f"Min Error: {results_df['mean_error_pct'].min():.2f}%")
+    print(f"Max Error: {results_df['mean_error_pct'].max():.2f}%")
+    
+    print(f"\n--- Correlation Statistics ---")
+    print(f"Mean Correlation: {results_df['correlation'].mean():.4f} ± {results_df['correlation'].std():.4f}")
+    print(f"Median Correlation: {results_df['correlation'].median():.4f}")
+    print(f"Positive Correlations: {(results_df['correlation'] > 0).sum()} / {len(results)} tracts")
+    print(f"Negative Correlations: {(results_df['correlation'] < 0).sum()} / {len(results)} tracts")
+    
+    print(f"\n--- Convergence Analysis ---")
+    print(f"Natural Convergence: {results_df['natural_convergence'].sum()} / {len(results)} tracts ({100*results_df['natural_convergence'].mean():.1f}%)")
+    
+    print(f"\n--- SVI Range Analysis ---")
+    print(f"Actual SVI Range: {results_df['actual_svi'].min():.3f} - {results_df['actual_svi'].max():.3f}")
+    print(f"Predicted SVI Range: {results_df['predicted_mean'].min():.3f} - {results_df['predicted_mean'].max():.3f}")
+    
+    # Error by SVI level
+    results_df['svi_category'] = pd.cut(
+        results_df['actual_svi'],
+        bins=[0, 0.3, 0.5, 0.7, 1.0],
+        labels=['Low', 'Medium', 'High', 'Very High']
+    )
+    
+    print(f"\n--- Error by SVI Category ---")
+    error_by_svi = results_df.groupby('svi_category')['mean_error_pct'].agg(['count', 'mean', 'std'])
+    print(error_by_svi)
+    
+    # Save results
+    output_file = './output/holdout_validation_enhanced_summary.csv'
+    results_df.to_csv(output_file, index=False)
+    print(f"\nResults saved: {output_file}")
+    
+    # Save detailed results with all metrics
+    detailed_file = './output/holdout_validation_detailed.csv'
+    results_df.to_csv(detailed_file, index=False)
+    print(f"Detailed results saved: {detailed_file}")
+    
+    return results_df
+
+
+if __name__ == '__main__':
+    print("GRANITE Enhanced Holdout Validation")
+    print("="*80)
+    print("\nThis script will:")
+    print("1. Analyze SVI distribution across Hamilton County tracts")
+    print("2. Select 10 diverse test tracts spanning the SVI spectrum")
+    print("3. Run holdout validation on each tract")
+    print("4. Provide comprehensive performance analysis")
+    print("\nNote: First-time OSRM routing may take 30-60 minutes per tract.")
+    print("Subsequent runs will use cached data and complete in <5 minutes per tract.")
+    
+    # Select diverse test tracts
+    test_tracts = select_diverse_test_tracts(n_tracts=10, seed=42)
+    
+    # Run validation
+    results = run_comprehensive_validation(test_tracts, neighbor_count=3, seed=42)
+    
+    if results is not None:
+        print("\n" + "="*80)
+        print("VALIDATION COMPLETE")
+        print("="*80)
+        print(f"\nSuccessfully validated {len(results)} tracts")
+        print("Review the output files for detailed results and analysis.")

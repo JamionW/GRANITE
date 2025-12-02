@@ -17,12 +17,10 @@ from ..models.gnn import set_random_seed
 import random
 
 from ..data.loaders import DataLoader
-from ..visualization.plots import GRANITEResearchVisualizer
-from ..visualization.disaggregation_plots import DisaggregationVisualizer
+from ..visualization.plots import GRANITEResearchVisualizer, DisaggregationVisualizer
 from ..evaluation.spatial_diagnostics import SpatialLearningDiagnostics
 from ..evaluation.accessibility_validator import validate_granite_accessibility_features, integrate_with_spatial_diagnostics
-from ..evaluation.baseline_comparisons import BaselineComparison
-from ..evaluation.disaggregation_baselines import (
+from ..evaluation.baselines import (
     DisaggregationComparison, 
     NaiveUniformBaseline,
     IDWDisaggregation, 
@@ -81,11 +79,11 @@ class GRANITEPipeline:
         
         self._log("Starting GRANITE Accessibility SVI Pipeline...")
 
-        # NEW: Support both per-tract holdout AND global training
+        # Support both per-tract holdout and global training
         validation_mode = self.config.get('validation', {}).get('mode', None)
 
         if validation_mode == 'holdout':
-            # Per-tract holdout (old approach)
+            # Per-tract holdout
             target_fips = self.config.get('data', {}).get('target_fips')
             neighbor_fips = self.config.get('validation', {}).get('neighbor_fips', [])
             
@@ -97,7 +95,7 @@ class GRANITEPipeline:
             return self.run_holdout_validation(target_fips, neighbor_fips)
 
         elif validation_mode == 'global':
-            # Global training (new approach)
+            # Global training
             training_fips = self.config.get('validation', {}).get('training_fips', [])
             test_fips = self.config.get('validation', {}).get('test_fips', [])
             use_mixture = self.config.get('training', {}).get('use_mixture', False)
@@ -120,7 +118,7 @@ class GRANITEPipeline:
         
         results = self._process_single_tract(target_fips, data)
 
-        # Run feature importance analysis (optional)
+        # Run feature importance analysis (optional - visit later to see if necessary)
         if results.get('success', False):
             skip_importance = self.config.get('processing', {}).get('skip_importance', False)
             
@@ -180,12 +178,12 @@ class GRANITEPipeline:
     def _process_single_tract(self, target_fips, data):
         """Process single tract or multiple tracts with accessibility → SVI approach"""
         
-        # CLEAR OLD ACCESSIBILITY CACHE
+        # Clear cache - revisit
         cache_dir = os.path.join(self.data_dir, 'cache', 'accessibility_features')
         if os.path.exists(cache_dir):
             import shutil
             shutil.rmtree(cache_dir)
-            self._log("✓ Cleared old accessibility cache - will recompute with real data")
+            self._log("Cleared old accessibility cache - will recompute with real data")
         
         # Check if multi-tract mode
         n_neighbor_tracts = self.config.get('data', {}).get('neighbor_tracts', 0)
@@ -218,7 +216,7 @@ class GRANITEPipeline:
             
             self._log(f"Combined {len(tract_addresses)} addresses from {len(tract_list)} tracts")
         else:
-            # Single tract mode (original behavior)
+            # Single tract mode
             self._log(f"Processing tract {target_fips}...")
             target_fips = str(target_fips).strip()
             data['tracts']['FIPS'] = data['tracts']['FIPS'].astype(str).str.strip()
@@ -240,11 +238,10 @@ class GRANITEPipeline:
         self._log(f"Found {len(tract_addresses)} total addresses")
         self._log(f"Target tract {target_fips} SVI: {target_tract_svi:.4f}")
         
-        # Rest is identical for both modes
         state_fips = target_fips[:2]
         county_fips = target_fips[2:5]
         
-        # Step 1: Compute accessibility features
+        # Compute accessibility features
         accessibility_features = self._compute_accessibility_features(
             tract_addresses, data
         )
@@ -255,14 +252,14 @@ class GRANITEPipeline:
         # Generate feature names
         feature_names = self._generate_feature_names(accessibility_features.shape[1])
                 
-        # Step 2: Build graph with context features
+        # Build graph with context features
         from ..models.gnn import normalize_accessibility_features
         normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
 
-        # Store NORMALIZED features for feature importance in multi-tract mode
+        # Store normalized features for feature importance in multi-tract mode
         full_accessibility_features = normalized_features.copy() if n_neighbor_tracts > 0 else None
 
-        # NEW: Extract and normalize context features
+        # Extract and normalize context features
         self._log("Extracting context features for addresses...")
         context_features = self.data_loader.create_context_features_for_addresses(
             addresses=tract_addresses,
@@ -270,14 +267,14 @@ class GRANITEPipeline:
         )
         normalized_context, context_scaler = self.data_loader.normalize_context_features(context_features)
 
-        # NEW: Store context for diagnostics
+        # Store context for diagnostics
         self._stored_context_features = normalized_context.copy()
 
-        # Create graph with both accessibility AND context features
+        # Create graph with both accessibility and context features
         graph_data = self.data_loader.create_spatial_accessibility_graph(
             addresses=tract_addresses,
             accessibility_features=normalized_features,
-            context_features=normalized_context,  # NEW: Pass context
+            context_features=normalized_context, 
             state_fips=state_fips,
             county_fips=county_fips
         )
@@ -288,7 +285,7 @@ class GRANITEPipeline:
         
         self._log(f"Built graph: {graph_data.x.shape[0]} nodes, {graph_data.edge_index.shape[1]} edges")
         
-        # Step 3: Train GNN (modified for multi-tract if needed)
+        # Train GNN (modified for multi-tract if needed)
         if n_neighbor_tracts > 0:
             training_result = self._train_multi_tract_gnn(
                 graph_data, tract_svis, tract_addresses
@@ -301,7 +298,7 @@ class GRANITEPipeline:
         if not training_result['success']:
             return training_result
         
-        # Step 4: Extract predictions for target tract only
+        # Extract predictions for target tract only
         if n_neighbor_tracts > 0:
             target_mask = tract_addresses['tract_fips'] == target_fips
             target_tract_addresses = tract_addresses[target_mask].copy()
@@ -335,10 +332,9 @@ class GRANITEPipeline:
             if hasattr(final_predictions, 'reset_index'):
                 final_predictions = final_predictions.reset_index(drop=True)
         
-        # Step 5: Validation (only on target tract)
+        # Validation (only on target tract)
         if n_neighbor_tracts > 0:
-            # Already filtered above with reset indices
-            target_addresses = target_tract_addresses  # Already defined above
+            target_addresses = target_tract_addresses  
             target_access_features = accessibility_features[target_mask]
             target_normalized_features = normalized_features[target_mask]
         else:
@@ -374,7 +370,7 @@ class GRANITEPipeline:
                 output_dir=os.path.join(self.output_dir, 'accessibility_validation')
             )
         except Exception as e:
-            self._log(f"Warning: Accessibility validation failed: {str(e)}")
+            self._log(f"WARNING: Accessibility validation failed: {str(e)}")
             access_validation_results = {'error': str(e)}
         
         # Spatial diagnostics
@@ -383,7 +379,7 @@ class GRANITEPipeline:
             target_normalized_features
         )
 
-        # NEW: Optional unconstrained evaluation
+        # Optional unconstrained evaluation
         if self.config.get('validation', {}).get('evaluate_unconstrained', False):
             self._log("\nEvaluating unconstrained learning quality...")
             unconstrained_metrics = self.evaluate_unconstrained_learning(
@@ -400,7 +396,7 @@ class GRANITEPipeline:
                 )
                 validation_results['integrated_analysis'] = integrated_results
             except Exception as e:
-                self._log(f"Warning: Integration failed: {str(e)}")
+                self._log(f"WARNING: Integration failed: {str(e)}")
         
         validation_results['accessibility_validation'] = access_validation_results
         
@@ -551,11 +547,11 @@ class GRANITEPipeline:
             for fips in tract_svis.keys():
                 tract_masks[fips] = (addresses['tract_fips'] == fips).values
             
-            # Create MULTI-TRACT trainer (new class)
+            # Create Multi-tract trainer
             trainer = MultiTractGNNTrainer(
                 model, 
                 config={**self.config.get('training', {}), 'use_multitask': True},
-                seed=seed  # STABILITY FIX
+                seed=seed 
             )
             
             # Training parameters
@@ -579,7 +575,7 @@ class GRANITEPipeline:
             # Get raw predictions from training
             raw_predictions = training_result['final_predictions']
             
-            # Store raw predictions with tract info (BEFORE any correction)
+            # Store raw predictions with tract info (before correction)
             self._stored_raw_predictions = pd.DataFrame({
                 'mean': raw_predictions,
                 'x': addresses.geometry.x.values,
@@ -603,15 +599,15 @@ class GRANITEPipeline:
             
             # Quality assessment
             if overall_error < 10 and spatial_std > 0.01:
-                self._log("✓ Multi-tract training quality: GOOD")
+                self._log("Multi-tract training quality: GOOD")
             elif overall_error < 25:
-                self._log("⚠ Multi-tract training quality: ACCEPTABLE")
+                self._log("Multi-tract training quality: ACCEPTABLE")
             else:
-                self._log("✗ Multi-tract training quality: POOR")
+                self._log("Multi-tract training quality: POOR")
             
             return {
                 'success': True,
-                'raw_predictions': raw_predictions,  # These are the model's raw outputs
+                'raw_predictions': raw_predictions, 
                 'learned_accessibility': training_result.get('learned_accessibility'),
                 'model': model,
                 'edge_index': graph_data.edge_index,
@@ -657,7 +653,6 @@ class GRANITEPipeline:
             ])
         
         # Modal features: 15 features
-        # (These come from compute_modal_features in modal_accessibility.py)
         modal_names = [
             'transit_mode_share',
             'walk_mode_share', 
@@ -678,7 +673,6 @@ class GRANITEPipeline:
         feature_names.extend(modal_names)
         
         # Socioeconomic features: 9 features
-        # (These come from get_tract_socioeconomic_features)
         socioeco_names = [
             'pct_no_vehicle',
             'pct_poverty',
@@ -707,7 +701,7 @@ class GRANITEPipeline:
 
     def _compute_accessibility_features(self, addresses, data):
         """
-        FIXED: Compute accessibility features with enhanced error handling and validation
+        Compute accessibility features with enhanced error handling and validation
         """
         self._log("Computing enhanced accessibility features...")
 
@@ -717,7 +711,6 @@ class GRANITEPipeline:
         
         if is_multi_tract:
             self._log(f"Multi-tract mode detected ({n_tracts} tracts, {len(addresses)} addresses)")
-            #self._log("⚠️  Skipping cache lookup for aggregated multi-tract data")
             # Force disable cache for this computation
             #skip_cache_lookup = True
             skip_cache_lookup = False
@@ -742,10 +735,10 @@ class GRANITEPipeline:
             return addr_hash, dest_hashes
         
         try:
-            # FIXED: Initialize the enhanced computer properly
+            # Initialize the enhanced computer properly
             from ..data.enhanced_accessibility import EnhancedAccessibilityComputer
 
-            # ADD CACHING: Pass cache config from pipeline
+            # Pass cache config from pipeline
             enable_caching = self.config.get('processing', {}).get('enable_caching', True)
             cache_dir = self.config.get('processing', {}).get('cache_dir', './granite_cache')
 
@@ -755,13 +748,10 @@ class GRANITEPipeline:
                 cache_dir=cache_dir
             )
             
-            # CHANGE 1: Get tract-appropriate destinations with validation
+            # Get tract-appropriate destinations with validation
             target_fips = self.config.get('data', {}).get('target_fips')
             if target_fips:
                 try:
-                    #destinations = self.data_loader.create_tract_appropriate_destinations(target_fips)
-                    #self._log("Using tract-appropriate destinations for better intra-tract variation")
-                    # TEMPORARILY DISABLED for debugging
                     destinations = {
                         'employment': data['employment_destinations'],
                         'healthcare': data['healthcare_destinations'],
@@ -783,7 +773,7 @@ class GRANITEPipeline:
                     'grocery': data['grocery_destinations']
                 }
             
-            # VALIDATION: Ensure all destinations are valid
+            # Ensure all destinations are valid
             validated_destinations = {}
             for dest_type, dest_gdf in destinations.items():
                 if dest_gdf is None or len(dest_gdf) == 0:
@@ -849,19 +839,18 @@ class GRANITEPipeline:
                             successful_computations += 1
                             continue  # Skip to next destination type
                     
-                    # EXISTING CODE: If not cached, compute as normal
-                    # CHANGE 3: Use the FIXED travel time calculation
+                    # If not cached, compute as normal
                     travel_times = accessibility_computer.calculate_realistic_travel_times(
                         origins=addresses,
                         destinations=dest_gdf
                     )
 
-                    # NEW: Validate travel times before feature extraction
+                    # Validate travel times before feature extraction
                     if not accessibility_computer._validate_distance_time_relationship(travel_times):
                         self._log(f"ERROR: Travel time validation failed for {dest_type}")
                         continue
                         
-                    # NEW: Validate destination counts
+                    # Validate destination counts
                     if not accessibility_computer._validate_destination_counts_fixed(travel_times):
                         self._log(f"ERROR: Destination count validation failed for {dest_type}")
                         continue
@@ -870,7 +859,7 @@ class GRANITEPipeline:
                         self._log(f"ERROR: No travel times computed for {dest_type}")
                         continue
                     
-                    # Debug: Show sample travel times
+                    # Debug - Show sample travel times
                     if self.verbose and len(travel_times) > 0:
                         sample = travel_times.head(3)
                         self._log(f"  Sample {dest_type} travel times:")
@@ -878,7 +867,6 @@ class GRANITEPipeline:
                             self._log(f"    Origin {row['origin_id']} -> Dest {row['dest_id']}: "
                                     f"{row['combined_time']:.1f}min ({row['best_mode']})")
                     
-                    # CHANGE 4: Use the FIXED feature extraction
                     dest_features = accessibility_computer.extract_enhanced_accessibility_features(
                         addresses=addresses,
                         travel_times=travel_times,
@@ -890,19 +878,19 @@ class GRANITEPipeline:
                         self._log(f"ERROR: No features extracted for {dest_type}")
                         continue
                     
-                    # VALIDATION: Check feature dimensions
+                    # Check feature dimensions
                     expected_addresses = len(addresses)
                     if dest_features.shape[0] != expected_addresses:
                         self._log(f"ERROR: Feature count mismatch for {dest_type}: "
                                 f"got {dest_features.shape[0]}, expected {expected_addresses}")
                         continue
 
-                    # NEW: Expect 24 features per destination type
+                    # Expect 24 features per destination type
                     if dest_features.shape[1] != 24:
                         self._log(f"WARNING: Unexpected feature count for {dest_type}: "
                                 f"got {dest_features.shape[1]}, expected 24")
 
-                    # VALIDATION: Remove zero-variance features instead of rejecting everything
+                    # Remove zero-variance features instead of rejecting everything
                     feature_stds = np.std(dest_features, axis=0)
                     zero_var_mask = feature_stds < 1e-8
                     zero_var_count = np.sum(zero_var_mask)
@@ -921,11 +909,6 @@ class GRANITEPipeline:
                             if has_zero_var and i < len(feature_names_temp):
                                 self._log(f"  Zero variance: {dest_type}_{feature_names_temp[i]}")
                         
-                        # KEEP all features - do NOT remove zero-variance features
-                        # valid_features_mask = ~zero_var_mask
-                        # dest_features = dest_features[:, valid_features_mask]
-                        self._log(f"  Keeping all {dest_features.shape[1]} features (including zero-variance)")
-                        
                         # If we removed all features, that's a real error
                         if dest_features.shape[1] == 0:
                             self._log(f"ERROR: All {dest_type} features have zero variance")
@@ -940,11 +923,11 @@ class GRANITEPipeline:
                         'drive_advantage', 'dispersion', 'time_range', 'percentile'
                     ]
 
-                    # ALWAYS add names for ALL features (no filtering)
+                    # Always add names for features (no filtering)
                     feature_names.extend([f'{dest_type}_{name}' for name in base_feature_names])
                     
                     successful_computations += 1
-                    self._log(f"  ✓ {dest_type}: {dest_features.shape} features computed successfully")
+                    self._log(f"{dest_type}: {dest_features.shape} features computed successfully")
                     
                     if accessibility_computer.cache is not None:
                         addr_hash, dest_hashes = _generate_cache_key(addresses, {dest_type: dest_gdf})
@@ -957,15 +940,15 @@ class GRANITEPipeline:
                             threshold=0,
                             origins_hash=dest_cache_key
                         )
-                        self._log(f"  ✓ Cached {dest_type} features for reuse")
+                        self._log(f"Cached {dest_type} features for reuse")
 
                 except Exception as e:
-                    self._log(f"ERROR processing {dest_type}: {str(e)}")
+                    self._log(f"Error processing {dest_type}: {str(e)}")
                     import traceback
                     self._log(f"Traceback: {traceback.format_exc()}")
                     continue
             
-            # CRITICAL CHECK: Ensure we have features
+            # Ensure we have features
             if successful_computations == 0:
                 self._log("CRITICAL ERROR: No accessibility features could be computed for any destination type")
                 return None
@@ -994,7 +977,7 @@ class GRANITEPipeline:
                                 origins_hash=addr_hash,
                                 operation='difference'
                             )
-                            self._log("✓ Cached car/transit mode comparison differential")
+                            self._log("Cached car/transit mode comparison differential")
                 except Exception as e:
                     self._log(f"Note: Could not cache mode differentials: {str(e)}")
             
@@ -1002,7 +985,7 @@ class GRANITEPipeline:
                 self._log("CRITICAL ERROR: Feature list is empty")
                 return None
             
-            # CHANGE 5: Combine features with validation
+            # Combine features with validation
             try:
                 accessibility_matrix = np.column_stack(all_features)
                 self._log(f"Base accessibility features: {accessibility_matrix.shape}")
@@ -1011,7 +994,6 @@ class GRANITEPipeline:
                     accessibility_matrix, addresses
                 )
 
-                # === ADD MODAL FEATURES ===
                 try:
                     from ..features.modal_accessibility import compute_modal_features
                     
@@ -1056,7 +1038,7 @@ class GRANITEPipeline:
                     modal_features = np.zeros((len(addresses), 0))
                     modal_names = []
 
-                # Combine: 30 base + 15 modal (if available) = 45 accessibility features
+                # Combine: 30 base + 15 modal = 45 accessibility features
                 if modal_features.shape[1] > 0:
                     final_features = np.column_stack([accessibility_matrix, modal_features])
                     complete_feature_names = feature_names + modal_names
@@ -1104,16 +1086,6 @@ class GRANITEPipeline:
                         feature_name = complete_feature_names[i] if i < len(complete_feature_names) else f"feature_{i}"
                         unique_vals = len(np.unique(final_features[:, i]))
                         self._log(f"  Zero-variance feature: {feature_name}: {unique_vals} unique values, std={np.std(final_features[:, i]):.8f}")
-                
-                # KEEP all features - do NOT remove zero-variance features
-                # valid_feature_mask = ~zero_var_mask
-                # final_features = final_features[:, valid_feature_mask]
-                # complete_feature_names = [name for i, name in enumerate(complete_feature_names) if valid_feature_mask[i]]
-                
-                # No need to check feature count since we're keeping all features
-                # if final_features.shape[1] < 10:
-                #     self._log(f"CRITICAL ERROR: Only {final_features.shape[1]} features remaining after removing zero-variance")
-                #     return None
                 
                 self._log(f"Keeping all {final_features.shape[1]} features (including {zero_var_count} zero-variance)")
             
@@ -1178,7 +1150,7 @@ class GRANITEPipeline:
             
             self._log(f"SUCCESS: Generated {enhanced_features.shape[1]} features for {len(addresses)} addresses")
             
-            # NEW: Add socioeconomic controls
+            # Add socioeconomic controls
             if 'FIPS' in addresses.columns:
                 tract_fips = str(addresses['FIPS'].iloc[0]).strip()
             elif hasattr(addresses.iloc[0], 'FIPS'):
@@ -1415,11 +1387,11 @@ class GRANITEPipeline:
                 origins_hash=cache_key
             )
             
-            self._log(f"  ✓ Cached batch features")
+            self._log(f"Cached batch features")
         
         except Exception as e:
             if self.verbose:
-                self._log(f"  Cache save failed: {str(e)}")
+                self._log(f"Cache save failed: {str(e)}")
 
     def _estimate_optimal_batch_size(self, num_addresses_total, num_tracts, available_memory_gb=14):
         """
@@ -1438,7 +1410,7 @@ class GRANITEPipeline:
         # Calculate average addresses per tract
         avg_addresses_per_tract = num_addresses_total / num_tracts
         
-        # Safe batch size: 900MB ≈ 7,500 addresses for typical Hamilton County data
+        # Safe batch size: 900MB ~ 7,500 addresses for typical Hamilton County data
         safe_addresses_per_batch = 7500
         
         # How many tracts of avg size fit in safe batch?
@@ -1554,19 +1526,19 @@ class GRANITEPipeline:
         return np.array(derived, dtype=np.float64)
 
     def _train_accessibility_svi_gnn(self, graph_data, tract_svi, addresses):
-        """INTEGRATED: Train GNN with all fixes applied"""
+        """Train GNN with all fixes applied"""
         self._log("Training Accessibility SVI GNN with enhanced architecture...")
         
         try:
-            # Import FIXED GNN classes
+            # Import GNN classes
             from ..models.gnn import AccessibilitySVIGNN, AccessibilityGNNTrainer, normalize_accessibility_features
             import torch
             
-            # Apply FIXED normalization
+            # Apply normalization
             normalized_features, feature_scaler = normalize_accessibility_features(graph_data.x.numpy())
             graph_data.x = torch.FloatTensor(normalized_features)
             
-            # Create FIXED model with proper architecture
+            # Create model with proper architecture
             seed = self.config.get('processing', {}).get('random_seed', 42)
             model = AccessibilitySVIGNN(
                 accessibility_features_dim=graph_data.x.shape[1],
@@ -1575,11 +1547,11 @@ class GRANITEPipeline:
                 seed=seed # Ensure reproducibility
             )
             
-            # Create FIXED trainer
+            # Create trainer
             trainer = AccessibilityGNNTrainer(
                 model, 
                 config=self.config.get('training', {}),
-                seed=seed  # STABILITY FIX
+                seed=seed 
             )     
 
             # Training parameters
@@ -1655,7 +1627,7 @@ class GRANITEPipeline:
         if raw_predictions is None:
             return pd.DataFrame()
         
-        # CRITICAL: Ensure predictions are numpy array with no index
+        # Ensure predictions are numpy array with no index
         if isinstance(raw_predictions, pd.Series):
             raw_predictions = raw_predictions.values
         elif isinstance(raw_predictions, pd.DataFrame):
@@ -1721,7 +1693,7 @@ class GRANITEPipeline:
         total_uncertainty = base_uncertainty + distance_uncertainty + spatial_uncertainty
         total_uncertainty = np.clip(total_uncertainty, 0.02, 0.15)
         
-        # Create DataFrame (RAW predictions - No post-training correction applied)
+        # Create DataFrame
         final_predictions = pd.DataFrame({
             'address_id': [addr.get('address_id', i) for i, (_, addr) in enumerate(addresses.iterrows())],
             'x': x_coords,
@@ -2095,60 +2067,6 @@ class GRANITEPipeline:
         self._log(f"  Final accessibility-SVI correlation: {accessibility_svi_correlations.get('overall', 'N/A')}")
         
         return validation_results
-
-    def _run_baseline_comparisons(self, addresses, predictions_df, tract_gdf, tract_svi):
-        """Run baseline comparisons (Action Item 3)"""
-        
-        self._log("\nRunning baseline comparisons (Action Item 3)...")
-        
-        try:
-            from ..evaluation.baseline_comparisons import BaselineComparison
-            
-            # Prepare address GeoDataFrame - use existing CRS from addresses
-            address_gdf = addresses.copy()
-            address_gdf['SVI'] = predictions_df['mean'].values
-            
-            # Prepare tract GeoDataFrame - make sure it has 'SVI' column
-            tract_gdf = tract_gdf.copy()
-            if 'RPL_THEMES' in tract_gdf.columns and 'SVI' not in tract_gdf.columns:
-                tract_gdf['SVI'] = tract_gdf['RPL_THEMES']
-            
-            # Ensure both GeoDataFrames have the same CRS
-            if address_gdf.crs != tract_gdf.crs:
-                self._log(f"Reprojecting addresses from {address_gdf.crs} to {tract_gdf.crs}")
-                address_gdf = address_gdf.to_crs(tract_gdf.crs)
-            
-            # Run comparison - now both use 'SVI' column
-            comparison = BaselineComparison()
-            baseline_results = comparison.run_comparison(
-                tract_gdf=tract_gdf,
-                address_gdf=address_gdf,
-                gnn_predictions=predictions_df['mean'].values,
-                svi_column='SVI'  # ← BACK TO 'SVI' since both DataFrames now have it
-            )
-            
-            # Print summary
-            comparison.print_summary()
-            
-            # Save visualization
-            comparison.plot_comparison(
-                save_path=os.path.join(self.output_dir, 'baseline_comparison.png')
-            )
-            
-            # Save metrics
-            baseline_results['metrics'].to_csv(
-                os.path.join(self.output_dir, 'baseline_metrics.csv'),
-                index=False
-            )
-            
-            self._log("✓ Baseline comparisons complete")
-            return baseline_results
-            
-        except Exception as e:
-            self._log(f"Warning: Baseline comparison failed: {str(e)}")
-            import traceback
-            self._log(f"Traceback: {traceback.format_exc()}")
-            return {'error': str(e)}
     
     def _get_raw_predictions_for_diagnostics(self):
         """

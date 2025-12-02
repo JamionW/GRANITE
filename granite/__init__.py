@@ -19,8 +19,8 @@ from .disaggregation import pipeline
 from .visualization import plots
 
 # New disaggregation modules
-from .evaluation import disaggregation_baselines
-from .visualization import disaggregation_plots
+from .evaluation import baselines
+from .visualization import plots
 
 # Package metadata
 __all__ = [

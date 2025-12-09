@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Setup script for GRANITE with integrated R installation
+Setup script for GRANITE
 """
 
 from setuptools import setup, find_packages
@@ -11,68 +11,65 @@ import os
 import subprocess
 import sys
 
+
 def run_r_setup():
-    """Run R setup script during installation"""
-    print("🔧 Setting up R environment for GRANITE...")
+    """Run R setup script during installation."""
+    print("Setting up R environment for GRANITE...")
     
-    # Find the setup script
     here = os.path.abspath(os.path.dirname(__file__))
     setup_script = os.path.join(here, 'granite', 'scripts', 'setup_metricgraph.sh')
     
     if not os.path.exists(setup_script):
-        print(f"⚠️  R setup script not found at {setup_script}")
-        print("⚠️  Please run: ./granite/scripts/setup_metricgraph.sh")
+        print(f"R setup script not found at {setup_script}")
+        print("Run manually: ./granite/scripts/setup_metricgraph.sh")
         return False
     
     try:
-        # Make script executable
         os.chmod(setup_script, 0o755)
-        
-        # Run setup script
-        result = subprocess.run(['bash', setup_script], 
-                              capture_output=True, text=True, 
-                              timeout=600)  # 10 minute timeout
+        result = subprocess.run(
+            ['bash', setup_script],
+            capture_output=True,
+            text=True,
+            timeout=600
+        )
         
         if result.returncode == 0:
-            print("✅ R environment setup completed successfully")
+            print("[OK] R environment setup completed")
             return True
         else:
-            print(f"❌ R setup failed with code {result.returncode}")
+            print(f"[FAIL] R setup failed with code {result.returncode}")
             print("STDOUT:", result.stdout)
             print("STDERR:", result.stderr)
             return False
             
     except subprocess.TimeoutExpired:
-        print("❌ R setup timed out (took >10 minutes)")
+        print("[FAIL] R setup timed out (>10 minutes)")
         return False
     except Exception as e:
-        print(f"❌ R setup failed: {str(e)}")
+        print(f"[FAIL] R setup failed: {str(e)}")
         return False
 
+
 class PostInstallCommand(install):
-    """Custom install command that runs R setup"""
+    """Custom install command that runs R setup."""
     def run(self):
-        # Run normal install first
         install.run(self)
-        
-        # Then run R setup
         if not run_r_setup():
-            print("\n⚠️  R setup failed. MetricGraph features may not work.")
-            print("💡 You can manually run: ./granite/scripts/setup_metricgraph.sh")
+            print("\nR setup failed. MetricGraph features may not work.")
+            print("Run manually: ./granite/scripts/setup_metricgraph.sh")
+
 
 class PostDevelopCommand(develop):
-    """Custom develop command that runs R setup"""
+    """Custom develop command that runs R setup."""
     def run(self):
-        # Run normal develop first
         develop.run(self)
-        
-        # Then run R setup
         if not run_r_setup():
-            print("\n⚠️  R setup failed. MetricGraph features may not work.")
-            print("💡 You can manually run: ./granite/scripts/setup_metricgraph.sh")
+            print("\nR setup failed. MetricGraph features may not work.")
+            print("Run manually: ./granite/scripts/setup_metricgraph.sh")
 
-# Read version and other metadata
+
 def get_version():
+    """Read version from __init__.py."""
     here = os.path.abspath(os.path.dirname(__file__))
     init_file = os.path.join(here, 'granite', '__init__.py')
     try:
@@ -84,21 +81,21 @@ def get_version():
         pass
     return "0.1.0"
 
-# Core dependencies (always required)
+
 INSTALL_REQUIRES = [
     # Core scientific computing
     "numpy>=1.21.0",
-    "pandas>=1.3.0", 
+    "pandas>=1.3.0",
     "scipy>=1.9.0",
     "scikit-learn>=1.0.0",
     
-    # Geospatial libraries
+    # Geospatial
     "geopandas>=0.10.0",
     "shapely>=1.8.0",
     "fiona>=1.8.0",
     "pyproj>=3.0.0",
     "rasterio>=1.2.0",
-    "geopy>=2.3.0", 
+    "geopy>=2.3.0",
     
     # Deep learning
     "torch>=1.10.0",
@@ -117,17 +114,15 @@ INSTALL_REQUIRES = [
     "requests>=2.25.0",
 ]
 
-# R interface - made optional for initial install
 R_DEPENDENCIES = [
     "rpy2>=3.4.0",
 ]
 
-# Optional dependencies
 EXTRAS_REQUIRE = {
-    'r': R_DEPENDENCIES,  # For manual R installation
+    'r': R_DEPENDENCIES,
     'dev': [
         "pytest>=6.0",
-        "pytest-cov>=2.0", 
+        "pytest-cov>=2.0",
         "black>=21.0",
         "flake8>=3.9",
         "mypy>=0.910",
@@ -139,22 +134,21 @@ EXTRAS_REQUIRE = {
         "ipywidgets>=7.6.0",
     ],
     'all': R_DEPENDENCIES + [
-        "pytest>=6.0", "jupyter>=1.0.0", "ipykernel>=6.0.0",
+        "pytest>=6.0",
+        "jupyter>=1.0.0",
+        "ipykernel>=6.0.0",
     ]
 }
 
-# Try to install rpy2 by default, but don't fail if R isn't available
+# Include rpy2 if R is available
 try:
-    import subprocess
     result = subprocess.run(['R', '--version'], capture_output=True)
     if result.returncode == 0:
-        # R is available, include rpy2 in default install
         INSTALL_REQUIRES.extend(R_DEPENDENCIES)
-        print("✅ R detected, including rpy2 in installation")
-    else:
-        print("⚠️  R not detected, rpy2 will be installed during post-install")
-except:
-    print("⚠️  R not detected, rpy2 will be installed during post-install")
+        print("[OK] R detected, including rpy2")
+except Exception:
+    print("R not detected, rpy2 will be installed during post-install")
+
 
 setup(
     name="granite-svi",
@@ -170,7 +164,6 @@ setup(
     extras_require=EXTRAS_REQUIRE,
     python_requires=">=3.8",
     
-    # Custom install commands
     cmdclass={
         'install': PostInstallCommand,
         'develop': PostDevelopCommand,
@@ -179,13 +172,12 @@ setup(
     entry_points={
         'console_scripts': [
             'granite=granite.scripts.run_granite:main',
-            'granite-setup=granite.scripts.setup_granite:main',  # New setup command
         ],
     },
     
     classifiers=[
         "Development Status :: 3 - Alpha",
-        "Intended Audience :: Science/Research", 
+        "Intended Audience :: Science/Research",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",

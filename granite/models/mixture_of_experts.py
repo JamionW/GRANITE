@@ -1,6 +1,8 @@
 """
-Mixture of Experts for GRANITE: Context-Dependent Accessibility-Vulnerability Prediction
-Addresses fundamental limitation: accessibility-vulnerability relationships vary by urban context
+Mixture of Experts for GRANITE
+
+Implements context-dependent accessibility-vulnerability prediction using
+multiple specialized experts for different SVI contexts.
 """
 import torch
 import torch.nn as nn
@@ -420,9 +422,6 @@ class MixtureOfExpertsTrainer:
                 
                 epoch_loss += gate_loss.item()
                 epoch_entropy += gate_entropy.item()
-
-                if epoch == 0:
-                    print(f"  DEBUG: raw gate_entropy={gate_entropy.item():.4f}")
             
             epoch_loss /= len(graph_data_list)
             epoch_entropy /= len(graph_data_list)

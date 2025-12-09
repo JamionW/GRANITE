@@ -1,6 +1,7 @@
 """
-Real OSRM Router - Actually calls the OSRM servers
-Place in granite/data/osrm_router.py
+OSRM Router
+
+Provides network-based routing using OSRM servers for driving and walking modes.
 """
 import requests
 import pandas as pd
@@ -38,13 +39,15 @@ class OSRMRouter:
                 test_url = f"{url}/route/v1/{profile}/-85.3,35.0;-85.2,35.0?overview=false"
                 response = requests.get(test_url, timeout=5)
                 if response.status_code == 200:
-                    self.log(f"✓ {name} server ready: {url}")
+                    self.log(f"{name} server ready: {url}")
                 else:
                     raise ConnectionError(f"{name} server returned status {response.status_code}")
             except requests.exceptions.ConnectionError:
-                raise ConnectionError(f"Cannot connect to {name} server at {url}. Is the server running?")
-            except Exception as e:
-                raise ConnectionError(f"Cannot connect to {name} server at {url}: {e}")
+                raise ConnectionError(
+                    f"Cannot connect to {name} server at {url}. "
+                    f"Start OSRM with: docker run -t -i -p {url.split(':')[-1]}:5000 -v $(pwd):/data "
+                    f"osrm/osrm-backend osrm-routed --algorithm mld /data/tennessee-latest.osrm"
+                )
     
     def compute_multimodal_travel_times(self,
                                        origins: gpd.GeoDataFrame,

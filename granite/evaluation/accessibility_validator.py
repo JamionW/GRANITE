@@ -1,10 +1,8 @@
 """
 Accessibility Feature Validator for GRANITE
-Place in granite/evaluation/accessibility_validator.py
 
-Comprehensive validation of accessibility feature computation to identify
-systematic issues in travel time calculation, destination counting, and
-feature engineering that lead to wrong accessibility-vulnerability relationships.
+Validates accessibility feature computation including travel times,
+destination counts, and theoretical consistency.
 """
 import numpy as np
 import pandas as pd

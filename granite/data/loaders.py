@@ -1,6 +1,8 @@
 """
-Streamlined Data Loaders for Simplified GRANITE
-Focus on robust accessibility feature computation with road network graphs
+GRANITE Data Loaders
+
+Provides data loading and preprocessing for census, SVI, addresses,
+destinations, and graph construction.
 """
 import os
 import numpy as np
@@ -61,7 +63,10 @@ class DataLoader:
                 tracts = gpd.read_file(local_file)
                 self._log(f"Loaded {len(tracts)} tracts from local file")
             else:
-                raise FileNotFoundError(f"Census tracts not found at {local_file}")
+                raise FileNotFoundError(
+                    f"Census tracts file not found at {local_file}. "
+                    f"Download from Census TIGER/Line: https://www.census.gov/geo/maps-data/data/tiger-line.html"
+                )
             
             # Filter to county
             county_tracts = tracts[tracts['COUNTYFP'] == county_fips].copy()
@@ -88,7 +93,10 @@ class DataLoader:
                 svi_data = pd.read_csv(svi_file, dtype={'FIPS': str, 'ST': str})
                 self._log(f"Loaded local SVI data ({len(svi_data)} records)")
             else:
-                raise FileNotFoundError(f"SVI data not found at {svi_file}")
+                raise FileNotFoundError(
+                    f"SVI data file not found at {svi_file}. "
+                    f"Download from CDC SVI: https://www.atsdr.cdc.gov/placeandhealth/svi/data_documentation_download.html"
+                )
             
             # Filter to county
             county_svi = svi_data[
@@ -132,8 +140,10 @@ class DataLoader:
         tract_data = svi_data[svi_data['FIPS'] == tract_fips]
         
         if len(tract_data) == 0:
-            self._log(f"WARNING: No SVI data for tract {tract_fips}, using defaults")
-            return self._default_socioeconomic_features()
+            raise ValueError(
+                f"No SVI data found for tract {tract_fips}. "
+                f"Ensure the tract exists in the SVI dataset."
+            )
         
         tract = tract_data.iloc[0]
         

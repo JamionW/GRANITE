@@ -1,6 +1,8 @@
 """
-Simplified GRANITE Pipeline: Accessibility → SVI Direct Prediction
-Eliminates two-stage complexity, focuses on robust accessibility feature extraction
+GRANITE Pipeline: Accessibility to SVI Prediction
+
+Main orchestration for data loading, feature computation, model training,
+and validation.
 """
 import os
 import time
@@ -118,7 +120,7 @@ class GRANITEPipeline:
         
         results = self._process_single_tract(target_fips, data)
 
-        # Run feature importance analysis (optional - visit later to see if necessary)
+        # Run feature importance analysis
         if results.get('success', False):
             skip_importance = self.config.get('processing', {}).get('skip_importance', False)
             
@@ -178,7 +180,7 @@ class GRANITEPipeline:
     def _process_single_tract(self, target_fips, data):
         """Process single tract or multiple tracts with accessibility → SVI approach"""
         
-        # Clear cache - revisit
+        # Clear stale accessibility cache
         cache_dir = os.path.join(self.data_dir, 'cache', 'accessibility_features')
         if os.path.exists(cache_dir):
             import shutil
@@ -280,8 +282,8 @@ class GRANITEPipeline:
         )
 
         self._log(f"Built graph: {graph_data.x.shape[0]} nodes, {graph_data.edge_index.shape[1]} edges")
-        self._log(f"  Accessibility features: {graph_data.x.shape[1]}")
-        self._log(f"  Context features: {graph_data.context.shape[1]}")
+        self._log(f" Accessibility features: {graph_data.x.shape[1]}")
+        self._log(f" Context features: {graph_data.context.shape[1]}")
         
         self._log(f"Built graph: {graph_data.x.shape[0]} nodes, {graph_data.edge_index.shape[1]} edges")
         
@@ -370,7 +372,7 @@ class GRANITEPipeline:
                 output_dir=os.path.join(self.output_dir, 'accessibility_validation')
             )
         except Exception as e:
-            self._log(f"WARNING: Accessibility validation failed: {str(e)}")
+            self._log(f"Accessibility validation failed: {str(e)}", level='WARN')
             access_validation_results = {'error': str(e)}
         
         # Spatial diagnostics
@@ -396,7 +398,7 @@ class GRANITEPipeline:
                 )
                 validation_results['integrated_analysis'] = integrated_results
             except Exception as e:
-                self._log(f"WARNING: Integration failed: {str(e)}")
+                self._log(f"Integration failed: {str(e)}", level='WARN')
         
         validation_results['accessibility_validation'] = access_validation_results
         
@@ -493,12 +495,12 @@ class GRANITEPipeline:
                     output_path=plot_path
                 )
             except Exception as e:
-                self._log(f"Warning: Visualization failed: {e}")
+                self._log(f"Visualization failed: {e}", level='WARN')
             
             return results
             
         except Exception as e:
-            self._log(f"Warning: Baseline comparison failed: {e}")
+            self._log(f"Baseline comparison failed: {e}", level='WARN')
             import traceback
             traceback.print_exc()
             return {'error': str(e)}
@@ -512,7 +514,7 @@ class GRANITEPipeline:
             from ..models.gnn import AccessibilitySVIGNN, MultiTractGNNTrainer, normalize_accessibility_features
             import torch
             import pandas as pd
-            import numpy as np  # NEEDED for np.mean()
+            import numpy as np 
             
             # Normalize features (same as single-tract)
             normalized_features, feature_scaler = normalize_accessibility_features(graph_data.x.numpy())
@@ -560,7 +562,7 @@ class GRANITEPipeline:
             self._log(f"Training on {len(tract_svis)} tracts:")
             for fips, svi in tract_svis.items():
                 n_addrs = tract_masks[fips].sum()
-                self._log(f"  {fips}: {n_addrs} addresses, SVI={svi:.4f}")
+                self._log(f" {fips}: {n_addrs} addresses, SVI={svi:.4f}")
             
             # Train with multi-tract constraints
             training_result = trainer.train(
@@ -568,8 +570,7 @@ class GRANITEPipeline:
                 tract_svis=tract_svis,
                 tract_masks=tract_masks,
                 epochs=epochs,
-                verbose=self.verbose,
-                feature_names=feature_names 
+                verbose=self.verbose
             )
             
             # Get raw predictions from training
@@ -588,22 +589,19 @@ class GRANITEPipeline:
             spatial_std = training_result['final_spatial_std']
             
             self._log(f"Multi-tract training completed:")
-            self._log(f"  Overall constraint error: {overall_error:.2f}%")
-            self._log(f"  Spatial variation: {spatial_std:.4f}")
-            self._log(f"  Epochs: {training_result['epochs_trained']}")
+            self._log(f" Overall constraint error: {overall_error:.2f}%")
+            self._log(f" Spatial variation: {spatial_std:.4f}")
+            self._log(f" Epochs: {training_result['epochs_trained']}")
             
             # Show per-tract errors
             self._log("Per-tract constraint errors:")
             for fips, error in training_result['per_tract_errors'].items():
-                self._log(f"  {fips}: {error:.2f}%")
+                self._log(f" {fips}: {error:.2f}%")
             
             # Quality assessment
-            if overall_error < 10 and spatial_std > 0.01:
-                self._log("Multi-tract training quality: GOOD")
-            elif overall_error < 25:
-                self._log("Multi-tract training quality: ACCEPTABLE")
-            else:
-                self._log("Multi-tract training quality: POOR")
+            quality = "good" if overall_error < 10 and spatial_std > 0.01 else \
+                      "acceptable" if overall_error < 25 else "poor"
+            self._log(f"Multi-tract training quality: {quality}")
             
             return {
                 'success': True,
@@ -690,7 +688,7 @@ class GRANITEPipeline:
         
         # Handle edge case where actual features don't match expected
         if len(feature_names) != n_features:
-            self._log(f"WARNING: Generated {len(feature_names)} names but have {n_features} features")
+            self._log(f"Generated {len(feature_names)} names but have {n_features} features", level='WARN')
             # Pad with generic names if needed
             while len(feature_names) < n_features:
                 feature_names.append(f'feature_{len(feature_names)}')
@@ -759,13 +757,7 @@ class GRANITEPipeline:
                     }
                     self._log("Using original county-wide destinations (tract enhancement disabled)")
                 except Exception as e:
-                    self._log(f"Warning: Could not create tract-appropriate destinations: {str(e)}")
-                    # Fallback to original destinations
-                    destinations = {
-                        'employment': data['employment_destinations'],
-                        'healthcare': data['healthcare_destinations'],
-                        'grocery': data['grocery_destinations']
-                    }
+                    raise RuntimeError(f"Failed to create destinations for tract {target_fips}: {e}")
             else:
                 destinations = {
                     'employment': data['employment_destinations'],
@@ -777,7 +769,7 @@ class GRANITEPipeline:
             validated_destinations = {}
             for dest_type, dest_gdf in destinations.items():
                 if dest_gdf is None or len(dest_gdf) == 0:
-                    self._log(f"ERROR: No {dest_type} destinations available")
+                    self._log(f"No {dest_type} destinations available",level='ERROR')
                     return None
                 
                 # Ensure proper columns exist
@@ -787,7 +779,7 @@ class GRANITEPipeline:
                     dest_gdf_copy['dest_id'] = range(len(dest_gdf_copy))
                 
                 validated_destinations[dest_type] = dest_gdf_copy
-                self._log(f"  {dest_type}: {len(dest_gdf_copy)} destinations")
+                self._log(f" {dest_type}: {len(dest_gdf_copy)} destinations")
             
             destinations = validated_destinations
 
@@ -803,7 +795,7 @@ class GRANITEPipeline:
                 )
                 
                 if cached_complete is not None:
-                    self._log(f"✓ Retrieved COMPLETE accessibility features from cache ({cached_complete.shape[0]} addresses)")
+                    self._log(f"Retrieved COMPLETE accessibility features from cache ({cached_complete.shape[0]} addresses)")
                     return cached_complete
             
             # CHANGE 2: Calculate features for all destination types with error handling
@@ -812,7 +804,7 @@ class GRANITEPipeline:
             successful_computations = 0
             
             for dest_type, dest_gdf in destinations.items():
-                self._log(f"  Processing {dest_type} accessibility...")
+                self._log(f" Processing {dest_type} accessibility...")
                 
                 try:
                     # ADD THIS: Check cache for this specific destination type
@@ -828,7 +820,7 @@ class GRANITEPipeline:
                         )
                         
                         if cached_features is not None:
-                            self._log(f"  ✓ Retrieved {dest_type} features from cache")
+                            self._log(f"  Retrieved {dest_type} features from cache")
                             all_features.append(cached_features)
                             feature_names.extend([
                                 f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_median_time',
@@ -847,24 +839,24 @@ class GRANITEPipeline:
 
                     # Validate travel times before feature extraction
                     if not accessibility_computer._validate_distance_time_relationship(travel_times):
-                        self._log(f"ERROR: Travel time validation failed for {dest_type}")
+                        self._log(f"Travel time validation failed for {dest_type}",level='ERROR')
                         continue
                         
                     # Validate destination counts
                     if not accessibility_computer._validate_destination_counts_fixed(travel_times):
-                        self._log(f"ERROR: Destination count validation failed for {dest_type}")
+                        self._log(f"Destination count validation failed for {dest_type}",level='ERROR')
                         continue
                     
                     if len(travel_times) == 0:
-                        self._log(f"ERROR: No travel times computed for {dest_type}")
+                        self._log(f"No travel times computed for {dest_type}",level='ERROR')
                         continue
                     
                     # Debug - Show sample travel times
                     if self.verbose and len(travel_times) > 0:
                         sample = travel_times.head(3)
-                        self._log(f"  Sample {dest_type} travel times:")
+                        self._log(f" Sample {dest_type} travel times:")
                         for _, row in sample.iterrows():
-                            self._log(f"    Origin {row['origin_id']} -> Dest {row['dest_id']}: "
+                            self._log(f"   Origin {row['origin_id']} -> Dest {row['dest_id']}: "
                                     f"{row['combined_time']:.1f}min ({row['best_mode']})")
                     
                     dest_features = accessibility_computer.extract_enhanced_accessibility_features(
@@ -875,20 +867,20 @@ class GRANITEPipeline:
                     )
                     
                     if dest_features is None or dest_features.size == 0:
-                        self._log(f"ERROR: No features extracted for {dest_type}")
+                        self._log(f"No features extracted for {dest_type}",level='ERROR')
                         continue
                     
                     # Check feature dimensions
                     expected_addresses = len(addresses)
                     if dest_features.shape[0] != expected_addresses:
-                        self._log(f"ERROR: Feature count mismatch for {dest_type}: "
-                                f"got {dest_features.shape[0]}, expected {expected_addresses}")
+                        self._log(f"Feature count mismatch for {dest_type}: "
+                                f"got {dest_features.shape[0]}, expected {expected_addresses}",level='ERROR')
                         continue
 
                     # Expect 24 features per destination type
                     if dest_features.shape[1] != 24:
-                        self._log(f"WARNING: Unexpected feature count for {dest_type}: "
-                                f"got {dest_features.shape[1]}, expected 24")
+                        self._log(f"Unexpected feature count for {dest_type}: "
+                                f"got {dest_features.shape[1]}, expected 24", level='WARN')
 
                     # Remove zero-variance features instead of rejecting everything
                     feature_stds = np.std(dest_features, axis=0)
@@ -896,7 +888,7 @@ class GRANITEPipeline:
                     zero_var_count = np.sum(zero_var_mask)
 
                     if zero_var_count > 0:
-                        self._log(f"WARNING: {dest_type} has {zero_var_count} zero-variance features (keeping for consistency)")
+                        self._log(f"{dest_type} has {zero_var_count} zero-variance features (keeping for consistency)", level='WARN')
                         
                         # Identify which features
                         feature_names_temp = [
@@ -907,11 +899,11 @@ class GRANITEPipeline:
                         
                         for i, has_zero_var in enumerate(zero_var_mask):
                             if has_zero_var and i < len(feature_names_temp):
-                                self._log(f"  Zero variance: {dest_type}_{feature_names_temp[i]}")
+                                self._log(f" Zero variance: {dest_type}_{feature_names_temp[i]}")
                         
                         # If we removed all features, that's a real error
                         if dest_features.shape[1] == 0:
-                            self._log(f"ERROR: All {dest_type} features have zero variance")
+                            self._log(f"All {dest_type} features have zero variance",level='ERROR')
                             continue
                     
                     all_features.append(dest_features)
@@ -948,10 +940,11 @@ class GRANITEPipeline:
                     self._log(f"Traceback: {traceback.format_exc()}")
                     continue
             
-            # Ensure we have features
             if successful_computations == 0:
-                self._log("CRITICAL ERROR: No accessibility features could be computed for any destination type")
-                return None
+                raise RuntimeError(
+                    "No accessibility features computed. Verify that destination data "
+                    "is available and OSRM servers are running."
+                )
             
             if accessibility_computer.cache is not None and successful_computations >= 2:
                 try:
@@ -1028,7 +1021,7 @@ class GRANITEPipeline:
                         address_tract_ids=address_tract_ids
                     )
                     
-                    self._log(f"✓ Generated {modal_features.shape[1]} modal features")
+                    self._log(f"Generated {modal_features.shape[1]} modal features")
                     
                 except Exception as e:
                     self._log(f"ERROR computing modal features: {str(e)}")
@@ -1047,8 +1040,8 @@ class GRANITEPipeline:
                     complete_feature_names = feature_names
 
                 self._log(f"Final feature matrix: {final_features.shape}")
-                self._log(f"  Base accessibility: {accessibility_matrix.shape[1]}")
-                self._log(f"  Modal features: {modal_features.shape[1]}")
+                self._log(f" Base accessibility: {accessibility_matrix.shape[1]}")
+                self._log(f" Modal features: {modal_features.shape[1]}")
                 
             except Exception as e:
                 self._log(f"ERROR combining features: {str(e)}")
@@ -1064,13 +1057,13 @@ class GRANITEPipeline:
             
             if np.any(np.isnan(final_features)):
                 nan_count = np.sum(np.isnan(final_features))
-                self._log(f"ERROR: {nan_count} NaN values in feature matrix")
+                self._log(f"{nan_count} NaN values in feature matrix",level='ERROR')
                 # Try to handle NaN values
                 final_features = np.nan_to_num(final_features, nan=0.0)
             
             if np.any(np.isinf(final_features)):
                 inf_count = np.sum(np.isinf(final_features))
-                self._log(f"ERROR: {inf_count} infinite values in feature matrix")
+                self._log(f"{inf_count} infinite values in feature matrix",level='ERROR')
                 final_features = np.nan_to_num(final_features, posinf=999.0, neginf=-999.0)
             
             # Check variance and remove zero-variance features
@@ -1078,14 +1071,14 @@ class GRANITEPipeline:
             zero_var_count = np.sum(zero_var_mask)
 
             if zero_var_count > 0:
-                self._log(f"WARNING: {zero_var_count} features have zero variance (keeping for consistency)")
+                self._log(f"{zero_var_count} features have zero variance (keeping for consistency)", level='WARN')
                 
                 # Debug zero variance features
                 for i in range(final_features.shape[1]):
                     if zero_var_mask[i]:
                         feature_name = complete_feature_names[i] if i < len(complete_feature_names) else f"feature_{i}"
                         unique_vals = len(np.unique(final_features[:, i]))
-                        self._log(f"  Zero-variance feature: {feature_name}: {unique_vals} unique values, std={np.std(final_features[:, i]):.8f}")
+                        self._log(f" Zero-variance feature: {feature_name}: {unique_vals} unique values, std={np.std(final_features[:, i]):.8f}")
                 
                 self._log(f"Keeping all {final_features.shape[1]} features (including {zero_var_count} zero-variance)")
             
@@ -1100,11 +1093,11 @@ class GRANITEPipeline:
                     negative_features.append(f"{feature_name}: {negative_count} negative values")
             
             if negative_features:
-                self._log(f"WARNING: Unexpected negative values in: {negative_features[:3]}")  # Show first 3
+                self._log(f"Unexpected negative values in: {negative_features[:3]}", level='WARN')  # Show first 3
             else:
-                self._log("✓ No unexpected negative values detected")
+                self._log(" No unexpected negative values detected")
             
-            self._log("✓ All features have proper variance")
+            self._log(" All features have proper variance")
             self._log(f"SUCCESS: Generated {final_features.shape[1]} features for {final_features.shape[0]} addresses")
             
             enhanced_features = final_features
@@ -1125,13 +1118,13 @@ class GRANITEPipeline:
             quality_score = validation_results['overall_quality']['overall_score']
             
             self._log(f"Feature enhancement completed:")
-            self._log(f"  Original features: {original_feature_count}")
-            self._log(f"  Enhanced features: {final_feature_count}")
-            self._log(f"  Quality grade: {quality_grade} ({quality_score:.1f}%)")
+            self._log(f" Original features: {original_feature_count}")
+            self._log(f" Enhanced features: {final_feature_count}")
+            self._log(f" Quality grade: {quality_grade} ({quality_score:.1f}%)")
             
             # Warn if quality is poor
             if quality_grade in ['D', 'F']:
-                self._log(f"WARNING: Feature quality is poor - consider investigating")
+                self._log(f"Feature quality is poor - consider investigating", level='WARN')
                 
             # Debug first 5 addresses
             if self.verbose and dest_type == 'employment':
@@ -1173,7 +1166,7 @@ class GRANITEPipeline:
                         str(tract_fips), data['svi']
                     )
                     
-                    self._log(f"  Tract {tract_fips}: no_vehicle={tract_features['pct_no_vehicle']:.1f}%, poverty={tract_features['pct_poverty']:.1f}%")
+                    self._log(f" Tract {tract_fips}: no_vehicle={tract_features['pct_no_vehicle']:.1f}%, poverty={tract_features['pct_poverty']:.1f}%")
                     
                     # Assign to addresses in this tract
                     socioeco_array[tract_mask] = list(tract_features.values())
@@ -1190,13 +1183,13 @@ class GRANITEPipeline:
             combined_features = np.column_stack([enhanced_features, socioeco_array])
             
             self._log(f"Final feature matrix: {combined_features.shape}")
-            self._log(f"  Accessibility features: {enhanced_features.shape[1]}")
-            self._log(f"  Socioeconomic controls: {socioeco_array.shape[1]}")
-            self._log(f"  Breakdown:")
-            self._log(f"    Base accessibility: 30")
-            self._log(f"    Modal features: 15")
-            self._log(f"    Socioeconomic: 9")
-            self._log(f"    Total: {combined_features.shape[1]}")
+            self._log(f" Accessibility features: {enhanced_features.shape[1]}")
+            self._log(f" Socioeconomic controls: {socioeco_array.shape[1]}")
+            self._log(f" Breakdown:")
+            self._log(f"   Base accessibility: 30")
+            self._log(f"   Modal features: 15")
+            self._log(f"   Socioeconomic: 9")
+            self._log(f"   Total: {combined_features.shape[1]}")
 
             if accessibility_computer.cache is not None:
                 addr_hash, dest_hashes = _generate_cache_key(addresses, destinations)
@@ -1209,12 +1202,12 @@ class GRANITEPipeline:
                     threshold=0,
                     origins_hash=cache_key
                 )
-                self._log(f"✓ Cached complete feature matrix for reuse")
+                self._log(f"Cached complete feature matrix for reuse")
             
             return combined_features
             
         except Exception as e:
-            self._log(f"CRITICAL ERROR in accessibility computation: {str(e)}")
+            self._log(f"Failure in accessibility computation: {str(e)}", level='ERROR')
             import traceback
             self._log(f"Full traceback: {traceback.format_exc()}")
             return None
@@ -1256,37 +1249,37 @@ class GRANITEPipeline:
             batch_key = f"batch_{batch_idx:02d}_" + "_".join(batch_tracts)
             
             self._log(f"\nBatch {batch_idx + 1}/{n_batches}: {len(batch_tracts)} tracts")
-            self._log(f"  Tracts: {', '.join(batch_tracts)}")
+            self._log(f" Tracts: {', '.join(batch_tracts)}")
             
             # Filter addresses for this batch
             batch_mask = addresses_df['tract_fips'].isin(batch_tracts)
             batch_addresses = addresses_df[batch_mask].copy()
             
-            self._log(f"  Addresses: {len(batch_addresses)}")
+            self._log(f" Addresses: {len(batch_addresses)}")
             
             # Try to load cached batch result
             batch_features = self._load_batch_cache(batch_addresses, batch_key, data)
             
             if batch_features is not None:
-                self._log(f"  ✓ Loaded from batch cache ({batch_features.shape})")
+                self._log(f"  Loaded from batch cache ({batch_features.shape})")
                 all_batch_features.append(batch_features)
                 continue
             
             # Compute features for this batch
             try:
-                self._log(f"  Computing accessibility features...")
+                self._log(f" Computing accessibility features...")
                 batch_features = self._compute_accessibility_features(batch_addresses, data)
                 
                 if batch_features is None or batch_features.size == 0:
-                    self._log(f"  ERROR: Failed to compute features for batch {batch_idx}")
+                    self._log(f" ERROR: Failed to compute features for batch {batch_idx}")
                     return None
                 
                 # Validate dimensions
                 if batch_features.shape[0] != len(batch_addresses):
-                    self._log(f"  ERROR: Feature count mismatch for batch {batch_idx}")
+                    self._log(f" ERROR: Feature count mismatch for batch {batch_idx}")
                     return None
                 
-                self._log(f"  ✓ Computed {batch_features.shape} features")
+                self._log(f"  Computed {batch_features.shape} features")
                 
                 # Cache the batch result
                 self._save_batch_cache(batch_addresses, batch_features, batch_key)
@@ -1294,9 +1287,9 @@ class GRANITEPipeline:
                 all_batch_features.append(batch_features)
                 
             except Exception as e:
-                self._log(f"  ERROR: Failed to process batch {batch_idx}: {str(e)}")
+                self._log(f" ERROR: Failed to process batch {batch_idx}: {str(e)}")
                 import traceback
-                self._log(f"  Traceback: {traceback.format_exc()}")
+                self._log(f" Traceback: {traceback.format_exc()}")
                 return None
         
         # Concatenate all batch results
@@ -1309,7 +1302,7 @@ class GRANITEPipeline:
         
         combined_features = np.vstack(all_batch_features)
         
-        self._log(f"✓ Combined features: {combined_features.shape}")
+        self._log(f"Combined features: {combined_features.shape}")
         self._log(f"{'='*80}\n")
         
         return combined_features
@@ -1356,7 +1349,7 @@ class GRANITEPipeline:
         
         except Exception as e:
             if self.verbose:
-                self._log(f"  Cache lookup failed: {str(e)}")
+                self._log(f" Cache lookup failed: {str(e)}")
             return None
 
     def _save_batch_cache(self, batch_addresses, batch_features, batch_key):
@@ -1585,13 +1578,13 @@ class GRANITEPipeline:
             spatial_std = np.std(predictions)
             
             self._log(f"Training completed:")
-            self._log(f"  Constraint error: {constraint_error:.2f}%")
-            self._log(f"  Spatial variation: {spatial_std:.4f}")
-            self._log(f"  Learning converged: {training_result.get('learning_converged', False)}")
+            self._log(f" Constraint error: {constraint_error:.2f}%")
+            self._log(f" Spatial variation: {spatial_std:.4f}")
+            self._log(f" Learning converged: {training_result.get('learning_converged', False)}")
             
             # Quality assessment
             if constraint_error < 10 and spatial_std > 0.01:
-                self._log("✓ Training quality: GOOD")
+                self._log(" Training quality: GOOD")
             elif constraint_error < 25:
                 self._log("⚠ Training quality: ACCEPTABLE")
             else:
@@ -1645,9 +1638,9 @@ class GRANITEPipeline:
         pre_correction_error = abs(current_mean - tract_svi) / tract_svi * 100
         
         self._log(f"Pre-correction analysis:")
-        self._log(f"  Raw mean: {current_mean:.4f}")
-        self._log(f"  Target: {tract_svi:.4f}")  
-        self._log(f"  Pre-correction constraint error: {pre_correction_error:.2f}%")
+        self._log(f" Raw mean: {current_mean:.4f}")
+        self._log(f" Target: {tract_svi:.4f}")  
+        self._log(f" Pre-correction constraint error: {pre_correction_error:.2f}%")
         
         # # Apply constraint correction
         adjustment = tract_svi - current_mean
@@ -1663,16 +1656,16 @@ class GRANITEPipeline:
         final_error = abs(final_mean - tract_svi) / tract_svi * 100
         
         self._log(f"Raw prediction analysis (NO post-correction):")
-        self._log(f"  Raw mean: {final_mean:.4f}")
-        self._log(f"  Target: {tract_svi:.4f}")
-        self._log(f"  Constraint error: {final_error:.2f}%")
+        self._log(f" Raw mean: {final_mean:.4f}")
+        self._log(f" Target: {tract_svi:.4f}")
+        self._log(f" Constraint error: {final_error:.2f}%")
         
         # Assess raw prediction quality
         if final_error > 10:
-            self._log(f"WARNING: High constraint error ({final_error:.2f}%) suggests model not learning tract mean")
+            self._log(f"High constraint error ({final_error:.2f}%) suggests model not learning tract mean", level='WARN')
         
         if pre_correction_error > 50:
-            self._log(f"WARNING: Very high error suggests fundamental model issues")
+            self._log(f"Very high error suggests fundamental model issues", level='WARN')
         
         # Extract coordinates
         x_coords = np.array([addr.geometry.x for _, addr in addresses.iterrows()])
@@ -1707,7 +1700,7 @@ class GRANITEPipeline:
         })
         
         self._log(f"Finalized predictions (RAW, uncorrected): {len(final_predictions)} addresses")
-        self._log(f"  Final spatial std: {np.std(adjusted_predictions):.4f}")
+        self._log(f" Final spatial std: {np.std(adjusted_predictions):.4f}")
         
         final_predictions.reset_index(drop=True, inplace=True)
         
@@ -1762,7 +1755,7 @@ class GRANITEPipeline:
         self._log(f"Actual tract SVI: {tract_svi:.4f}")
         self._log(f"Predicted mean (unconstrained): {predicted_mean:.4f}")
         self._log(f"Mean error: {mean_error_pct:.2f}%")
-        self._log(f"Natural convergence: {'YES ✓' if natural_convergence else 'NO ✗'}")
+        self._log(f"Natural convergence: {'YES ' if natural_convergence else 'NO ✗'}")
         self._log(f"Prediction std: {predicted_std:.4f}")
         self._log(f"Accessibility-SVI correlation: {correlation:.4f}")
         
@@ -2062,9 +2055,9 @@ class GRANITEPipeline:
         }
         
         self._log("Standard Validation Results:")
-        self._log(f"  Final constraint error: {constraint_error:.2f}%")
-        self._log(f"  Final spatial variation: {spatial_std:.4f}")
-        self._log(f"  Final accessibility-SVI correlation: {accessibility_svi_correlations.get('overall', 'N/A')}")
+        self._log(f" Final constraint error: {constraint_error:.2f}%")
+        self._log(f" Final spatial variation: {spatial_std:.4f}")
+        self._log(f" Final accessibility-SVI correlation: {accessibility_svi_correlations.get('overall', 'N/A')}")
         
         return validation_results
     
@@ -2129,7 +2122,92 @@ class GRANITEPipeline:
             self._log(f"Research visualizations saved to {viz_output_dir}")
             
         except Exception as e:
-            self._log(f"Warning: Could not create visualizations: {str(e)}")
+            self._log(f"Could not create visualizations: {str(e)}", level='WARN')
+
+    def _plot_error_by_svi_quintile(self, results, output_dir):
+        """Stratify errors by SVI quintile to show model performance patterns."""
+        import matplotlib.pyplot as plt
+        
+        # Extract data
+        data = []
+        for fips, r in results.items():
+            data.append({
+                'fips': fips,
+                'svi': r['actual_svi'],
+                'error': r['mean_error_pct'],
+                'variation': np.std(r['predictions']),
+                'raw_error': abs(np.mean(r.get('raw_predictions', r['predictions'])) - r['actual_svi']) / r['actual_svi'] * 100
+            })
+        
+        df = pd.DataFrame(data)
+        
+        # Create quintiles
+        df['quintile'] = pd.qcut(df['svi'], q=5, labels=['Q1 (Low)', 'Q2', 'Q3', 'Q4', 'Q5 (High)'])
+        
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle('Model Performance by SVI Quintile', fontsize=14, fontweight='bold')
+        
+        # Panel 1: Box plot of errors by quintile
+        ax1 = axes[0, 0]
+        df.boxplot(column='error', by='quintile', ax=ax1)
+        ax1.set_xlabel('SVI Quintile')
+        ax1.set_ylabel('Constraint Error (%)')
+        ax1.set_title('Error Distribution by Quintile')
+        ax1.axhline(y=20, color='green', linestyle='--', alpha=0.7)
+        plt.suptitle('')  # Remove automatic title
+        
+        # Panel 2: Mean error with CI by quintile
+        ax2 = axes[0, 1]
+        quintile_stats = df.groupby('quintile')['error'].agg(['mean', 'std', 'count'])
+        quintile_stats['se'] = quintile_stats['std'] / np.sqrt(quintile_stats['count'])
+        
+        x = range(len(quintile_stats))
+        ax2.bar(x, quintile_stats['mean'], yerr=quintile_stats['se'] * 1.96, 
+            capsize=5, color='steelblue', alpha=0.7, edgecolor='black')
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(quintile_stats.index)
+        ax2.set_xlabel('SVI Quintile')
+        ax2.set_ylabel('Mean Error (%) ± 95% CI')
+        ax2.set_title('Mean Constraint Error by Quintile')
+        ax2.grid(True, alpha=0.3)
+        
+        # Panel 3: Spatial variation by quintile
+        ax3 = axes[1, 0]
+        df.boxplot(column='variation', by='quintile', ax=ax3)
+        ax3.set_xlabel('SVI Quintile')
+        ax3.set_ylabel('Spatial Variation (std)')
+        ax3.set_title('Disaggregation Quality by Quintile')
+        plt.suptitle('')
+        
+        # Panel 4: Summary table
+        ax4 = axes[1, 1]
+        ax4.axis('off')
+        
+        summary_df = df.groupby('quintile').agg({
+            'svi': ['min', 'max'],
+            'error': ['mean', 'median'],
+            'variation': 'mean'
+        }).round(3)
+        
+        table_text = "QUINTILE ANALYSIS\n" + "="*50 + "\n\n"
+        table_text += f"{'Quintile':<12} {'SVI Range':<15} {'Mean Err%':<12} {'Med Err%':<12} {'Variation':<10}\n"
+        table_text += "-"*60 + "\n"
+        
+        for q in ['Q1 (Low)', 'Q2', 'Q3', 'Q4', 'Q5 (High)']:
+            if q in summary_df.index:
+                row = summary_df.loc[q]
+                table_text += f"{q:<12} {row[('svi', 'min')]:.2f}-{row[('svi', 'max')]:.2f}    "
+                table_text += f"{row[('error', 'mean')]:<12.1f} {row[('error', 'median')]:<12.1f} "
+                table_text += f"{row[('variation', 'mean')]:.4f}\n"
+        
+        ax4.text(0.05, 0.95, table_text, transform=ax4.transAxes, fontsize=10,
+                verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.5))
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'error_by_svi_quintile.png'), 
+                dpi=300, bbox_inches='tight')
+        plt.close()
 
     def _create_disaggregation_visualizations(self, test_results, training_results=None,
                                                expert_usage=None, tract_gdf=None, all_addresses=None):
@@ -2180,13 +2258,130 @@ class GRANITEPipeline:
             
             # 5. Constraint satisfaction analysis
             self._plot_constraint_analysis(valid_results, viz_dir)
+
+            # 6. Raw vs corrected analysis 
+            self._plot_raw_vs_corrected_analysis(valid_results, viz_dir)
+
+            # 7. Error stratified by SVI quintile
+            self._plot_error_by_svi_quintile(valid_results, viz_dir)
+
+            # 8. Feature transparency analysis
+            # Aggregate features from all test tracts
+            all_features = np.vstack([r['features'] for r in valid_results.values() if 'features' in r])
+            all_predictions = np.concatenate([r['predictions'] for r in valid_results.values()])
+
+            feature_analysis = self._analyze_feature_usage(
+                features=all_features,
+                feature_names=self._generate_feature_names(all_features.shape[1]),
+                predictions=all_predictions,
+                output_dir=output_dir
+            )
+            self._plot_feature_transparency(feature_analysis, output_dir)
             
             self._log(f"Visualizations saved to {viz_dir}")
             
         except Exception as e:
-            self._log(f"Warning: Visualization generation failed: {e}")
+            self._log(f"Visualization generation failed: {e}", level='WARN')
             import traceback
             traceback.print_exc()
+
+    def _plot_raw_vs_corrected_analysis(self, results, output_dir):
+        """Show constraint errors before and after correction."""
+        import matplotlib.pyplot as plt
+        
+        fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+        fig.suptitle('Raw vs Corrected Predictions (Constraint Correction Analysis)', 
+                    fontsize=14, fontweight='bold')
+        
+        fips_list = list(results.keys())
+        raw_errors, corrected_errors = [], []
+        raw_stds, corrected_stds = [], []
+        
+        for f in fips_list:
+            actual = results[f]['actual_svi']
+            raw = results[f].get('raw_predictions', results[f]['predictions'])
+            corrected = results[f]['predictions']
+            
+            raw_mean = np.mean(raw)
+            corrected_mean = np.mean(corrected)
+            
+            raw_err = abs(raw_mean - actual) / actual * 100
+            corr_err = abs(corrected_mean - actual) / actual * 100
+            
+            raw_errors.append(raw_err)
+            corrected_errors.append(corr_err)
+            raw_stds.append(np.std(raw))
+            corrected_stds.append(np.std(corrected))
+        
+        # Panel 1: Error reduction
+        ax1 = axes[0, 0]
+        x = np.arange(len(fips_list))
+        width = 0.35
+        ax1.bar(x - width/2, raw_errors, width, label='Raw', color='#E57373', alpha=0.8)
+        ax1.bar(x + width/2, corrected_errors, width, label='Corrected', color='#81C784', alpha=0.8)
+        ax1.set_ylabel('Constraint Error (%)')
+        ax1.set_title('Constraint Satisfaction: Raw vs Corrected')
+        ax1.set_xticks(x)
+        ax1.set_xticklabels([f[-5:] for f in fips_list], rotation=45)
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Panel 2: Variation preservation
+        ax2 = axes[0, 1]
+        ax2.scatter(raw_stds, corrected_stds, c=raw_errors, cmap='RdYlGn_r', 
+                s=100, edgecolors='black')
+        max_std = max(max(raw_stds), max(corrected_stds)) * 1.1
+        ax2.plot([0, max_std], [0, max_std], 'k--', alpha=0.5)
+        ax2.set_xlabel('Raw Prediction Std')
+        ax2.set_ylabel('Corrected Prediction Std')
+        ax2.set_title('Spatial Variation Preservation')
+        ax2.grid(True, alpha=0.3)
+        cbar = plt.colorbar(ax2.collections[0], ax=ax2)
+        cbar.set_label('Raw Error %')
+        
+        # Panel 3: Distribution of raw errors
+        ax3 = axes[1, 0]
+        ax3.hist(raw_errors, bins=15, color='#E57373', alpha=0.7, edgecolor='black')
+        ax3.axvline(np.mean(raw_errors), color='red', linestyle='--', 
+                label=f'Mean: {np.mean(raw_errors):.1f}%')
+        ax3.set_xlabel('Raw Constraint Error (%)')
+        ax3.set_ylabel('Count')
+        ax3.set_title('Raw Error Distribution (Pre-Correction)')
+        ax3.legend()
+        
+        # Panel 4: Summary
+        ax4 = axes[1, 1]
+        ax4.axis('off')
+        summary = f"""
+    RAW VS CORRECTED ANALYSIS
+    {'='*40}
+
+    RAW PREDICTIONS (Model Output)
+    Mean Error: {np.mean(raw_errors):.1f}%
+    Median Error: {np.median(raw_errors):.1f}%
+    Tracts < 20%: {sum(1 for e in raw_errors if e < 20)}/{len(raw_errors)}
+
+    CORRECTED PREDICTIONS (Post-Constraint)
+    Mean Error: {np.mean(corrected_errors):.1f}%
+    Tracts < 10%: {sum(1 for e in corrected_errors if e < 10)}/{len(corrected_errors)}
+
+    VARIATION PRESERVATION
+    Mean Raw Std: {np.mean(raw_stds):.4f}
+    Mean Corrected Std: {np.mean(corrected_stds):.4f}
+    Std Ratio: {np.mean(corrected_stds)/np.mean(raw_stds):.2f}
+
+    INTERPRETATION
+    Post-hoc correction shifts mean but
+    preserves learned spatial patterns.
+    """
+        ax4.text(0.05, 0.95, summary, transform=ax4.transAxes, fontsize=11,
+                verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9))
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'raw_vs_corrected_analysis.png'), 
+                dpi=300, bbox_inches='tight')
+        plt.close()
 
     def _plot_aggregate_baseline_comparison(self, results, output_dir):
         """Create aggregate baseline comparison dashboard."""
@@ -2320,6 +2515,192 @@ ACCESSIBILITY-VULNERABILITY
         plt.close()
         self._log("  Created: disaggregation_dashboard.png")
 
+    def _analyze_feature_usage(self, features, feature_names, predictions, output_dir):
+        """
+        Comprehensive feature usage analysis for transparency.
+        
+        Generates:
+        - Feature correlation matrix with SVI proxy
+        - Top contributing features ranked
+        - Feature group summaries (by destination type)
+        - Unused/low-variance feature identification
+        """
+        from scipy.stats import pearsonr, spearmanr
+        
+        n_features = features.shape[1]
+        
+        # Generate feature names if not provided
+        if feature_names is None or len(feature_names) != n_features:
+            feature_names = self._generate_feature_names(n_features)
+        
+        # Feature statistics
+        feature_stats = []
+        for i, name in enumerate(feature_names):
+            values = features[:, i]
+            corr_pred, p_pred = pearsonr(values, predictions)
+            
+            stats = {
+                'feature': name,
+                'mean': np.mean(values),
+                'std': np.std(values),
+                'range': np.ptp(values),
+                'prediction_corr': corr_pred,
+                'prediction_p': p_pred,
+                'abs_corr': abs(corr_pred)
+            }
+            feature_stats.append(stats)
+        
+        stats_df = pd.DataFrame(feature_stats)
+        stats_df = stats_df.sort_values('abs_corr', ascending=False)
+        
+        # Identify problematic features
+        low_variance = stats_df[stats_df['std'] < 0.01]['feature'].tolist()
+        weak_signal = stats_df[stats_df['abs_corr'] < 0.1]['feature'].tolist()
+        strong_signal = stats_df[stats_df['abs_corr'] > 0.3]['feature'].tolist()
+        
+        # Group by destination type
+        dest_groups = {'employment': [], 'healthcare': [], 'grocery': [], 'modal': [], 'socioeconomic': []}
+        for name in feature_names:
+            for group in dest_groups.keys():
+                if group in name.lower() or (group == 'socioeconomic' and any(x in name for x in ['pct_', 'no_', 'poverty', 'unemployment'])):
+                    dest_groups[group].append(name)
+                    break
+        
+        return {
+            'feature_stats': stats_df,
+            'low_variance_features': low_variance,
+            'weak_signal_features': weak_signal,
+            'strong_signal_features': strong_signal,
+            'destination_groups': dest_groups,
+            'n_features': n_features
+        }
+
+    def _plot_feature_transparency(self, feature_analysis, output_dir):
+        """Create comprehensive feature transparency visualizations."""
+        import matplotlib.pyplot as plt
+        
+        stats_df = feature_analysis['feature_stats']
+        
+        fig = plt.figure(figsize=(20, 16))
+        
+        # Layout: 3 rows, 3 columns
+        gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
+        
+        # Panel 1: Top 20 features by correlation (takes 2 columns)
+        ax1 = fig.add_subplot(gs[0, :2])
+        top20 = stats_df.head(20)
+        colors = ['#2E7D32' if c < 0 else '#D32F2F' for c in top20['prediction_corr']]
+        bars = ax1.barh(range(len(top20)), top20['prediction_corr'], color=colors, edgecolor='black')
+        ax1.set_yticks(range(len(top20)))
+        ax1.set_yticklabels(top20['feature'], fontsize=9)
+        ax1.axvline(x=0, color='black', linewidth=0.5)
+        ax1.set_xlabel('Correlation with Predictions')
+        ax1.set_title('Top 20 Features by Prediction Correlation\n(Green=Negative expected for vulnerability)', fontweight='bold')
+        ax1.grid(True, alpha=0.3, axis='x')
+        ax1.invert_yaxis()
+        
+        # Panel 2: Feature variance distribution
+        ax2 = fig.add_subplot(gs[0, 2])
+        ax2.hist(stats_df['std'], bins=30, color='steelblue', edgecolor='black', alpha=0.7)
+        ax2.axvline(x=0.01, color='red', linestyle='--', label='Low variance threshold')
+        ax2.set_xlabel('Feature Standard Deviation')
+        ax2.set_ylabel('Count')
+        ax2.set_title('Feature Variance Distribution')
+        ax2.legend()
+        
+        # Panel 3: Correlation by feature group
+        ax3 = fig.add_subplot(gs[1, 0])
+        groups = feature_analysis['destination_groups']
+        group_corrs = {}
+        for group, features in groups.items():
+            if features:
+                group_data = stats_df[stats_df['feature'].isin(features)]
+                group_corrs[group] = group_data['abs_corr'].mean()
+        
+        if group_corrs:
+            ax3.bar(range(len(group_corrs)), list(group_corrs.values()), 
+                color='teal', edgecolor='black', alpha=0.7)
+            ax3.set_xticks(range(len(group_corrs)))
+            ax3.set_xticklabels(list(group_corrs.keys()), rotation=45, ha='right')
+            ax3.set_ylabel('Mean |Correlation|')
+            ax3.set_title('Feature Group Importance')
+            ax3.grid(True, alpha=0.3)
+        
+        # Panel 4: Feature type breakdown
+        ax4 = fig.add_subplot(gs[1, 1])
+        # Categorize by type (time, count, modal, etc.)
+        type_counts = {'time': 0, 'count': 0, 'advantage': 0, 'dispersion': 0, 
+                    'modal': 0, 'socioeconomic': 0, 'other': 0}
+        for name in stats_df['feature']:
+            categorized = False
+            for key in type_counts.keys():
+                if key in name.lower():
+                    type_counts[key] += 1
+                    categorized = True
+                    break
+            if not categorized:
+                type_counts['other'] += 1
+        
+        ax4.pie([v for v in type_counts.values() if v > 0], 
+            labels=[k for k, v in type_counts.items() if v > 0],
+            autopct='%1.0f%%', startangle=90)
+        ax4.set_title('Feature Type Distribution')
+        
+        # Panel 5: Unused features alert
+        ax5 = fig.add_subplot(gs[1, 2])
+        ax5.axis('off')
+        
+        weak = feature_analysis['weak_signal_features']
+        low_var = feature_analysis['low_variance_features']
+        strong = feature_analysis['strong_signal_features']
+        
+        alert_text = f"""
+    FEATURE QUALITY SUMMARY
+    {'='*35}
+
+    Total Features: {feature_analysis['n_features']}
+
+    STRONG SIGNAL (|r| > 0.3): {len(strong)}
+    {', '.join(strong[:5])}{'...' if len(strong) > 5 else ''}
+
+    WEAK SIGNAL (|r| < 0.1): {len(weak)}
+    {', '.join(weak[:5])}{'...' if len(weak) > 5 else ''}
+
+    LOW VARIANCE: {len(low_var)}
+    {', '.join(low_var[:3])}{'...' if len(low_var) > 3 else ''}
+
+    RECOMMENDATION:
+    Consider removing {len(weak)} weak features
+    for model simplification.
+    """
+        ax5.text(0.05, 0.95, alert_text, transform=ax5.transAxes, fontsize=10,
+                verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9))
+        
+        # Panel 6: Full correlation heatmap (bottom row, spans all columns)
+        ax6 = fig.add_subplot(gs[2, :])
+        
+        # Show correlation for top 30 features
+        top30 = stats_df.head(30)
+        corr_data = top30[['feature', 'prediction_corr']].set_index('feature')
+        
+        # Create horizontal bar-style heatmap
+        im = ax6.imshow([top30['prediction_corr'].values], cmap='RdYlGn_r', 
+                    aspect='auto', vmin=-0.5, vmax=0.5)
+        ax6.set_yticks([])
+        ax6.set_xticks(range(len(top30)))
+        ax6.set_xticklabels(top30['feature'], rotation=90, fontsize=8)
+        ax6.set_title('Feature-Prediction Correlation Heatmap (Top 30)', fontweight='bold')
+        plt.colorbar(im, ax=ax6, orientation='horizontal', pad=0.2, 
+                    label='Correlation', shrink=0.5)
+        
+        plt.savefig(os.path.join(output_dir, 'feature_transparency.png'), 
+                dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # Also save CSV for inspection
+        stats_df.to_csv(os.path.join(output_dir, 'feature_analysis.csv'), index=False)
+
     def _plot_per_tract_disaggregation(self, results, output_dir):
         """Create per-tract spatial disaggregation maps."""
         import matplotlib.pyplot as plt
@@ -2434,8 +2815,8 @@ ACCESSIBILITY-VULNERABILITY
             
             # Verify prediction count matches
             if len(predictions) != len(tract_addresses):
-                self._log(f"Warning: Prediction count mismatch for {fips}: "
-                         f"{len(predictions)} preds vs {len(tract_addresses)} addresses")
+                self._log(f"Prediction count mismatch for {fips}: "
+                         f"{len(predictions)} preds vs {len(tract_addresses)} addresses", level='WARN')
                 ax.axis('off')
                 ax.text(0.5, 0.5, 
                        f'Mismatch:\n{len(predictions)} preds\n{len(tract_addresses)} addresses', 
@@ -2783,15 +3164,15 @@ ACCESSIBILITY-VULNERABILITY
             # Overall accessibility score (lower times = better access)
             avg_min_time = (emp_min_time + health_min_time + grocery_min_time) / 3
             
-            self._log(f"  Address {addr_id}: SVI={pred_svi:.3f}")
-            self._log(f"    Avg min travel time: {avg_min_time:.1f} min")
-            self._log(f"    Employment: {emp_min_time:.1f}min, {emp_count_5min} jobs in 5min")
-            self._log(f"    Healthcare: {health_min_time:.1f}min")
-            self._log(f"    Grocery: {grocery_min_time:.1f}min")
+            self._log(f" Address {addr_id}: SVI={pred_svi:.3f}")
+            self._log(f"   Avg min travel time: {avg_min_time:.1f} min")
+            self._log(f"   Employment: {emp_min_time:.1f}min, {emp_count_5min} jobs in 5min")
+            self._log(f"   Healthcare: {health_min_time:.1f}min")
+            self._log(f"   Grocery: {grocery_min_time:.1f}min")
             
             # RED FLAG CHECK: If high vulnerability has very good accessibility
             if avg_min_time < 6.0:  # Very good accessibility (< 6min average)
-                self._log(f"    🚨 RED FLAG: High vulnerability but excellent accessibility!")
+                self._log(f"   🚨 RED FLAG: High vulnerability but excellent accessibility!")
         
         self._log("\nLOW VULNERABILITY ADDRESSES (should have GOOD accessibility):")
         
@@ -2806,15 +3187,15 @@ ACCESSIBILITY-VULNERABILITY
             
             avg_min_time = (emp_min_time + health_min_time + grocery_min_time) / 3
             
-            self._log(f"  Address {addr_id}: SVI={pred_svi:.3f}")
-            self._log(f"    Avg min travel time: {avg_min_time:.1f} min")
-            self._log(f"    Employment: {emp_min_time:.1f}min, {emp_count_5min} jobs in 5min")
-            self._log(f"    Healthcare: {health_min_time:.1f}min")  
-            self._log(f"    Grocery: {grocery_min_time:.1f}min")
+            self._log(f" Address {addr_id}: SVI={pred_svi:.3f}")
+            self._log(f"   Avg min travel time: {avg_min_time:.1f} min")
+            self._log(f"   Employment: {emp_min_time:.1f}min, {emp_count_5min} jobs in 5min")
+            self._log(f"   Healthcare: {health_min_time:.1f}min")  
+            self._log(f"   Grocery: {grocery_min_time:.1f}min")
             
             # RED FLAG CHECK: If low vulnerability has very poor accessibility
             if avg_min_time > 12.0:  # Poor accessibility (> 12min average)
-                self._log(f"    🚨 RED FLAG: Low vulnerability but poor accessibility!")
+                self._log(f"   🚨 RED FLAG: Low vulnerability but poor accessibility!")
         
         return {
             'high_vuln_sample': high_vuln_indices,
@@ -2862,11 +3243,11 @@ ACCESSIBILITY-VULNERABILITY
         self._log("THEORETICAL TEST:")
         self._log("Good accessibility profile (should predict LOW vulnerability):")
         for i, (name, val) in enumerate(zip(feature_names[:10], good_access_profile[:10])):  # Show first 10
-            self._log(f"  {name}: {val:.2f}")
+            self._log(f" {name}: {val:.2f}")
         
         self._log("Poor accessibility profile (should predict HIGH vulnerability):")
         for i, (name, val) in enumerate(zip(feature_names[:10], poor_access_profile[:10])):  # Show first 10
-            self._log(f"  {name}: {val:.2f}")
+            self._log(f" {name}: {val:.2f}")
         
         # Calculate what the correlation SHOULD be if features are coded correctly
         # This is a basic sanity check
@@ -3063,7 +3444,7 @@ ACCESSIBILITY-VULNERABILITY
             if corr_info['correct'] is None:
                 status = "?"
             elif corr_info['correct']:
-                status = "✓"
+                status = ""
                 correct_count += 1
             else:
                 status = "✗"
@@ -3071,7 +3452,7 @@ ACCESSIBILITY-VULNERABILITY
             if corr_info['expected'] != "UNKNOWN":
                 known_count += 1
             
-            self._log(f"  {status} {corr_info['feature']}: r={corr_info['correlation']:.3f} "
+            self._log(f" {status} {corr_info['feature']}: r={corr_info['correlation']:.3f} "
                     f"({corr_info['strength']}, expected {corr_info['expected']})")
         
         # Calculate correctness rate only for features with known expected directions
@@ -3087,7 +3468,7 @@ ACCESSIBILITY-VULNERABILITY
             elif correctness_rate < 80:
                 self._log("⚠️  WARNING: Some features may be incorrectly encoded or model is learning confounding patterns")
             else:
-                self._log("✓ Feature directions appear mostly correct")
+                self._log(" Feature directions appear mostly correct")
         else:
             self._log("\n⚠️  WARNING: No features with known expected directions found")
         
@@ -3145,14 +3526,14 @@ ACCESSIBILITY-VULNERABILITY
             addresses = addresses_with_tracts[tract_mask].copy()
             
             if len(addresses) == 0:
-                self._log(f"WARNING: No addresses found for tract {fips}")
+                self._log(f"No addresses found for tract {fips}", level='WARN')
                 continue
             
             # Keep only original columns + tract_fips
             addresses = addresses[['address_id', 'geometry', 'full_address']].copy()
             addresses['tract_fips'] = fips
             train_addresses.append(addresses)
-            print(f"[DEBUG] ✓ Filtered {len(addresses)} addresses from {fips}")
+            print(f"[DEBUG]  Filtered {len(addresses)} addresses from {fips}")
 
             # Store tract SVI
             tract_data = data['tracts'][data['tracts']['FIPS'] == fips]
@@ -3261,7 +3642,7 @@ ACCESSIBILITY-VULNERABILITY
                 )
                 test_results[test_fips] = result
                 
-                self._log(f"  {test_fips}: Error={result['mean_error_pct']:.1f}%, Corr={result['correlation']:.3f}")
+                self._log(f" {test_fips}: Error={result['mean_error_pct']:.1f}%, Corr={result['correlation']:.3f}")
         
         return {
             'success': True,
@@ -3313,7 +3694,7 @@ ACCESSIBILITY-VULNERABILITY
             return results
             
         except Exception as e:
-            self._log(f"    Baseline comparison failed: {e}", level='WARNING')
+            self._log(f"   Baseline comparison failed: {e}", level='WARNING')
             return {'error': str(e)}
 
     def run_mixture_training(self, training_fips_list, test_fips_list):
@@ -3373,7 +3754,7 @@ ACCESSIBILITY-VULNERABILITY
             addresses = addresses_with_tracts[tract_mask].copy()
             
             if len(addresses) == 0:
-                self._log(f"WARNING: No addresses found for tract {fips}")
+                self._log(f"No addresses found for tract {fips}", level='WARN')
                 continue
                 
             addresses = addresses[['address_id', 'geometry', 'full_address']].copy()
@@ -3387,7 +3768,7 @@ ACCESSIBILITY-VULNERABILITY
                 svi = float(tract_data.iloc[0]['RPL_THEMES'])
                 training_svis.append(svi)
                 training_fips_processed.append(fips)
-                self._log(f"  {fips}: SVI={svi:.3f}, {len(addresses)} addresses")
+                self._log(f" {fips}: SVI={svi:.3f}, {len(addresses)} addresses")
         
         if len(all_train_addresses) < 3:
             return {
@@ -3458,7 +3839,7 @@ ACCESSIBILITY-VULNERABILITY
             training_graphs.append(tract_graph)
             current_idx += n_addresses
             
-            self._log(f"  {fips}: {tract_graph.x.shape[0]} nodes, {tract_graph.edge_index.shape[1]} edges")
+            self._log(f" {fips}: {tract_graph.x.shape[0]} nodes, {tract_graph.edge_index.shape[1]} edges")
         
         # 8. Create MoE model
         self._log("\nCreating Mixture of Experts model...")
@@ -3503,7 +3884,7 @@ ACCESSIBILITY-VULNERABILITY
                     test_addresses = addresses_with_tracts[tract_mask].copy()
                     
                     if len(test_addresses) == 0:
-                        self._log(f"  {test_fips}: No addresses, skipping")
+                        self._log(f" {test_fips}: No addresses, skipping")
                         continue
                     
                     test_addresses = test_addresses[['address_id', 'geometry', 'full_address']].copy()
@@ -3582,19 +3963,20 @@ ACCESSIBILITY-VULNERABILITY
                         'correlation': correlation,
                         'dominant_expert': expert_names[dominant_expert],
                         'gate_weights': gate_weights_np.mean(axis=0).tolist(),
-                        'predictions': corrected_predictions,  # Store corrected predictions
-                        'raw_predictions': predictions_np,  # Store raw predictions for analysis
+                        'predictions': corrected_predictions,
+                        'raw_predictions': predictions_np,  
+                        'features': test_features,
                         'baseline_comparison': baseline_results
                     }
                     
                     # Log with baseline context
                     gnn_std = np.std(corrected_predictions)  # Use corrected predictions for std
                     idw_std = baseline_results.get('methods', {}).get('IDW_p2.0', {}).get('std', 0)
-                    self._log(f"  {test_fips}: Error={mean_error_pct:.1f}%, Expert={expert_names[dominant_expert]}, "
+                    self._log(f" {test_fips}: Error={mean_error_pct:.1f}%, Expert={expert_names[dominant_expert]}, "
                              f"GNN_std={gnn_std:.4f}, IDW_std={idw_std:.4f}")
                     
                 except Exception as e:
-                    self._log(f"  {test_fips}: ERROR - {str(e)}", level='ERROR')
+                    self._log(f" {test_fips}: ERROR - {str(e)}", level='ERROR')
                     import traceback
                     traceback.print_exc()
         
@@ -3644,7 +4026,7 @@ ACCESSIBILITY-VULNERABILITY
         holdout_addresses = self.data_loader.get_addresses_for_tract(test_fips)
 
         if len(holdout_addresses) == 0:
-            self._log(f"WARNING: Tract {test_fips} has no addresses, skipping")
+            self._log(f"Tract {test_fips} has no addresses, skipping", level='WARN')
             return {
                 'actual_svi': None,
                 'predicted_mean': None,
@@ -3727,7 +4109,7 @@ ACCESSIBILITY-VULNERABILITY
                 self._log("ERROR: Time and count features are positively correlated")
                 return False
             else:
-                self._log("✓ Time-Count relationship is correct")
+                self._log(" Time-Count relationship is correct")
         
         # Check for sufficient variation across addresses
         feature_variations = np.std(features, axis=0)
@@ -3739,5 +4121,5 @@ ACCESSIBILITY-VULNERABILITY
             self._log("ERROR: Too many features have low variation")
             return False
         
-        self._log("✓ Feature relationships appear correct")
+        self._log(" Feature relationships appear correct")
         return True

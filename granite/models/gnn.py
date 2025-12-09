@@ -1,18 +1,8 @@
 """
-GRANITE GNN Architecture and Training - STABILIZED VERSION
-===========================================================
+GRANITE GNN Architecture and Training
 
-CRITICAL FIXES APPLIED:
-1. Deterministic weight initialization with seed control
-2. Rebalanced loss weights prioritizing accessibility learning
-3. Raw prediction tracking for diagnostic purposes
-4. Reproducibility enforcement throughout training
-
-Changes from original:
-- Added set_random_seed() function for full reproducibility
-- Reduced constraint loss weight from 5.0 -> 2.0 in multi-tract
-- Added diagnostic outputs for pre/post correction comparison
-- Enhanced training history tracking
+Provides graph neural network models and trainers for accessibility-based
+social vulnerability prediction with constraint enforcement.
 """
 import torch
 import torch.nn as nn
@@ -25,9 +15,7 @@ from typing import Dict, Tuple, Optional
 
 def set_random_seed(seed=42):
     """
-    Set all random seeds for complete reproducibility.
-    
-    CRITICAL: Call this before ANY model initialization or training.
+    Set all random seeds for reproducibility.
     
     Args:
         seed: Random seed value (default: 42)
@@ -49,10 +37,7 @@ class AccessibilitySVIGNN(nn.Module):
     """
     Context-aware GNN for accessibility-vulnerability prediction.
     
-    ENHANCEMENTS:
-    - Context-gated feature modulation for heterogeneous contexts
-    - Deterministic weight initialization
-    - Consistent random state for dropout
+    Supports context-gated feature modulation and multi-task learning.
     """
     def __init__(self, accessibility_features_dim, context_features_dim=5, 
              hidden_dim=64, dropout=0.3, seed=42, use_context_gating=True,
@@ -67,9 +52,8 @@ class AccessibilitySVIGNN(nn.Module):
         self.context_features_dim = context_features_dim
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout
-        self.use_context_gating = use_context_gating  # NEW: Toggle for ablation
+        self.use_context_gating = use_context_gating  
         
-        # NEW: Context-gated feature modulation
         if use_context_gating:
             self.context_gate = ContextGatedFeatureModulator(
                 accessibility_dim=accessibility_features_dim,
@@ -145,11 +129,7 @@ class AccessibilitySVIGNN(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def _initialize_weights(self, seed):
-        """
-        Deterministic weight initialization for stable training.
-        
-        CRITICAL: Uses seed to ensure identical initialization across runs.
-        """
+        """Initialize weights deterministically using the provided seed."""
         # Set seed again to ensure consistent initialization
         torch.manual_seed(seed)
         
@@ -271,12 +251,8 @@ class ContextGatedFeatureModulator(nn.Module):
 
 class AccessibilityGNNTrainer:
     """
-    Single-tract trainer for standard GRANITE training.
+    Single-tract trainer for GRANITE training.
     Enforces tract-level mean constraint while learning spatial patterns.
-    
-    STABILITY IMPROVEMENTS:
-    - Deterministic training with seed control
-    - Rebalanced loss weights (constraint 2.0 -> accessibility learning prioritized)
     """
     def __init__(self, model, config=None, seed=42):
         self.model = model
@@ -434,12 +410,7 @@ class AccessibilityGNNTrainer:
         return results
     
     def _compute_losses(self, predictions, target_svi, n_addresses):
-        """
-        Single-tract loss computation with CONFIGURABLE constraint enforcement.
-        
-        When enforce_constraints=False, model learns purely from accessibility
-        patterns without mean-matching pressure.
-        """
+        """Compute training losses with optional constraint enforcement."""
         
         # 1. Constraint preservation loss
         predicted_mean = predictions.mean()
@@ -464,7 +435,6 @@ class AccessibilityGNNTrainer:
         # 5. Accessibility consistency
         accessibility_consistency_loss = self._compute_accessibility_consistency_loss(predictions)
         
-        # NEW: Conditional weighting based on mode
         if self.enforce_constraints:
             # Standard constrained training
             total_loss = (
@@ -1040,10 +1010,7 @@ def normalize_accessibility_features(features, method='robust'):
     zero_var_mask = feature_stds < 1e-8
     
     if np.any(zero_var_mask):
-        print(f"Warning: {np.sum(zero_var_mask)} features have zero variance")
-        #features = features[:, ~zero_var_mask]
-        #if features.shape[1] == 0:
-        #    raise ValueError("All features have zero variance")
+        print(f"{np.sum(zero_var_mask)} features have zero variance; proceeding")
     
     # Apply normalization
     normalized_features = scaler.fit_transform(features)

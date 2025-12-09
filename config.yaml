@@ -1,146 +1,74 @@
-# GRANITE Framework Configuration - Hybrid Accessibility-SVI Research Mode
+# GRANITE Configuration
+# All parameters should be set here; CLI arguments act as overrides only.
 
+# =============================================================================
+# Geographic Scope
+# =============================================================================
 data:
-  # Geographic scope
   state_fips: "47"
   county_fips: "065"
   census_year: 2020
   address_file: "chattanooga.geojson"
-  use_real_addresses: true
-  
-  # Processing mode - simplified to only support single FIPS
-  processing_mode: "fips"
-  
-  # File paths
-  svi_file: "data/raw/SVI2020_US_tract.csv"
+  svi_file: "data/raw/SVI_2020_US.csv"
   roads_file: "data/raw/tl_2023_47065_roads.shp"
   census_tracts_file: "data/raw/tl_2020_47_tract.shp"
 
-# Research approach selection - UPDATED FOR HYBRID ACCESSIBILITY-SVI
-research:
-  approach: "hybrid_accessibility_svi"  # NEW: Two-stage GNN approach
-  methodology: "accessibility_learning_to_svi_prediction"
-  contribution: "first_systematic_gnn_accessibility_svi_integration"
-
-# Accessibility analysis configuration - ENABLED FOR NEW APPROACH
+# =============================================================================
+# Accessibility Computation
+# =============================================================================
 accessibility:
-  enabled: true  # CHANGED: Now required for hybrid approach
-  max_addresses_per_tract: 10  # REDUCED: Optimized for two-stage training
+  enabled: true
+  max_addresses_per_tract: 10
   destinations:
-    employment: true    # Calculate employment accessibility
-    healthcare: true    # Calculate healthcare accessibility  
-    grocery: true       # Calculate food accessibility
-  performance:
-    cache_transit_network: true    # Use caching optimization
-    parallel_calculation: false    # Future: parallel processing
-    timeout_minutes: 2             # Max time per tract
-  
-  # NEW: Accessibility target computation
-  target_features:
-    employment: ["min_time", "accessible_count", "transit_share"]
-    healthcare: ["min_time", "accessible_count", "transit_share"] 
-    grocery: ["min_time", "accessible_count", "transit_share"]
+    employment: true
+    healthcare: true
+    grocery: true
+  timeout_minutes: 2
 
-# Transit configuration
+# =============================================================================
+# Transit Data
+# =============================================================================
 transit:
-  preferred_source: 'gtfs'
-  local_file: 'carta_gtfs.zip'
-  download_real_data: true
+  source: "gtfs"
+  local_file: "carta_gtfs.zip"
 
-# Two-stage GNN model configuration - NEW ARCHITECTURE
+# =============================================================================
+# OSRM Routing
+# =============================================================================
+routing:
+  driving_url: "http://localhost:5000"
+  walking_url: "http://localhost:5001"
+  batch_size: 100
+
+# =============================================================================
+# Model Architecture
+# =============================================================================
 model:
-  # Stage 1: Accessibility Learning GNN
-  accessibility_learning:
-    input_dim: 5  # NLCD features
-    hidden_dim: 64
-    accessibility_output_dim: 9  # 3 features × 3 destination types
-    dropout_rate: 0.2
-    
-  # Stage 2: SVI Prediction GNN  
-  svi_prediction:
-    # input_dim computed dynamically (NLCD + learned accessibility)
-    hidden_dim: 64
-    output_dim: 1
-    attention_heads: 4
-    dropout_rate: 0.2
-  
-  # Training epochs for each stage
-  accessibility_epochs: 50   # Stage 1 training
-  svi_epochs: 100           # Stage 2 training
-  
-  # Shared parameters
-  learning_rate: 0.001
-  weight_decay: 1e-5
-  use_accessibility_features: true
+  hidden_dim: 64
+  dropout: 0.3
+  attention_heads: 4
+  use_context_gating: true
+  use_multitask: true
 
-# NEW: Stage-specific training configurations
-accessibility_training:
-  learning_rate: 0.002        # Slightly higher for accessibility learning
-  weight_decay: 1e-5
-  regularization_weight: 0.1  # Penalty for unrealistic accessibility values
-  time_penalty_weight: 0.1    # Penalize travel times > 2 hours
-  count_penalty_weight: 0.1   # Penalize accessible counts > 10
-  
-svi_training:
-  learning_rate: 0.001
-  weight_decay: 1e-5
-  variation_weight: 0.3       # Encourage spatial variation
-  min_spatial_std: 0.02       # Minimum spatial standard deviation
-
-# Features configuration
-features:
-  type: "nlcd"
-  nlcd_path: "./data/nlcd_hamilton_county.tif"
-  
-  # NEW: Enhanced feature integration
-  combine_nlcd_accessibility: true
-  accessibility_feature_scaling: "standardization"
-
-# NEW: Validation and comparison settings
-validation:
-  compare_with_idm: true                    # Generate IDM baseline for comparison
-  compare_with_traditional_accessibility: true  # Compare learned vs traditional accessibility
-  correlation_analysis: true               # Analyze accessibility-SVI correlations
-  research_metrics: true                   # Compute research contribution metrics
-
-# Output settings - ENHANCED
-output:
-  save_predictions: true
-  save_plots: true
-  
-  # NEW: Research-specific outputs
-  save_accessibility_features: true       # Save learned accessibility features
-  save_stage_results: true               # Save both stage 1 and stage 2 results
-  save_comparison_analysis: true         # Save validation comparisons
-  save_research_metrics: true            # Save research contribution metrics
-
-# Baselines configuration
-baselines:
-  enable_idm: true  # Keep IDM for comparison
-
-# Processing settings
-processing:
-  continue_on_error: true
-  verbose: true
-  random_seed: 42
-  
-  # NEW: Research mode settings
-  research_mode: true
-  detailed_logging: true
-  save_intermediate_results: true
-
-# Enable MoE mode
+# =============================================================================
+# Training
+# =============================================================================
 training:
-  use_mixture: true
   epochs: 150
-  gate_epochs: 100
-  finetune_epochs: 50
   learning_rate: 0.001
   weight_decay: 0.0001
   enforce_constraints: true
+  constraint_weight: 2.0
+  variation_weight: 1.5
+  early_stopping_patience: 15
 
-# Mixture settings
+# =============================================================================
+# Mixture of Experts
+# =============================================================================
 mixture:
+  enabled: false
+  gate_epochs: 100
+  finetune_epochs: 50
   svi_boundaries:
     low: [0.01, 0.40]
     medium: [0.30, 0.70]
@@ -148,10 +76,36 @@ mixture:
   expert_hidden_dim: 64
   gate_hidden_dim: 32
 
-# NEW: Research documentation
-research_documentation:
-  methodology: "Two-stage Graph Neural Network approach for accessibility-SVI integration"
-  stage1_description: "Learn accessibility patterns from network topology and demographics"
-  stage2_description: "Predict social vulnerability using learned accessibility features"
-  research_question: "Can GNNs learn accessibility patterns that accurately predict social vulnerability?"
-  expected_contribution: "First systematic GNN-based accessibility-vulnerability integration"
+# =============================================================================
+# Features
+# =============================================================================
+features:
+  type: "nlcd"
+  nlcd_path: "./data/nlcd_hamilton_county.tif"
+  scaling: "robust"
+
+# =============================================================================
+# Processing
+# =============================================================================
+processing:
+  verbose: true
+  random_seed: 42
+  enable_caching: true
+  cache_dir: "./granite_cache"
+
+# =============================================================================
+# Validation
+# =============================================================================
+validation:
+  mode: null  # null, 'holdout', or 'global'
+  compare_baselines: true
+  compute_spatial_diagnostics: true
+
+# =============================================================================
+# Output
+# =============================================================================
+output:
+  directory: "./output"
+  save_predictions: true
+  save_plots: true
+  save_intermediate: false

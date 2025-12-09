@@ -1,6 +1,7 @@
 """
-FIXED: Enhanced Accessibility Computation for GRANITE
-Corrects destination counting logic and feature computation errors
+Enhanced Accessibility Computation for GRANITE
+
+Provides multi-modal travel time calculation and accessibility feature extraction.
 """
 import numpy as np
 import pandas as pd
@@ -14,7 +15,7 @@ from ..routing.osrm_router import OSRMRouter
 
 class EnhancedAccessibilityComputer:
     """
-    FIXED: Enhanced accessibility computation with corrected counting logic
+    Enhanced accessibility computation with multi-modal travel time support.
     """
     
     def __init__(self, verbose=True, enable_caching=True, cache_dir='./granite_cache'):
@@ -28,7 +29,7 @@ class EnhancedAccessibilityComputer:
                 from granite.cache import AccessibilityCache
                 self.cache = AccessibilityCache(cache_dir=cache_dir)
                 if self.verbose:
-                    print(f"[EnhancedAccessibility] ✓ Cache enabled at {cache_dir}")
+                    print(f"[EnhancedAccessibility] Cache enabled at {cache_dir}")
             except ImportError:
                 if self.verbose:
                     print(f"[EnhancedAccessibility] Cache module not found, disabling caching")
@@ -53,8 +54,11 @@ class EnhancedAccessibilityComputer:
             from ..routing.osrm_router import OSRMRouter
             self.osrm_router = OSRMRouter(verbose=self.verbose)
         except Exception as e:
-            self.log(f"OSRM router not available: {e}")
-            self.osrm_router = None
+            raise RuntimeError(
+                f"OSRM router initialization failed: {e}. "
+                f"Ensure OSRM servers are running at {self.driving_url} and {self.walking_url}. "
+                f"Start with: docker-compose up -d osrm-driving osrm-walking"
+            )
     
     def log(self, message):
         if self.verbose:
@@ -279,7 +283,7 @@ class EnhancedAccessibilityComputer:
             self.log("WARNING: OSRM may be using fallback (all walk == drive times)")
         else:
             pct = 100 * different_times / total_routes
-            self.log(f"✓ OSRM verified: {pct:.1f}% of routes have mode-specific times")
+            self.log(f"OSRM verified: {pct:.1f}% of routes have mode-specific times")
         
         return travel_times_df
     
@@ -1045,7 +1049,7 @@ class EnhancedAccessibilityComputer:
             
             is_correct = (correlation > 0.05) if expected_positive else (correlation < -0.05)
             
-            status = "✓" if is_correct else "✗"
+            status = "[OK]" if is_correct else "[FAIL]"
             self.log(f"  {status} {name}: r={correlation:.3f} (expected {'positive' if expected_positive else 'negative'})")
             
             if not is_correct:

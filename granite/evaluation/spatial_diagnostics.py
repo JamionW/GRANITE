@@ -1,7 +1,8 @@
 """
-Enhanced Spatial Learning Diagnostics for GRANITE
-Drop-in replacement for granite/evaluation/spatial_diagnostics.py
-Maintains original API while adding comprehensive diagnostic capabilities
+Spatial Learning Diagnostics for GRANITE
+
+Provides diagnostic tools for evaluating spatial pattern learning quality
+including Moran's I, accessibility correlations, and baseline comparisons.
 """
 import numpy as np
 import pandas as pd

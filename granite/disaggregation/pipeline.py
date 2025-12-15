@@ -12,7 +12,7 @@ import pandas as pd
 import geopandas as gpd
 import torch
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 warnings.filterwarnings('ignore')
 
 from ..models.gnn import set_random_seed
@@ -2209,6 +2209,276 @@ class GRANITEPipeline:
                 dpi=300, bbox_inches='tight')
         plt.close()
 
+    def _compute_global_affine_correction(self, 
+                                        all_raw_predictions: Dict[str, np.ndarray],
+                                        tract_svi_values: Dict[str, float]) -> Tuple[float, float]:
+        """
+        Compute a single global affine transformation (y = ax + b) that minimizes
+        aggregate constraint error across all tracts while preserving between-tract
+        relationships.
+        
+        Args:
+            all_raw_predictions: Dict mapping tract FIPS to raw prediction arrays
+            tract_svi_values: Dict mapping tract FIPS to known SVI values
+            
+        Returns:
+            Tuple of (scale, offset) for transformation: corrected = scale * raw + offset
+        """
+        # Aggregate to tract means
+        tract_means = {}
+        for fips, preds in all_raw_predictions.items():
+            tract_means[fips] = np.mean(preds)
+        
+        # Prepare arrays for linear regression
+        x = np.array([tract_means[f] for f in tract_svi_values.keys()])
+        y = np.array([tract_svi_values[f] for f in tract_svi_values.keys()])
+        
+        # Least squares: y = ax + b
+        # Solve: [x, 1] @ [a, b].T = y
+        A = np.column_stack([x, np.ones_like(x)])
+        coeffs, residuals, rank, s = np.linalg.lstsq(A, y, rcond=None)
+        
+        scale, offset = coeffs[0], coeffs[1]
+        
+        self._log(f"Global affine correction: y = {scale:.4f}x + {offset:.4f}")
+        
+        return float(scale), float(offset)
+
+    def _apply_global_correction(self,
+                                predictions: np.ndarray,
+                                scale: float,
+                                offset: float) -> np.ndarray:
+        """
+        Apply global affine correction to predictions.
+        
+        Args:
+            predictions: Raw predictions array
+            scale: Multiplicative factor
+            offset: Additive factor
+            
+        Returns:
+            Corrected predictions, clipped to [0, 1]
+        """
+        corrected = scale * predictions + offset
+        corrected = np.clip(corrected, 0.0, 1.0)
+        return corrected
+
+    def _analyze_correction_impact(self,
+                                    raw_predictions: Dict[str, np.ndarray],
+                                    corrected_predictions: Dict[str, np.ndarray],
+                                    tract_svi_values: Dict[str, float],
+                                    scale: float,
+                                    offset: float,
+                                    output_dir: str):
+        """
+        Generate transparent visualization of correction impact.
+        
+        Creates a report showing:
+        1. Raw vs corrected tract means
+        2. Spatial variation preservation
+        3. Between-tract relationship preservation
+        """
+        import matplotlib.pyplot as plt
+        
+        fips_list = sorted(raw_predictions.keys())
+        
+        raw_means = [np.mean(raw_predictions[f]) for f in fips_list]
+        corrected_means = [np.mean(corrected_predictions[f]) for f in fips_list]
+        actual_svis = [tract_svi_values[f] for f in fips_list]
+        
+        raw_stds = [np.std(raw_predictions[f]) for f in fips_list]
+        corrected_stds = [np.std(corrected_predictions[f]) for f in fips_list]
+        
+        fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+        fig.suptitle('Global Affine Correction Analysis', fontsize=14, fontweight='bold')
+        
+        # Panel 1: Raw means vs Actual SVI
+        ax1 = axes[0, 0]
+        ax1.scatter(actual_svis, raw_means, alpha=0.7, s=60, label='Raw predictions')
+        ax1.plot([0, 1], [0, 1], 'k--', alpha=0.3, label='Perfect agreement')
+        
+        # Show regression line
+        x_line = np.linspace(0, 1, 100)
+        y_line = (x_line - offset) / scale if scale != 0 else x_line  # Inverse transform
+        ax1.plot(actual_svis, [scale * m + offset for m in raw_means], 
+                'r-', alpha=0.5, linewidth=2, label='Affine fit')
+        
+        raw_r2 = np.corrcoef(actual_svis, raw_means)[0, 1] ** 2
+        ax1.set_xlabel('Actual Tract SVI')
+        ax1.set_ylabel('Raw Predicted Mean')
+        ax1.set_title(f'Raw Predictions (R² = {raw_r2:.3f})')
+        ax1.legend()
+        ax1.set_xlim(-0.05, 1.05)
+        ax1.set_ylim(-0.05, 1.05)
+        
+        # Panel 2: Corrected means vs Actual SVI
+        ax2 = axes[0, 1]
+        ax2.scatter(actual_svis, corrected_means, alpha=0.7, s=60, c='green')
+        ax2.plot([0, 1], [0, 1], 'k--', alpha=0.3)
+        
+        corrected_r2 = np.corrcoef(actual_svis, corrected_means)[0, 1] ** 2
+        mean_error = np.mean([abs(c - a) / a * 100 for c, a in zip(corrected_means, actual_svis)])
+        
+        ax2.set_xlabel('Actual Tract SVI')
+        ax2.set_ylabel('Corrected Predicted Mean')
+        ax2.set_title(f'After Global Correction (R² = {corrected_r2:.3f}, Mean Error = {mean_error:.1f}%)')
+        ax2.set_xlim(-0.05, 1.05)
+        ax2.set_ylim(-0.05, 1.05)
+        
+        # Panel 3: Spatial variation preservation
+        ax3 = axes[1, 0]
+        ax3.scatter(raw_stds, corrected_stds, alpha=0.7, s=60)
+        max_std = max(max(raw_stds), max(corrected_stds)) * 1.1
+        ax3.plot([0, max_std], [0, max_std], 'k--', alpha=0.3)
+        ax3.set_xlabel('Raw Prediction Std')
+        ax3.set_ylabel('Corrected Prediction Std')
+        ax3.set_title(f'Spatial Variation Preservation (ratio = {np.mean(corrected_stds)/np.mean(raw_stds):.2f})')
+        
+        # Panel 4: Correction parameters and summary
+        ax4 = axes[1, 1]
+        ax4.axis('off')
+        
+        summary_text = f"""
+        GLOBAL AFFINE CORRECTION SUMMARY
+        ================================
+        
+        Transformation: y = {scale:.4f}x + {offset:.4f}
+        
+        Before Correction:
+        - R² (raw means vs actual): {raw_r2:.3f}
+        - Mean tract error: {np.mean([abs(r - a) / a * 100 for r, a in zip(raw_means, actual_svis)]):.1f}%
+        - Mean spatial variation: {np.mean(raw_stds):.4f}
+        
+        After Correction:
+        - R² (corrected vs actual): {corrected_r2:.3f}
+        - Mean tract error: {mean_error:.1f}%
+        - Mean spatial variation: {np.mean(corrected_stds):.4f}
+        
+        Interpretation:
+        - Scale < 1: Raw predictions had too much range
+        - Scale > 1: Raw predictions had too little range
+        - Offset > 0: Raw predictions were systematically low
+        - Offset < 0: Raw predictions were systematically high
+        
+        Key Insight:
+        Global correction preserves the RANKING of predictions
+        across tracts, unlike per-tract independent shifts.
+        """
+        
+        ax4.text(0.05, 0.95, summary_text, transform=ax4.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace')
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'global_correction_analysis.png'), 
+                    dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        self._log(f"Saved correction analysis to {output_dir}/global_correction_analysis.png")
+
+    def _analyze_per_tract_corrections(self, test_results: Dict, output_dir: str):
+        """
+        Analyze per-tract mean-shift corrections applied.
+        Shows the shift required for each tract and spatial variation preserved.
+        """
+        import matplotlib.pyplot as plt
+        
+        if not test_results:
+            return
+            
+        fips_list = sorted(test_results.keys())
+        
+        # Extract data
+        actual_svis = [test_results[f]['actual_svi'] for f in fips_list]
+        raw_means = [test_results[f].get('raw_mean', test_results[f]['predicted_mean']) for f in fips_list]
+        shifts = [test_results[f].get('shift_applied', 0) for f in fips_list]
+        spatial_stds = [test_results[f].get('spatial_std', np.std(test_results[f]['predictions'])) for f in fips_list]
+        
+        fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+        fig.suptitle('Per-Tract Mean-Shift Correction Analysis', fontsize=14, fontweight='bold')
+        
+        # Panel 1: Raw means vs Actual SVI (shows what model learned)
+        ax1 = axes[0, 0]
+        ax1.scatter(actual_svis, raw_means, alpha=0.7, s=60, c='steelblue')
+        ax1.plot([0, 1], [0, 1], 'k--', alpha=0.3, label='Perfect prediction')
+        
+        # Add R² annotation
+        if len(actual_svis) > 2:
+            r2 = np.corrcoef(actual_svis, raw_means)[0, 1] ** 2
+            ax1.annotate(f'R² = {r2:.3f}', xy=(0.05, 0.95), xycoords='axes fraction',
+                        fontsize=11, fontweight='bold')
+        
+        ax1.set_xlabel('Actual Tract SVI')
+        ax1.set_ylabel('Raw Model Prediction (mean)')
+        ax1.set_title('What the Model Learned (Before Correction)')
+        ax1.set_xlim(-0.05, 1.05)
+        ax1.set_ylim(-0.05, 1.05)
+        ax1.legend()
+        
+        # Panel 2: Shift required by tract SVI
+        ax2 = axes[0, 1]
+        colors = ['green' if s > 0 else 'red' for s in shifts]
+        ax2.bar(range(len(fips_list)), shifts, color=colors, alpha=0.7)
+        ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+        ax2.set_xticks(range(len(fips_list)))
+        ax2.set_xticklabels([f[-5:] for f in fips_list], rotation=45, ha='right')
+        ax2.set_xlabel('Tract')
+        ax2.set_ylabel('Shift Applied')
+        ax2.set_title('Correction Shift by Tract (green=up, red=down)')
+        
+        # Panel 3: Spatial variation by tract SVI
+        ax3 = axes[1, 0]
+        scatter = ax3.scatter(actual_svis, spatial_stds, c=actual_svis, cmap='RdYlGn_r', 
+                             s=80, alpha=0.7, edgecolors='black', linewidth=0.5)
+        ax3.set_xlabel('Actual Tract SVI')
+        ax3.set_ylabel('Within-Tract Spatial Variation (std)')
+        ax3.set_title('Spatial Variation vs Vulnerability Level')
+        plt.colorbar(scatter, ax=ax3, label='Tract SVI')
+        
+        # Panel 4: Summary statistics
+        ax4 = axes[1, 1]
+        ax4.axis('off')
+        
+        mean_shift = np.mean(np.abs(shifts))
+        mean_std = np.mean(spatial_stds)
+        r2_val = np.corrcoef(actual_svis, raw_means)[0, 1] ** 2 if len(actual_svis) > 2 else 0
+        
+        summary_text = f'''
+        PER-TRACT MEAN-SHIFT CORRECTION SUMMARY
+        =======================================
+        
+        Tracts Evaluated: {len(fips_list)}
+        SVI Range: {min(actual_svis):.3f} - {max(actual_svis):.3f}
+        
+        RAW MODEL PERFORMANCE:
+        - Mean raw prediction: {np.mean(raw_means):.3f}
+        - R² (raw vs actual): {r2_val:.3f}
+        
+        CORRECTION APPLIED:
+        - Mean absolute shift: {mean_shift:.3f}
+        - Max shift: {max(np.abs(shifts)):.3f}
+        
+        SPATIAL VARIATION PRESERVED:
+        - Mean within-tract std: {mean_std:.4f}
+        - Std range: {min(spatial_stds):.4f} - {max(spatial_stds):.4f}
+        
+        INTERPRETATION:
+        Per-tract correction guarantees constraint satisfaction
+        while preserving learned within-tract spatial patterns.
+        
+        The key question: Is this within-tract variation
+        meaningful? Block group validation will tell us.
+        '''
+        
+        ax4.text(0.05, 0.95, summary_text, transform=ax4.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace')
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'correction_analysis.png'), 
+                    dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        self._log(f"Saved correction analysis to {output_dir}/correction_analysis.png")
+
     def _create_disaggregation_visualizations(self, test_results, training_results=None,
                                                expert_usage=None, tract_gdf=None, all_addresses=None):
         """
@@ -2274,9 +2544,9 @@ class GRANITEPipeline:
                 features=all_features,
                 feature_names=self._generate_feature_names(all_features.shape[1]),
                 predictions=all_predictions,
-                output_dir=output_dir
+                output_dir=viz_dir
             )
-            self._plot_feature_transparency(feature_analysis, output_dir)
+            self._plot_feature_transparency(feature_analysis, viz_dir)
             
             self._log(f"Visualizations saved to {viz_dir}")
             
@@ -3870,8 +4140,13 @@ ACCESSIBILITY-VULNERABILITY
             verbose=self.verbose
         )
         
-        # 10. Evaluate on test set
+        # 10. Evaluate on test set with per-tract mean-shift correction
+        # ==============================================================
+        # Simple approach: shift each tract's predictions to match known SVI mean.
+        # This preserves within-tract spatial variation while satisfying constraints.
+        
         test_results = {}
+        
         if test_fips_list:
             self._log(f"\nEvaluating on {len(test_fips_list)} test tracts...")
             moe_model.eval()
@@ -3884,7 +4159,7 @@ ACCESSIBILITY-VULNERABILITY
                     test_addresses = addresses_with_tracts[tract_mask].copy()
                     
                     if len(test_addresses) == 0:
-                        self._log(f" {test_fips}: No addresses, skipping")
+                        self._log(f"  {test_fips}: No addresses, skipping")
                         continue
                     
                     test_addresses = test_addresses[['address_id', 'geometry', 'full_address']].copy()
@@ -3901,15 +4176,15 @@ ACCESSIBILITY-VULNERABILITY
                     normalized_test_context = context_scaler.transform(test_context)
                     
                     # Create test graph
-                    state_fips = test_fips[:2]
-                    county_fips = test_fips[2:5]
+                    state_fips_code = test_fips[:2]
+                    county_fips_code = test_fips[2:5]
                     
                     test_graph = self.data_loader.create_spatial_accessibility_graph(
                         addresses=test_addresses,
                         accessibility_features=normalized_test_features,
                         context_features=normalized_test_context,
-                        state_fips=state_fips,
-                        county_fips=county_fips
+                        state_fips=state_fips_code,
+                        county_fips=county_fips_code
                     )
                     test_graph.context = torch.tensor(normalized_test_context, dtype=torch.float32)
                     
@@ -3926,30 +4201,35 @@ ACCESSIBILITY-VULNERABILITY
                             return_gate_weights=True
                         )
                     
-                    predictions_np = predictions.cpu().numpy()
+                    raw_predictions = predictions.cpu().numpy()
                     
-                    # Apply constraint correction to satisfy tract-level SVI
-                    corrected_predictions = self._apply_strong_constraint_correction(
-                        predictions_np, actual_svi
-                    )
+                    # Per-tract mean-shift correction
+                    raw_mean = float(np.mean(raw_predictions))
+                    shift = actual_svi - raw_mean
+                    corrected_predictions = raw_predictions + shift
+                    corrected_predictions = np.clip(corrected_predictions, 0.0, 1.0)
                     
-                    # Calculate error on corrected predictions
+                    # Calculate metrics
                     predicted_mean = float(np.mean(corrected_predictions))
-                    mean_error_pct = abs(predicted_mean - actual_svi) / actual_svi * 100
+                    mean_error_pct = abs(predicted_mean - actual_svi) / actual_svi * 100 if actual_svi > 0 else 0
+                    spatial_std = float(np.std(corrected_predictions))
                     
-                    # Correlation between predictions and some accessibility metric
+                    # Correlation between predictions and accessibility
                     accessibility_summary = test_graph.x.mean(dim=1).cpu().numpy()
-                    correlation = float(np.corrcoef(accessibility_summary, corrected_predictions)[0, 1])
+                    if len(accessibility_summary) > 1:
+                        correlation = float(np.corrcoef(accessibility_summary, corrected_predictions)[0, 1])
+                    else:
+                        correlation = 0.0
                     
                     # Gate analysis
                     gate_weights_np = gate_weights.cpu().numpy()
                     dominant_expert = int(np.argmax(gate_weights_np.mean(axis=0)))
                     expert_names = ['Low', 'Medium', 'High']
                     
-                    # Run baseline comparisons for this holdout tract
+                    # Run baseline comparisons
                     baseline_results = self._run_holdout_baselines(
                         test_addresses=test_addresses,
-                        gnn_predictions=corrected_predictions,  # Use corrected predictions
+                        gnn_predictions=corrected_predictions,
                         tract_gdf=data['tracts'],
                         test_fips=test_fips,
                         actual_svi=actual_svi,
@@ -3959,34 +4239,108 @@ ACCESSIBILITY-VULNERABILITY
                     test_results[test_fips] = {
                         'actual_svi': actual_svi,
                         'predicted_mean': predicted_mean,
+                        'raw_mean': raw_mean,
                         'mean_error_pct': mean_error_pct,
+                        'spatial_std': spatial_std,
                         'correlation': correlation,
                         'dominant_expert': expert_names[dominant_expert],
                         'gate_weights': gate_weights_np.mean(axis=0).tolist(),
                         'predictions': corrected_predictions,
-                        'raw_predictions': predictions_np,  
+                        'raw_predictions': raw_predictions,
+                        'shift_applied': shift,
                         'features': test_features,
                         'baseline_comparison': baseline_results
                     }
                     
-                    # Log with baseline context
-                    gnn_std = np.std(corrected_predictions)  # Use corrected predictions for std
+                    # Log results
                     idw_std = baseline_results.get('methods', {}).get('IDW_p2.0', {}).get('std', 0)
-                    self._log(f" {test_fips}: Error={mean_error_pct:.1f}%, Expert={expert_names[dominant_expert]}, "
-                             f"GNN_std={gnn_std:.4f}, IDW_std={idw_std:.4f}")
+                    self._log(f"  {test_fips}: SVI={actual_svi:.3f}, Shift={shift:+.3f}, "
+                             f"Std={spatial_std:.4f}, Expert={expert_names[dominant_expert]}")
                     
                 except Exception as e:
-                    self._log(f" {test_fips}: ERROR - {str(e)}", level='ERROR')
+                    self._log(f"  {test_fips}: ERROR - {str(e)}", level='ERROR')
                     import traceback
                     traceback.print_exc()
+        
+        # Generate correction analysis visualization
+        if test_results:
+            self._analyze_per_tract_corrections(test_results, self.output_dir)
         
         # 11. Analyze expert usage
         analyzer = MoEInferenceAnalyzer(moe_model, verbose=self.verbose)
         usage_stats = analyzer.analyze_expert_usage(training_graphs, training_svis)
         
         elapsed = time.time() - start_time
+
+        # 12. Block group validation (optional - graceful failure if data unavailable)
+        try:
+            block_groups = self.data_loader.load_block_groups_for_validation(
+                state_fips, county_fips
+            )
+            
+            if block_groups is not None:
+                from granite.evaluation.block_group_validation import BlockGroupValidator
+                
+                # Combine all test addresses and predictions
+                all_test_addresses = []
+                all_test_predictions = []
+                for fips, result in test_results.items():
+                    test_addr = self.data_loader.get_addresses_for_tract(fips)
+                    all_test_addresses.append(test_addr)
+                    all_test_predictions.append(result['predictions'])
+                
+                if all_test_addresses:
+                    combined_addresses = pd.concat(all_test_addresses, ignore_index=True)
+                    combined_predictions = np.concatenate(all_test_predictions)
+                    
+                    # Create validator
+                    validator = BlockGroupValidator(block_groups, verbose=self.verbose)
+                    
+                    # Validate GRANITE
+                    granite_validation = validator.validate(
+                        combined_addresses, combined_predictions, 'GRANITE'
+                    )
+                    
+                    # Build comparison results dict - include GRANITE
+                    comparison_results = {'GRANITE': granite_validation}
+                    
+                    # Run same validation for baselines
+                    idw_predictions = []
+                    kriging_predictions = []
+                    for fips, result in test_results.items():
+                        if 'baseline_comparison' in result:
+                            baselines = result['baseline_comparison'].get('methods', {})
+                            if 'IDW_p2.0' in baselines:
+                                idw_predictions.append(baselines['IDW_p2.0']['predictions'])
+                            if 'Kriging' in baselines:
+                                kriging_predictions.append(baselines['Kriging']['predictions'])
+                    
+                    if idw_predictions:
+                        idw_combined = np.concatenate(idw_predictions)
+                        comparison_results['IDW'] = validator.validate(
+                            combined_addresses, idw_combined, 'IDW'
+                        )
+                    
+                    if kriging_predictions:
+                        kriging_combined = np.concatenate(kriging_predictions)
+                        comparison_results['Kriging'] = validator.validate(
+                            combined_addresses, kriging_combined, 'Kriging'
+                        )
+                    
+                    # Generate comparison report
+                    validation_dir = os.path.join(self.output_dir, 'block_group_validation')
+                    os.makedirs(validation_dir, exist_ok=True)
+                    validator.create_validation_report(validation_dir, comparison_results)
+                    
+                    self._log(f"Block group validation complete. See {validation_dir}")
+            else:
+                self._log("Block group data not available, skipping validation", level='WARN')
+                
+        except Exception as e:
+            self._log(f"Block group validation failed (non-fatal): {e}", level='WARN')
+            # Continue with rest of pipeline - validation is optional
         
-        # 12. Summary
+        # 13. Summary
         if test_results:
             errors = [r['mean_error_pct'] for r in test_results.values()]
             self._log(f"\n{'='*80}")
@@ -4084,6 +4438,115 @@ ACCESSIBILITY-VULNERABILITY
             'predictions': predictions
         }
     
+    def _create_comprehensive_validation_report(self,
+                                                granite_results: Dict,
+                                                baseline_results: Dict,
+                                                block_group_validation: Dict,
+                                                output_dir: str):
+        """
+        Create final validation report comparing all methods against ground truth.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.gridspec import GridSpec
+        
+        fig = plt.figure(figsize=(16, 12))
+        gs = GridSpec(3, 3, figure=fig, hspace=0.3, wspace=0.3)
+        
+        fig.suptitle('GRANITE Comprehensive Validation Report', 
+                    fontsize=16, fontweight='bold')
+        
+        # Panel 1: Constraint satisfaction comparison
+        ax1 = fig.add_subplot(gs[0, 0])
+        methods = ['GRANITE', 'IDW', 'Kriging', 'Naive']
+        errors = [
+            np.mean([r['mean_error_pct'] for r in granite_results.values()]),
+            # Extract from baseline_results...
+        ]
+        colors = ['#2E86AB', '#A23B72', '#F18F01', '#95190C']
+        ax1.bar(methods, errors, color=colors, alpha=0.8)
+        ax1.set_ylabel('Mean Constraint Error (%)')
+        ax1.set_title('Tract-Level Constraint Satisfaction')
+        ax1.axhline(y=10, color='green', linestyle='--', alpha=0.5, label='10% threshold')
+        
+        # Panel 2: Spatial variation comparison
+        ax2 = fig.add_subplot(gs[0, 1])
+        variations = [
+            np.mean([np.std(r['predictions']) for r in granite_results.values()]),
+            # Extract from baselines...
+        ]
+        ax2.bar(methods, variations, color=colors, alpha=0.8)
+        ax2.set_ylabel('Mean Within-Tract Std')
+        ax2.set_title('Spatial Variation Generated')
+        
+        # Panel 3: Block group correlation (the key validation)
+        ax3 = fig.add_subplot(gs[0, 2])
+        bg_corrs = [
+            block_group_validation.get('GRANITE', {}).get('correlations', {})
+                .get('poverty_correlation', {}).get('r', 0),
+            block_group_validation.get('IDW', {}).get('correlations', {})
+                .get('poverty_correlation', {}).get('r', 0),
+            # etc.
+        ]
+        ax3.bar(methods[:len(bg_corrs)], bg_corrs, color=colors[:len(bg_corrs)], alpha=0.8)
+        ax3.set_ylabel('Correlation with BG Poverty')
+        ax3.set_title('Block Group Validation (Ground Truth)')
+        ax3.axhline(y=0.3, color='green', linestyle='--', alpha=0.5, label='Strong threshold')
+        ax3.axhline(y=0.15, color='orange', linestyle='--', alpha=0.5, label='Moderate threshold')
+        
+        # Panel 4-6: Scatter plots for top 3 methods vs block group poverty
+        for idx, method in enumerate(['GRANITE', 'IDW', 'Kriging']):
+            ax = fig.add_subplot(gs[1, idx])
+            
+            if method in block_group_validation:
+                df = block_group_validation[method]['validation_data']
+                valid = df['poverty_rate'].notna()
+                ax.scatter(df.loc[valid, 'poverty_rate'],
+                        df.loc[valid, 'predicted_vulnerability'],
+                        alpha=0.5, s=20, color=colors[idx])
+                
+                r = block_group_validation[method]['correlations'] \
+                    .get('poverty_correlation', {}).get('r', np.nan)
+                
+                ax.set_xlabel('BG Poverty Rate (%)')
+                ax.set_ylabel('Predicted Vulnerability')
+                ax.set_title(f'{method} (r = {r:.3f})')
+        
+        # Panel 7-9: Summary statistics
+        ax7 = fig.add_subplot(gs[2, :])
+        ax7.axis('off')
+        
+        summary = """
+        VALIDATION SUMMARY
+        ==================
+        
+        This report validates GRANITE's spatial disaggregation against three criteria:
+        
+        1. CONSTRAINT SATISFACTION: Do tract-level means match known SVI?
+        - All methods should achieve <10% mean error after correction
+        - Lower error = better constraint adherence
+        
+        2. SPATIAL VARIATION: Does the method generate meaningful within-tract patterns?
+        - Higher variation = more disaggregation (Naive baseline = 0)
+        - But high variation alone doesn't prove validity
+        
+        3. BLOCK GROUP VALIDATION (Ground Truth): Do patterns correlate with reality?
+        - This is the key test: aggregated predictions vs actual ACS demographics
+        - r > 0.3 = strong evidence patterns are real, not arbitrary
+        - r < 0.15 = weak evidence; variation may be noise
+        
+        INTERPRETATION:
+        - A method that satisfies constraints with high variation but low BG correlation
+        is "mathematically consistent but empirically meaningless"
+        - GRANITE should outperform baselines on BG correlation to justify GNN complexity
+        """
+        
+        ax7.text(0.05, 0.95, summary, transform=ax7.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace')
+        
+        plt.savefig(os.path.join(output_dir, 'comprehensive_validation_report.png'),
+                    dpi=150, bbox_inches='tight')
+        plt.close()
+
     def _validate_final_feature_relationships(self, features: np.ndarray, addresses) -> bool:
         """NEW: Final validation of accessibility-vulnerability relationship"""
         

@@ -16,6 +16,7 @@ import types
 import warnings
 warnings.filterwarnings('ignore')
 
+from .block_group_loader import BlockGroupLoader
 from .enhanced_accessibility import EnhancedAccessibilityComputer
 
 
@@ -37,6 +38,9 @@ class DataLoader:
         self._address_cache = None
         self._svi_cache = None
         self._transit_cache = None
+
+        # Load census data for validation
+        self.block_group_loader = BlockGroupLoader(data_dir, verbose=self.verbose)
         
         os.makedirs(data_dir, exist_ok=True)
 
@@ -320,8 +324,14 @@ class DataLoader:
             raise FileNotFoundError(f"Healthcare data not found: {healthcare_file}")
         
         healthcare_df = pd.read_csv(healthcare_file)
+
+        lon_col = 'longitude' if 'longitude' in healthcare_df.columns else 'lon'
+        lat_col = 'latitude' if 'latitude' in healthcare_df.columns else 'lat'
         
-        geometry = [Point(xy) for xy in zip(healthcare_df['longitude'], healthcare_df['latitude'])]
+        if lon_col not in healthcare_df.columns or lat_col not in healthcare_df.columns:
+            raise ValueError(f"Healthcare CSV missing coordinate columns. Found: {healthcare_df.columns.tolist()}")
+        
+        geometry = [Point(xy) for xy in zip(healthcare_df[lon_col], healthcare_df[lat_col])]
         healthcare_gdf = gpd.GeoDataFrame(healthcare_df, geometry=geometry, crs='EPSG:4326')
         
         healthcare_gdf['dest_id'] = range(len(healthcare_gdf))
@@ -347,7 +357,13 @@ class DataLoader:
         
         grocery_df = pd.read_csv(grocery_file)
         
-        geometry = [Point(xy) for xy in zip(grocery_df['longitude'], grocery_df['latitude'])]
+        lon_col = 'longitude' if 'longitude' in grocery_df.columns else 'lon'
+        lat_col = 'latitude' if 'latitude' in grocery_df.columns else 'lat'
+        
+        if lon_col not in grocery_df.columns or lat_col not in grocery_df.columns:
+            raise ValueError(f"Grocery CSV missing coordinate columns. Found: {grocery_df.columns.tolist()}")
+        
+        geometry = [Point(xy) for xy in zip(grocery_df[lon_col], grocery_df[lat_col])]
         grocery_gdf = gpd.GeoDataFrame(grocery_df, geometry=geometry, crs='EPSG:4326')
         
         grocery_gdf['dest_id'] = range(len(grocery_gdf))
@@ -1190,6 +1206,34 @@ class DataLoader:
             ])
         
         return np.array(derived, dtype=np.float64)
+
+    def load_block_groups_for_validation(self, state_fips: str, county_fips: str):
+        '''
+        Load block group geometries and demographics for validation.
+        
+        Returns:
+            Tuple of (geometries_gdf, demographics_df) or None if not available
+        '''
+        from granite.data.block_group_loader import BlockGroupLoader
+        
+        try:
+            loader = BlockGroupLoader(
+                data_dir=self.data_dir,
+                verbose=self.verbose
+            )
+            
+            geometries = loader.load_block_group_geometries(state_fips, county_fips)
+            demographics = loader.fetch_acs_demographics(state_fips, county_fips)
+            
+            if geometries is not None and demographics is not None:
+                return (geometries, demographics)
+            else:
+                return None
+                
+        except Exception as e:
+            if self.verbose:
+                print(f"Could not load block group data: {e}")
+            return None
 
     # =========================================================================
     # ENHANCED DESTINATION METHODS (bound at init)

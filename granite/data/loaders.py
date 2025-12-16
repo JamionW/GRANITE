@@ -1208,31 +1208,47 @@ class DataLoader:
         return np.array(derived, dtype=np.float64)
 
     def load_block_groups_for_validation(self, state_fips: str, county_fips: str):
-        '''
-        Load block group geometries and demographics for validation.
+        """
+        Load block group geometries and demographics with computed SVI for validation.
         
         Returns:
-            Tuple of (geometries_gdf, demographics_df) or None if not available
-        '''
+            GeoDataFrame with geometry, demographics, and computed SVI, or None if not available
+        """
         from granite.data.block_group_loader import BlockGroupLoader
         
         try:
+            # Get Census API key from config
+            api_key = None
+            if hasattr(self, 'config') and self.config:
+                api_key = self.config.get('data', {}).get('census_api_key')
+            
+            # Fall back to environment variable
+            if not api_key:
+                import os
+                api_key = os.environ.get('CENSUS_API_KEY')
+            
             loader = BlockGroupLoader(
                 data_dir=self.data_dir,
+                api_key=api_key,
                 verbose=self.verbose
             )
             
-            geometries = loader.load_block_group_geometries(state_fips, county_fips)
-            demographics = loader.fetch_acs_demographics(state_fips, county_fips)
+            # Get merged geometries + demographics with SVI
+            bg_gdf = loader.get_block_groups_with_demographics(state_fips, county_fips)
             
-            if geometries is not None and demographics is not None:
-                return (geometries, demographics)
+            if bg_gdf is not None and len(bg_gdf) > 0:
+                # Check if SVI was computed
+                if 'SVI' in bg_gdf.columns:
+                    svi_complete = bg_gdf['svi_complete'].sum() if 'svi_complete' in bg_gdf.columns else len(bg_gdf)
+                    if self.verbose:
+                        print(f"[DataLoader] Loaded {len(bg_gdf)} block groups with SVI ({svi_complete} complete)")
+                return bg_gdf
             else:
                 return None
                 
         except Exception as e:
             if self.verbose:
-                print(f"Could not load block group data: {e}")
+                print(f"[DataLoader] Could not load block group data: {e}")
             return None
 
     # =========================================================================

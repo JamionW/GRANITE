@@ -4272,73 +4272,86 @@ ACCESSIBILITY-VULNERABILITY
         
         elapsed = time.time() - start_time
 
-        # 12. Block group validation (optional - graceful failure if data unavailable)
+        # 12. Block group validation with SVI ground truth
         try:
             block_groups = self.data_loader.load_block_groups_for_validation(
                 state_fips, county_fips
             )
             
-            if block_groups is not None:
-                from granite.evaluation.block_group_validation import BlockGroupValidator
+            if block_groups is not None and 'SVI' in block_groups.columns:
+                from granite.validation.block_group_validation import BlockGroupValidator
                 
                 # Combine all test addresses and predictions
                 all_test_addresses = []
-                all_test_predictions = []
+                all_test_predictions = {'GRANITE': []}
+                idw_predictions = []
+                kriging_predictions = []
+                
                 for fips, result in test_results.items():
                     test_addr = self.data_loader.get_addresses_for_tract(fips)
-                    all_test_addresses.append(test_addr)
-                    all_test_predictions.append(result['predictions'])
-                
-                if all_test_addresses:
-                    combined_addresses = pd.concat(all_test_addresses, ignore_index=True)
-                    combined_predictions = np.concatenate(all_test_predictions)
-                    
-                    # Create validator
-                    validator = BlockGroupValidator(block_groups, verbose=self.verbose)
-                    
-                    # Validate GRANITE
-                    granite_validation = validator.validate(
-                        combined_addresses, combined_predictions, 'GRANITE'
-                    )
-                    
-                    # Build comparison results dict - include GRANITE
-                    comparison_results = {'GRANITE': granite_validation}
-                    
-                    # Run same validation for baselines
-                    idw_predictions = []
-                    kriging_predictions = []
-                    for fips, result in test_results.items():
+                    if test_addr is not None and len(test_addr) > 0:
+                        all_test_addresses.append(test_addr)
+                        all_test_predictions['GRANITE'].append(result['predictions'])
+                        
+                        # Collect baseline predictions
                         if 'baseline_comparison' in result:
                             baselines = result['baseline_comparison'].get('methods', {})
                             if 'IDW_p2.0' in baselines:
                                 idw_predictions.append(baselines['IDW_p2.0']['predictions'])
                             if 'Kriging' in baselines:
                                 kriging_predictions.append(baselines['Kriging']['predictions'])
+                
+                if all_test_addresses:
+                    combined_addresses = gpd.GeoDataFrame(
+                        pd.concat(all_test_addresses, ignore_index=True)
+                    )
+                    if combined_addresses.crs is None:
+                        combined_addresses.set_crs(epsg=4326, inplace=True)
                     
+                    # Build method predictions dict
+                    method_predictions = {
+                        'GRANITE': np.concatenate(all_test_predictions['GRANITE'])
+                    }
                     if idw_predictions:
-                        idw_combined = np.concatenate(idw_predictions)
-                        comparison_results['IDW'] = validator.validate(
-                            combined_addresses, idw_combined, 'IDW'
-                        )
-                    
+                        method_predictions['IDW'] = np.concatenate(idw_predictions)
                     if kriging_predictions:
-                        kriging_combined = np.concatenate(kriging_predictions)
-                        comparison_results['Kriging'] = validator.validate(
-                            combined_addresses, kriging_combined, 'Kriging'
-                        )
+                        method_predictions['Kriging'] = np.concatenate(kriging_predictions)
                     
-                    # Generate comparison report
+                    # Create validator and run comparison
+                    validator = BlockGroupValidator(block_groups, verbose=self.verbose)
+                    comparison_results = validator.compare_methods(
+                        combined_addresses, method_predictions
+                    )
+                    
+                    # Generate comprehensive report with visualizations
                     validation_dir = os.path.join(self.output_dir, 'block_group_validation')
                     os.makedirs(validation_dir, exist_ok=True)
-                    validator.create_validation_report(validation_dir, comparison_results)
+                    validator.create_validation_report(validation_dir)
                     
-                    self._log(f"Block group validation complete. See {validation_dir}")
+                    # Log key results
+                    self._log(f"\n{'='*60}")
+                    self._log("BLOCK GROUP SVI VALIDATION")
+                    self._log(f"{'='*60}")
+                    for method, result in comparison_results.items():
+                        svi_corr = result['correlations'].get('svi_correlation', {})
+                        r = svi_corr.get('pearson_r', np.nan)
+                        p = svi_corr.get('p_value', np.nan)
+                        n = result['diagnostics'].get('n_block_groups_validated', 0)
+                        self._log(f"  {method}: r={r:.3f}, p={p:.4f}, n={n} block groups")
+                    self._log(f"{'='*60}")
+                    self._log(f"Validation report saved to: {validation_dir}")
+                    
             else:
-                self._log("Block group data not available, skipping validation", level='WARN')
+                if block_groups is None:
+                    self._log("Block group data not available, skipping validation", level='WARN')
+                else:
+                    self._log("Block group SVI not computed, skipping validation", level='WARN')
                 
         except Exception as e:
             self._log(f"Block group validation failed (non-fatal): {e}", level='WARN')
-            # Continue with rest of pipeline - validation is optional
+            import traceback
+            if self.verbose:
+                traceback.print_exc()
         
         # 13. Summary
         if test_results:

@@ -1,29 +1,20 @@
 {
-  "name": "GRANITE Development",
+  "name": "GRANITE Spatial",
   "image": "mcr.microsoft.com/devcontainers/python:3.11",
-  "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {
-      "moby": false
-    }
-  },
-  "postStartCommand": "bash /workspaces/GRANITE/granite/scripts/start_osrm.sh",
-  "forwardPorts": [5000, 5001],
-  "portsAttributes": {
-    "5000": {
-      "label": "OSRM Driving",
-      "onAutoForward": "ignore"
-    },
-    "5001": {
-      "label": "OSRM Walking",
-      "onAutoForward": "ignore"
-    }
-  },
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
-        "ms-python.vscode-pylance"
-      ]
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      }
     }
+  },
+  "postCreateCommand": "pip install -r requirements.txt",
+  "containerEnv": {
+    "PYTHONPATH": "/workspaces/GRANITE"
   }
 }

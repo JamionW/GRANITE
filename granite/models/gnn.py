@@ -1,8 +1,9 @@
 """
-GRANITE GNN Architecture and Training
+GRANITE GNN Architecture (Spatial Version)
 
-Provides graph neural network models and trainers for accessibility-based
-social vulnerability prediction with constraint enforcement.
+Simplified Graph Neural Network for spatial disaggregation.
+Uses coordinate-based features and graph topology to learn
+within-tract vulnerability patterns.
 """
 import torch
 import torch.nn as nn
@@ -11,343 +12,216 @@ from torch_geometric.nn import GCNConv, GATConv, BatchNorm
 from torch_geometric.data import Data
 import numpy as np
 import random
-from typing import Dict, Tuple, Optional
+from typing import Dict, Optional
 
-def set_random_seed(seed=42):
-    """
-    Set all random seeds for reproducibility.
-    
-    Args:
-        seed: Random seed value (default: 42)
-    """
+
+def set_random_seed(seed: int = 42):
+    """Set all random seeds for reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    
-    # Force deterministic behavior in PyTorch
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    
-    # Set PyTorch Geometric reproducibility
     torch.use_deterministic_algorithms(True, warn_only=True)
 
 
-class AccessibilitySVIGNN(nn.Module):
+class SpatialDisaggregationGNN(nn.Module):
     """
-    Context-aware GNN for accessibility-vulnerability prediction.
+    GNN for spatial disaggregation of tract-level SVI to addresses.
     
-    Supports context-gated feature modulation and multi-task learning.
+    Architecture:
+        Input (spatial features) -> MLP encoder -> GCN -> GAT -> GCN -> Output (SVI)
+    
+    The model learns to allocate known tract-level SVI across addresses
+    based on spatial position and graph structure.
     """
-    def __init__(self, accessibility_features_dim, context_features_dim=5, 
-             hidden_dim=64, dropout=0.3, seed=42, use_context_gating=True,
-             use_multitask=True):
-
-        super(AccessibilitySVIGNN, self).__init__()
+    
+    def __init__(self, 
+                 input_dim: int = 6,
+                 hidden_dim: int = 32,
+                 dropout: float = 0.2,
+                 seed: int = 42):
+        """
+        Args:
+            input_dim: Number of spatial features (default: 6)
+            hidden_dim: Hidden layer dimension
+            dropout: Dropout rate
+            seed: Random seed for reproducibility
+        """
+        super(SpatialDisaggregationGNN, self).__init__()
         
-        # Set seed for reproducible initialization
         set_random_seed(seed)
         
-        self.accessibility_features_dim = accessibility_features_dim
-        self.context_features_dim = context_features_dim
+        self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout
-        self.use_context_gating = use_context_gating  
         
-        if use_context_gating:
-            self.context_gate = ContextGatedFeatureModulator(
-                accessibility_dim=accessibility_features_dim,
-                context_dim=context_features_dim,
-                hidden_dim=32
-            )
-
-        self.use_multitask = use_multitask
+        # Input normalization
+        self.input_norm = nn.LayerNorm(input_dim)
         
-        # Input normalization (applied to potentially modulated features)
-        self.input_norm = nn.LayerNorm(accessibility_features_dim)
-        
-        # Feature encoding
-        self.feature_encoder = nn.Sequential(
-            nn.Linear(accessibility_features_dim, hidden_dim),
+        # Feature encoder (MLP)
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout * 0.5),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        )
-        
-        # Graph convolution layers
-        self.spatial_conv1 = GCNConv(hidden_dim, hidden_dim)
-        self.spatial_norm1 = BatchNorm(hidden_dim)
-        
-        self.attention_conv = GATConv(hidden_dim, hidden_dim//2, heads=2, concat=True, dropout=dropout*0.5)
-        self.attention_norm = BatchNorm(hidden_dim)
-        
-        self.spatial_conv2 = GCNConv(hidden_dim, hidden_dim//2)
-        self.spatial_norm2 = BatchNorm(hidden_dim//2)
-        
-        # Accessibility learning layer
-        self.accessibility_learner = nn.Sequential(
-            nn.Linear(hidden_dim//2, hidden_dim//4),
-            nn.ReLU(),
-            nn.Dropout(dropout * 0.5),
-            nn.Linear(hidden_dim//4, accessibility_features_dim),
             nn.ReLU()
         )
         
-        # PRIMARY TASK: SVI prediction head
-        self.svi_predictor = nn.Sequential(
-            nn.Linear(hidden_dim//2, hidden_dim//4),
+        # Graph convolution layers
+        self.conv1 = GCNConv(hidden_dim, hidden_dim)
+        self.norm1 = BatchNorm(hidden_dim)
+        
+        self.attention = GATConv(
+            hidden_dim, 
+            hidden_dim // 2, 
+            heads=2, 
+            concat=True,
+            dropout=dropout * 0.5
+        )
+        self.norm2 = BatchNorm(hidden_dim)
+        
+        self.conv2 = GCNConv(hidden_dim, hidden_dim // 2)
+        self.norm3 = BatchNorm(hidden_dim // 2)
+        
+        # Output head
+        self.predictor = nn.Sequential(
+            nn.Linear(hidden_dim // 2, hidden_dim // 4),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim//4, 1)
+            nn.Linear(hidden_dim // 4, 1)
         )
         
-        # AUXILIARY TASK HEADS (only if using multi-task)
-        if use_multitask:
-            self.accessibility_classifier = nn.Sequential(
-                nn.Linear(hidden_dim//2, hidden_dim//4),
-                nn.ReLU(),
-                nn.Dropout(dropout * 0.5),
-                nn.Linear(hidden_dim//4, 5)
-            )
-            
-            self.vehicle_predictor = nn.Sequential(
-                nn.Linear(hidden_dim//2, hidden_dim//4),
-                nn.ReLU(),
-                nn.Dropout(dropout * 0.5),
-                nn.Linear(hidden_dim//4, 1)
-            )
-            
-            self.employment_classifier = nn.Sequential(
-                nn.Linear(hidden_dim//2, hidden_dim//4),
-                nn.ReLU(),
-                nn.Dropout(dropout * 0.5),
-                nn.Linear(hidden_dim//4, 3)
-            )
-        
-        self._initialize_weights(seed)
         self.dropout = nn.Dropout(dropout)
-
-    def _initialize_weights(self, seed):
-        """Initialize weights deterministically using the provided seed."""
-        # Set seed again to ensure consistent initialization
+        self._initialize_weights(seed)
+    
+    def _initialize_weights(self, seed: int):
+        """Initialize weights deterministically."""
         torch.manual_seed(seed)
-        
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_normal_(module.weight, gain=1.0)
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
-        
-    def forward(self, accessibility_features, edge_index, context_features=None, 
-                return_accessibility=False, return_all_tasks=False):
+    
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """
-        Context-aware forward pass through the GNN.
+        Forward pass through the GNN.
         
         Args:
-            accessibility_features: Input node features [n_nodes, accessibility_dim]
-            edge_index: Graph edge connectivity
-            context_features: Context features for gating [n_nodes, context_dim]
-            return_accessibility: If True, return predictions, accessibility, and attention
+            x: Node features [n_nodes, input_dim]
+            edge_index: Graph connectivity [2, n_edges]
         
         Returns:
-            svi_predictions: Predicted SVI values [0,1]
-            learned_accessibility: (optional) Learned accessibility representations
-            attention_weights: (optional) Context-gating attention weights
+            predictions: SVI predictions [n_nodes] in range [0, 1]
         """
-        # NEW: Apply context-gating if available
-        attention_weights = None
-        if self.use_context_gating and context_features is not None:
-            # Modulate accessibility features based on context
-            modulated_features, attention_weights = self.context_gate(
-                accessibility_features,
-                context_features
-            )
-            # Use modulated features for rest of pipeline
-            x = self.input_norm(modulated_features)
-        else:
-            # Standard path (no context-gating)
-            x = self.input_norm(accessibility_features)
+        # Input processing
+        x = self.input_norm(x)
+        x = self.encoder(x)
         
-        x = self.feature_encoder(x)
-        
-        # Graph convolution (unchanged)
-        x = self.spatial_conv1(x, edge_index)
-        x = self.spatial_norm1(x)
+        # Graph convolutions
+        x = self.conv1(x, edge_index)
+        x = self.norm1(x)
         x = F.relu(x)
         x = self.dropout(x)
         
-        x_att = self.attention_conv(x, edge_index)
-        x_att = self.attention_norm(x_att)
-        x_att = F.relu(x_att)
-        
-        x = self.spatial_conv2(x_att, edge_index)
-        x = self.spatial_norm2(x)
+        x = self.attention(x, edge_index)
+        x = self.norm2(x)
         x = F.relu(x)
         
-        # Learn accessibility representations
-        learned_accessibility = self.accessibility_learner(x)
+        x = self.conv2(x, edge_index)
+        x = self.norm3(x)
+        x = F.relu(x)
         
-        # SVI prediction
-        svi_predictions = self.svi_predictor(x)
-        svi_predictions = torch.sigmoid(svi_predictions.squeeze())
+        # Prediction
+        out = self.predictor(x)
+        predictions = torch.sigmoid(out.squeeze())
         
-        # Return based on what's requested
-        if not self.use_multitask or not return_all_tasks:
-            if return_accessibility:
-                return svi_predictions, learned_accessibility, attention_weights
-            else:
-                return svi_predictions
-        
-        # MULTI-TASK OUTPUT
-        return {
-            'svi': svi_predictions,
-            'accessibility_quintile_logits': self.accessibility_classifier(x),
-            'vehicle_ownership': torch.sigmoid(self.vehicle_predictor(x).squeeze()),
-            'employment_category_logits': self.employment_classifier(x),
-            'learned_accessibility': learned_accessibility,
-            'attention_weights': attention_weights,
-            'embeddings': x
-        }
+        return predictions
 
-class ContextGatedFeatureModulator(nn.Module):
+
+class SpatialGNNTrainer:
     """
-    Dynamically weight accessibility features based on socioeconomic context.
-    """
-    def __init__(self, accessibility_dim, context_dim, hidden_dim=32):
-        super(ContextGatedFeatureModulator, self).__init__()
-        
-        # Context encoder: Demographics → embedding
-        self.context_encoder = nn.Sequential(
-            nn.Linear(context_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim)
-        )
-        
-        # Attention mechanism: Context → feature importance weights
-        self.attention = nn.Sequential(
-            nn.Linear(hidden_dim, accessibility_dim),
-            nn.Softmax(dim=-1)
-        )
-        
-        # Base feature importance (learned universal patterns)
-        self.base_importance = nn.Parameter(torch.ones(accessibility_dim))
+    Trainer for spatial disaggregation GNN.
     
-    def forward(self, accessibility_features, context_features):
-        """Apply context-dependent feature weighting."""
-        # Encode context
-        context_embedding = self.context_encoder(context_features)
-        
-        # Compute feature importance weights from context
-        attention_weights = self.attention(context_embedding)
-        
-        # Combine with base importance
-        combined_weights = attention_weights * self.base_importance
-        
-        # Apply weights to features
-        modulated_features = accessibility_features * combined_weights
-        
-        return modulated_features, attention_weights
-
-class AccessibilityGNNTrainer:
+    Enforces tract-level mean constraint while encouraging
+    meaningful spatial variation.
     """
-    Single-tract trainer for GRANITE training.
-    Enforces tract-level mean constraint while learning spatial patterns.
-    """
-    def __init__(self, model, config=None, seed=42):
+    
+    def __init__(self, 
+                 model: SpatialDisaggregationGNN,
+                 learning_rate: float = 0.001,
+                 constraint_weight: float = 2.0,
+                 seed: int = 42):
+        """
+        Args:
+            model: SpatialDisaggregationGNN instance
+            learning_rate: Optimizer learning rate
+            constraint_weight: Weight for tract mean constraint loss
+            seed: Random seed
+        """
         self.model = model
-        self.config = config or {}
         self.seed = seed
+        self.constraint_weight = constraint_weight
         
-        self.use_multitask = config.get('use_multitask', True)
-        self.multitask_weights = {
-            'accessibility': 0.3,
-            'vehicle': 0.3,
-            'employment': 0.2
-        }
-
-        self.enforce_constraints = config.get('enforce_constraints', True)
-        self.constraint_weight = config.get('constraint_weight', 
-                                        2.0 if self.enforce_constraints else 0.0)
-        
-        # Set seed for optimizer initialization
         set_random_seed(seed)
         
-        learning_rate = float(self.config.get('learning_rate', 0.001))
-        weight_decay = float(self.config.get('weight_decay', 1e-4))
-        
         self.optimizer = torch.optim.Adam(
-            model.parameters(), 
-            lr=learning_rate, 
-            weight_decay=weight_decay
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=1e-4
         )
         
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', patience=5, factor=0.8, min_lr=1e-5
         )
         
-        # Training state
-        self.best_loss = float('inf')
-        self.patience_counter = 0
         self.training_history = {
-            'losses': [], 
-            'constraint_errors': [], 
-            'spatial_stds': [],
-            'raw_predictions_history': [],
-            'attention_weights': [] 
+            'losses': [],
+            'constraint_errors': [],
+            'spatial_stds': []
         }
-        
-    def train(self, graph_data, tract_svi, epochs=100, verbose=True):
+    
+    def train(self, 
+              graph_data: Data,
+              tract_svi: float,
+              epochs: int = 100,
+              verbose: bool = True) -> Dict:
         """
-        Train GNN on single tract with deterministic behavior.
+        Train the GNN with tract mean constraint.
         
         Args:
-            graph_data: PyTorch Geometric Data object
-            tract_svi: Target SVI value for the tract
+            graph_data: PyG Data object with x (features) and edge_index
+            tract_svi: Known tract-level SVI value (constraint target)
             epochs: Number of training epochs
-            verbose: Print training progress
+            verbose: Print progress
         
         Returns:
-            Dict with training results and diagnostics
+            Dict with training results
         """
-        # Ensure reproducibility
         set_random_seed(self.seed)
         
         self.model.train()
         target_svi = torch.FloatTensor([tract_svi])
         n_addresses = graph_data.x.shape[0]
         
-        learned_accessibility_history = []
+        best_loss = float('inf')
+        patience_counter = 0
         
         for epoch in range(epochs):
             self.optimizer.zero_grad()
-
-            # Check if context features available
-            context = getattr(graph_data, 'context', None)
             
-            # Forward pass with context-gating
-            predictions, learned_accessibility, attention_weights = self.model(
-                graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
-            )
-
-            # Optional: Track attention weights for analysis
-            if attention_weights is not None:
-                if epoch == 0:
-                    self.training_history['attention_weights'] = []
-                self.training_history['attention_weights'].append(
-                    attention_weights.detach().cpu().numpy()
-                )
+            # Forward pass
+            predictions = self.model(graph_data.x, graph_data.edge_index)
             
-            # Compute losses with REBALANCED weights
-            losses = self._compute_losses(predictions, target_svi, n_addresses)
+            # Compute losses
+            losses = self._compute_losses(predictions, target_svi)
             total_loss = losses['total']
             
             # Backward pass
             total_loss.backward()
-            
-            # Gradient clipping for stability
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            
             self.optimizer.step()
             self.scheduler.step(total_loss)
             
@@ -358,786 +232,194 @@ class AccessibilityGNNTrainer:
             self.training_history['losses'].append(total_loss.item())
             self.training_history['constraint_errors'].append(constraint_error)
             self.training_history['spatial_stds'].append(spatial_std)
-            self.training_history['raw_predictions_history'].append(predictions.detach().cpu().numpy())
-            
-            # Store accessibility learning evolution
-            if epoch % 10 == 0 or epoch == epochs - 1:
-                learned_accessibility_history.append({
-                    'epoch': epoch,
-                    'learned_features': learned_accessibility.detach().cpu().numpy()
-                })
             
             # Early stopping
-            if total_loss.item() < self.best_loss:
-                self.best_loss = total_loss.item()
-                self.patience_counter = 0
+            if total_loss.item() < best_loss:
+                best_loss = total_loss.item()
+                patience_counter = 0
             else:
-                self.patience_counter += 1
-                    
-            if self.patience_counter >= 15:
+                patience_counter += 1
+            
+            if patience_counter >= 15:
                 if verbose:
                     print(f"Early stopping at epoch {epoch}")
                 break
             
-            # Progress reporting
+            # Progress
             if verbose and epoch % 20 == 0:
-                current_lr = self.optimizer.param_groups[0]['lr']
                 print(f"Epoch {epoch:3d}: Loss={total_loss.item():.6f}, "
-                    f"Constraint={constraint_error:.2f}%, "
-                    f"Std={spatial_std:.4f}, "
-                    f"LR={current_lr:.6f}")
+                      f"Constraint={constraint_error:.2f}%, Std={spatial_std:.4f}")
         
         # Final evaluation
         self.model.eval()
-        context = getattr(graph_data, 'context', None)
-        final_predictions, final_learned_accessibility, attention_weights = self.model(
-            graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
-        )
+        with torch.no_grad():
+            final_predictions = self.model(graph_data.x, graph_data.edge_index)
         
-        results = {
-            'final_predictions': final_predictions.detach().numpy(),
-            'learned_accessibility': final_learned_accessibility.detach().numpy(),
-            'learned_accessibility_history': learned_accessibility_history,
-            'training_history': self.training_history,
+        return {
+            'success': True,
+            'raw_predictions': final_predictions.numpy(),
             'final_spatial_std': float(final_predictions.std()),
             'constraint_error': float(abs(final_predictions.mean() - tract_svi)),
             'epochs_trained': epoch + 1,
-            'final_loss': total_loss.item(),
-            'learning_converged': self.patience_counter < 15,
-            'success': True
+            'training_history': self.training_history
         }
-        
-        return results
     
-    def _compute_losses(self, predictions, target_svi, n_addresses):
-        """Compute training losses with optional constraint enforcement."""
+    def _compute_losses(self, predictions: torch.Tensor, target_svi: torch.Tensor) -> Dict:
+        """Compute training losses."""
         
-        # 1. Constraint preservation loss
+        # 1. Constraint loss (tract mean must match)
         predicted_mean = predictions.mean()
         constraint_loss = F.mse_loss(predicted_mean.unsqueeze(0), target_svi)
         
-        # 2. Spatial variation encouragement
+        # 2. Variation loss (encourage spatial heterogeneity)
         spatial_std = predictions.std()
         min_variation = 0.02
         variation_loss = F.relu(min_variation - spatial_std)
         
-        # 3. Bounds enforcement (always active)
-        bounds_loss = torch.mean(F.relu(predictions - 1.0)) + torch.mean(F.relu(-predictions))
+        # 3. Bounds loss (keep predictions in [0, 1])
+        bounds_loss = (
+            torch.mean(F.relu(predictions - 1.0)) + 
+            torch.mean(F.relu(-predictions))
+        )
         
-        # 4. Distribution regularization
-        if n_addresses > 10:
-            prediction_range = predictions.max() - predictions.min()
-            min_range = 0.05
-            range_loss = F.relu(min_range - prediction_range)
-        else:
-            range_loss = torch.tensor(0.0)
+        # 4. Range loss (encourage spread)
+        pred_range = predictions.max() - predictions.min()
+        range_loss = F.relu(0.05 - pred_range)
         
-        # 5. Accessibility consistency
-        accessibility_consistency_loss = self._compute_accessibility_consistency_loss(predictions)
-        
-        if self.enforce_constraints:
-            # Standard constrained training
-            total_loss = (
-                self.constraint_weight * constraint_loss +     # Use configured weight
-                1.5 * variation_loss +
-                1.0 * bounds_loss +
-                0.3 * range_loss +
-                0.5 * accessibility_consistency_loss
-            )
-        else:
-            # Unconstrained: learn from structure only
-            total_loss = (
-                0.0 * constraint_loss +           # No constraint pressure
-                2.0 * variation_loss +            # Strong variation encouragement
-                1.0 * bounds_loss +               # Keep valid range
-                0.5 * range_loss +                # Distribution shape
-                1.0 * accessibility_consistency_loss  # Structure learning
-            )
+        # Combine
+        total_loss = (
+            self.constraint_weight * constraint_loss +
+            1.5 * variation_loss +
+            1.0 * bounds_loss +
+            0.3 * range_loss
+        )
         
         return {
             'total': total_loss,
             'constraint': constraint_loss,
             'variation': variation_loss,
             'bounds': bounds_loss,
-            'range': range_loss,
-            'accessibility': accessibility_consistency_loss
+            'range': range_loss
         }
     
-    def _compute_accessibility_consistency_loss(self, predictions):
-        """Encourage structured predictions"""
-        
-        if len(predictions) < 4:
-            return torch.tensor(0.0)
-        
-        sorted_preds = torch.sort(predictions)[0]
-        
-        if len(sorted_preds) > 1:
-            pred_gradient = sorted_preds[1:] - sorted_preds[:-1]
-            gradient_loss = F.relu(0.001 - pred_gradient.mean())
-        else:
-            gradient_loss = torch.tensor(0.0)
-        
-        return gradient_loss
-
-    def predict_unconstrained(self, graph_data):
-        """
-        Generate predictions without any correction.
-        Returns raw model outputs for validation.
-        
-        Returns:
-            dict with 'predictions' and 'learned_accessibility'
-        """
+    def predict(self, graph_data: Data) -> np.ndarray:
+        """Generate predictions without training."""
         self.model.eval()
-        # Check if context features available
-        context = getattr(graph_data, 'context', None)
-
         with torch.no_grad():
-            predictions, learned_accessibility, attention_weights = self.model(  # ← RIGHT: unpacking 3
-                graph_data.x, 
-                graph_data.edge_index, 
-                return_accessibility=True,
-                context_features=context
-            )
-        
-        return {
-            'predictions': predictions.detach().numpy(),
-            'learned_accessibility': learned_accessibility.detach().numpy()
-        }
+            predictions = self.model(graph_data.x, graph_data.edge_index)
+        return predictions.numpy()
 
 
-class MultiTractGNNTrainer:
+class MultiTractGNNTrainer(SpatialGNNTrainer):
     """
-    Multi-tract trainer for GRANITE with per-tract constraint enforcement.
-    
-    CRITICAL STABILITY IMPROVEMENTS:
-    - Deterministic training with seed control
-    - REBALANCED loss weights (constraint 5.0 -> 2.0)
-    - Enhanced diagnostic tracking
-    - Raw prediction preservation for analysis
+    Extended trainer for multi-tract training with per-tract constraints.
     """
     
-    def __init__(self, model, config=None, seed=42):
-        self.model = model
-        self.config = config or {}
-        self.seed = seed
-
-        # Multi-task learning configuration
-        self.use_multitask = config.get('use_multitask', True)
-        self.multitask_weights = {
-            'accessibility': 0.3,
-            'vehicle': 0.3,
-            'employment': 0.2
-        }
-
-        # NEW: Training mode controls
-        self.enforce_constraints = config.get('enforce_constraints', True)
-        self.constraint_weight = config.get('constraint_weight', 
-                                        2.0 if self.enforce_constraints else 0.0)
-        
-        # Set seed for optimizer initialization
-        set_random_seed(seed)
-        
-        learning_rate = self.config.get('learning_rate', 0.001)
-        weight_decay = self.config.get('weight_decay', 1e-4)
-        
-        self.optimizer = torch.optim.Adam(
-            model.parameters(), 
-            lr=learning_rate, 
-            weight_decay=weight_decay
-        )
-        
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', patience=5, factor=0.8, min_lr=1e-5
-        )
-        
-        # Training state
-        self.best_loss = float('inf')
-        self.patience_counter = 0
-        self.training_history = {
-            'losses': [], 
-            'constraint_errors': [], 
-            'spatial_stds': [],
-            'per_tract_errors': {},
-            'raw_predictions_history': [],
-            'attention_weights': [] 
-        }
-    
-    def train(self, graph_data, tract_svis: Dict[str, float], 
-          tract_masks: Dict[str, np.ndarray], epochs=100, verbose=True,
-          feature_names=None):
+    def train_multi_tract(self,
+                          graph_data: Data,
+                          tract_svis: Dict[str, float],
+                          tract_masks: Dict[str, np.ndarray],
+                          epochs: int = 100,
+                          verbose: bool = True) -> Dict:
         """
-        Train GNN across multiple tracts with per-tract constraints.
-        
-        STABILITY GUARANTEE: Identical results across runs with same seed.
+        Train on multiple tracts simultaneously.
         
         Args:
-            graph_data: PyTorch Geometric Data object with all addresses
-            tract_svis: Dict mapping tract FIPS to target SVI values
-            tract_masks: Dict mapping tract FIPS to boolean masks
-            epochs: Number of training epochs
-            verbose: Print training progress
+            graph_data: Combined graph for all tracts
+            tract_svis: Dict mapping FIPS -> target SVI
+            tract_masks: Dict mapping FIPS -> boolean mask for addresses
+            epochs: Training epochs
+            verbose: Print progress
         
         Returns:
-            Dict with training results including raw predictions
+            Training results dict
         """
-        # Ensure complete reproducibility
         set_random_seed(self.seed)
-        
         self.model.train()
-        
-        # Convert tract SVIs to tensors
-        tract_targets = {
-            fips: torch.FloatTensor([svi]) 
-            for fips, svi in tract_svis.items()
-        }
         
         # Convert masks to tensors
         tract_masks_tensor = {
-            fips: torch.BoolTensor(mask)
+            fips: torch.BoolTensor(mask) 
             for fips, mask in tract_masks.items()
         }
+        tract_targets = {
+            fips: torch.FloatTensor([svi])
+            for fips, svi in tract_svis.items()
+        }
         
-        n_addresses = graph_data.x.shape[0]
-        
-        # Generate auxiliary labels for multi-task learning
-        auxiliary_labels = None
-        if self.use_multitask:
-            if feature_names is None:
-                if verbose:
-                    print("WARNING: feature_names not provided, multi-task disabled")
-                self.use_multitask = False
-            else:
-                # Extract features as numpy
-                accessibility_np = graph_data.x.cpu().numpy()
-                context_np = graph_data.context.cpu().numpy()
-                
-                # Generate labels
-                labels_dict = generate_auxiliary_labels(
-                    accessibility_np, context_np, feature_names
-                )
-                
-                # Convert to tensors
-                device = graph_data.x.device
-                auxiliary_labels = {
-                    'accessibility_quintile': torch.tensor(
-                        labels_dict['accessibility_quintile'],
-                        dtype=torch.long, device=device
-                    ),
-                    'vehicle_ownership': torch.tensor(
-                        labels_dict['vehicle_ownership'],
-                        dtype=torch.float32, device=device
-                    ),
-                    'employment_category': torch.tensor(
-                        labels_dict['employment_category'],
-                        dtype=torch.long, device=device
-                    )
-                }
-                
-                if verbose:
-                    print("\n=== Multi-Task Learning Enabled ===")
-                    print(f"Generated auxiliary labels:")
-                    print(f"  Accessibility quintiles: {np.bincount(labels_dict['accessibility_quintile'])}")
-                    print(f"  Vehicle ownership range: [{labels_dict['vehicle_ownership'].min():.3f}, {labels_dict['vehicle_ownership'].max():.3f}]")
-                    print(f"  Employment categories: {np.bincount(labels_dict['employment_category'])}")
-                    print("=" * 40 + "\n")
+        best_loss = float('inf')
+        patience_counter = 0
         
         for epoch in range(epochs):
             self.optimizer.zero_grad()
-
-            # Check if context features available
-            context = getattr(graph_data, 'context', None)
             
-            if self.use_multitask and auxiliary_labels is not None:
-                # === MULTI-TASK PATH ===
-                outputs = self.model(
-                    graph_data.x, 
-                    graph_data.edge_index,
-                    context_features=context,
-                    return_all_tasks=True
-                )
-                
-                predictions = outputs['svi']
-                learned_accessibility = outputs['learned_accessibility']
-                attention_weights = outputs['attention_weights']
-                
-                # Track attention weights
-                if attention_weights is not None:
-                    if epoch == 0:
-                        self.training_history['attention_weights'] = []
-                    self.training_history['attention_weights'].append(
-                        attention_weights.detach().cpu().numpy()
-                    )
-                
-                # Compute constraint losses
-                losses = self._compute_multi_tract_losses(
-                    predictions, tract_targets, tract_masks_tensor, n_addresses
-                )
-                
-                # Compute auxiliary losses
-                aux_loss_dict = compute_multitask_loss(
-                    outputs, auxiliary_labels, weights=self.multitask_weights
-                )
-                
-                # Combined loss
-                total_loss = losses['total'] + 1.0 * aux_loss_dict['total']
-                
-                # Enhanced logging every 10 epochs
-                if verbose and epoch % 10 == 0:
-                    print(f"\nEpoch {epoch}:")
-                    print(f"  Total Loss: {total_loss:.4f}")
-                    print(f"  Constraint: {losses['constraint']:.4f}")
-                    print(f"  Auxiliary Total: {aux_loss_dict['total']:.4f}")
-                    print(f"    - Accessibility cls: {aux_loss_dict['accessibility']:.4f}")
-                    print(f"    - Vehicle reg: {aux_loss_dict['vehicle']:.4f}")
-                    print(f"    - Employment cls: {aux_loss_dict['employment']:.4f}")
-                    
-                    # Evaluate auxiliary task accuracy
-                    with torch.no_grad():
-                        acc_pred = outputs['accessibility_quintile_logits'].argmax(dim=1)
-                        acc_acc = (acc_pred == auxiliary_labels['accessibility_quintile']).float().mean().item()
-                        
-                        emp_pred = outputs['employment_category_logits'].argmax(dim=1)
-                        emp_acc = (emp_pred == auxiliary_labels['employment_category']).float().mean().item()
-                        
-                        veh_corr = np.corrcoef(
-                            outputs['vehicle_ownership'].cpu().numpy(),
-                            auxiliary_labels['vehicle_ownership'].cpu().numpy()
-                        )[0, 1]
-                        
-                        print(f"  Auxiliary Performance:")
-                        print(f"    - Accessibility accuracy: {acc_acc:.3f} (target: >0.70)")
-                        print(f"    - Employment accuracy: {emp_acc:.3f} (target: >0.70)")
-                        print(f"    - Vehicle correlation: {veh_corr:.3f} (target: >0.80)")
+            predictions = self.model(graph_data.x, graph_data.edge_index)
             
-            else:
-                # === SINGLE-TASK PATH (original) ===
-                predictions, learned_accessibility, attention_weights = self.model(
-                    graph_data.x, graph_data.edge_index, 
-                    return_accessibility=True, context_features=context
-                )
-
-                # Track attention weights
-                if attention_weights is not None:
-                    if epoch == 0:
-                        self.training_history['attention_weights'] = []
-                    self.training_history['attention_weights'].append(
-                        attention_weights.detach().cpu().numpy()
-                    )
-                
-                # Compute losses
-                losses = self._compute_multi_tract_losses(
-                    predictions, tract_targets, tract_masks_tensor, n_addresses
-                )
-                total_loss = losses['total']
-                
-                if verbose and epoch % 10 == 0:
-                    print(f"Epoch {epoch}: Loss={total_loss:.4f}")
+            # Per-tract constraint losses
+            constraint_losses = []
+            for fips, target in tract_targets.items():
+                mask = tract_masks_tensor[fips]
+                tract_preds = predictions[mask]
+                if len(tract_preds) > 0:
+                    tract_mean = tract_preds.mean()
+                    loss = F.mse_loss(tract_mean.unsqueeze(0), target)
+                    constraint_losses.append(loss)
             
-            # Backward pass
+            constraint_loss = torch.stack(constraint_losses).mean() if constraint_losses else torch.tensor(0.0)
+            
+            # Other losses
+            spatial_std = predictions.std()
+            variation_loss = F.relu(0.02 - spatial_std)
+            bounds_loss = torch.mean(F.relu(predictions - 1.0)) + torch.mean(F.relu(-predictions))
+            
+            total_loss = (
+                self.constraint_weight * constraint_loss +
+                1.5 * variation_loss +
+                1.0 * bounds_loss
+            )
+            
             total_loss.backward()
-            
-            # Gradient clipping for stability
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            
             self.optimizer.step()
             self.scheduler.step(total_loss)
             
-            # Track metrics
-            overall_constraint_error = self._compute_overall_constraint_error(
-                predictions, tract_targets, tract_masks_tensor
-            )
-            spatial_std = float(predictions.std())
-            
-            self.training_history['losses'].append(total_loss.item())
-            self.training_history['constraint_errors'].append(overall_constraint_error)
-            self.training_history['spatial_stds'].append(spatial_std)
-            self.training_history['raw_predictions_history'].append(predictions.detach().cpu().numpy())
-            
-            # Track per-tract errors
-            per_tract_errors = self._compute_per_tract_errors(
-                predictions, tract_targets, tract_masks_tensor
-            )
-            for fips, error in per_tract_errors.items():
-                if fips not in self.training_history['per_tract_errors']:
-                    self.training_history['per_tract_errors'][fips] = []
-                self.training_history['per_tract_errors'][fips].append(error)
-            
             # Early stopping
-            if total_loss.item() < self.best_loss:
-                self.best_loss = total_loss.item()
-                self.patience_counter = 0
+            if total_loss.item() < best_loss:
+                best_loss = total_loss.item()
+                patience_counter = 0
             else:
-                self.patience_counter += 1
-                    
-            if self.patience_counter >= 15:
+                patience_counter += 1
+            
+            if patience_counter >= 15:
                 if verbose:
                     print(f"Early stopping at epoch {epoch}")
                 break
             
-            # Progress reporting
             if verbose and epoch % 20 == 0:
-                current_lr = self.optimizer.param_groups[0]['lr']
+                avg_error = self._compute_avg_constraint_error(predictions, tract_targets, tract_masks_tensor)
                 print(f"Epoch {epoch:3d}: Loss={total_loss.item():.6f}, "
-                    f"Overall Constraint={overall_constraint_error:.2f}%, "
-                    f"Std={spatial_std:.4f}, "
-                    f"LR={current_lr:.6f}")
-                
-                # Show per-tract errors
-                for fips, error in list(per_tract_errors.items())[:3]:
-                    tract_id = fips[-6:]  # Last 6 digits
-                    print(f"  Tract {tract_id}: {error:.2f}% error")
+                      f"AvgConstraint={avg_error:.2f}%, Std={float(spatial_std):.4f}")
         
-        # Final evaluation
         self.model.eval()
-        context = getattr(graph_data, 'context', None)
-        final_predictions, final_learned_accessibility, attention_weights = self.model(
-            graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
-        )
-        
-        # Compute final metrics
-        final_per_tract_errors = self._compute_per_tract_errors(
-            final_predictions, tract_targets, tract_masks_tensor
-        )
-        
-        results = {
-            'final_predictions': final_predictions.detach().numpy(),
-            'learned_accessibility': final_learned_accessibility.detach().numpy(),
-            'training_history': self.training_history,
-            'final_spatial_std': float(final_predictions.std()),
-            'overall_constraint_error': self._compute_overall_constraint_error(
-                final_predictions, tract_targets, tract_masks_tensor
-            ),
-            'per_tract_errors': final_per_tract_errors,
-            'epochs_trained': epoch + 1,
-            'final_loss': total_loss.item(),
-            'learning_converged': self.patience_counter < 15,
-            'success': True
-        }
-        
-        return results
-    
-    def _compute_multi_tract_losses(self, predictions, tract_targets, 
-                                    tract_masks, n_addresses):
-        """
-        Multi-tract loss computation with configurable constraint enforcement.
-        
-        When enforce_constraints=False, the model learns purely from
-        accessibility patterns without mean-matching pressure.
-        """
-        
-        # 1. Per-tract constraint losses (weight controlled by config)
-        constraint_losses = []
-        
-        for fips, target_svi in tract_targets.items():
-            mask = tract_masks[fips]
-            tract_predictions = predictions[mask]
-            
-            if len(tract_predictions) > 0:
-                tract_mean = tract_predictions.mean()
-                tract_loss = F.mse_loss(tract_mean.unsqueeze(0), target_svi)
-                constraint_losses.append(tract_loss)
-        
-        if len(constraint_losses) > 0:
-            constraint_loss = torch.mean(torch.stack(constraint_losses))
-        else:
-            constraint_loss = torch.tensor(0.0)
-        
-        # 2. Within-tract variation encouragement
-        variation_losses = []
-        for fips, mask in tract_masks.items():
-            tract_predictions = predictions[mask]
-            
-            if len(tract_predictions) > 10:
-                tract_std = tract_predictions.std()
-                min_variation = 0.02
-                variation_loss = F.relu(min_variation - tract_std)
-                variation_losses.append(variation_loss)
-        
-        if len(variation_losses) > 0:
-            variation_loss = torch.mean(torch.stack(variation_losses))
-        else:
-            variation_loss = torch.tensor(0.0)
-        
-        # 3. Bounds enforcement (always active)
-        bounds_loss = torch.mean(F.relu(predictions - 1.0)) + torch.mean(F.relu(-predictions))
-        
-        # 4. Cross-tract smoothness
-        smoothness_loss = self._compute_cross_tract_smoothness(predictions, tract_masks)
-        
-        # NEW: Conditional weighting based on mode
-        if self.enforce_constraints:
-            # Standard constrained training
-            total_loss = (
-                self.constraint_weight * constraint_loss +
-                0.8 * variation_loss +
-                1.0 * bounds_loss +
-                0.1 * smoothness_loss
-            )
-        else:
-            # Unconstrained: learn from structure only
-            total_loss = (
-                0.0 * constraint_loss +     # No constraint pressure
-                2.0 * variation_loss +      # Strong variation encouragement
-                1.0 * bounds_loss +         # Keep valid range
-                0.5 * smoothness_loss       # Spatial structure
-            )
-        
-        return {
-            'total': total_loss,
-            'constraint': constraint_loss,
-            'variation': variation_loss,
-            'bounds': bounds_loss,
-            'smoothness': smoothness_loss
-        }
-
-    def predict_unconstrained(self, graph_data):
-        """
-        Generate predictions without any correction.
-        Returns raw model outputs for validation.
-        
-        Returns:
-            dict with 'predictions' and 'learned_accessibility'
-        """
-        self.model.eval()
-
-        # Check if context features available
-        context = getattr(graph_data, 'context', None)
-
         with torch.no_grad():
-            predictions, learned_accessibility, attention_weights = self.model(
-                graph_data.x, 
-                graph_data.edge_index, 
-                return_accessibility=True,
-                context_features=context
-            )
+            final_predictions = self.model(graph_data.x, graph_data.edge_index)
         
         return {
-            'predictions': predictions.detach().numpy(),
-            'learned_accessibility': learned_accessibility.detach().numpy()
+            'success': True,
+            'raw_predictions': final_predictions.numpy(),
+            'epochs_trained': epoch + 1
         }
     
-    def _compute_cross_tract_smoothness(self, predictions, tract_masks):
-        """Gentle smoothness penalty for extreme tract differences"""
-        
-        tract_means = []
-        for mask in tract_masks.values():
-            if mask.sum() > 0:
-                tract_means.append(predictions[mask].mean())
-        
-        if len(tract_means) > 1:
-            tract_means_tensor = torch.stack(tract_means)
-            range_penalty = (tract_means_tensor.max() - tract_means_tensor.min()) * 0.05
-            return range_penalty
-        else:
-            return torch.tensor(0.0)
-    
-    def _compute_overall_constraint_error(self, predictions, tract_targets, tract_masks):
-        """Compute weighted average constraint error across tracts"""
-        
+    def _compute_avg_constraint_error(self, predictions, tract_targets, tract_masks):
+        """Compute average constraint error across tracts."""
         errors = []
-        weights = []
-        
-        for fips, target_svi in tract_targets.items():
+        for fips, target in tract_targets.items():
             mask = tract_masks[fips]
-            tract_predictions = predictions[mask]
-            
-            if len(tract_predictions) > 0:
-                tract_mean = float(tract_predictions.mean())
-                target_val = target_svi.item()
-                
+            tract_preds = predictions[mask]
+            if len(tract_preds) > 0:
+                tract_mean = float(tract_preds.mean())
+                target_val = float(target)
                 if target_val > 0:
                     error = abs(tract_mean - target_val) / target_val * 100
-                else:
-                    error = abs(tract_mean - target_val) * 100
-                
-                errors.append(error)
-                weights.append(len(tract_predictions))
-        
-        if len(errors) > 0:
-            total_addresses = sum(weights)
-            weighted_error = sum(e * w for e, w in zip(errors, weights)) / total_addresses
-            return weighted_error
-        else:
-            return 0.0
-    
-    def _compute_per_tract_errors(self, predictions, tract_targets, tract_masks):
-        """Compute constraint error for each tract individually"""
-        
-        per_tract_errors = {}
-        
-        for fips, target_svi in tract_targets.items():
-            mask = tract_masks[fips]
-            tract_predictions = predictions[mask]
-            
-            if len(tract_predictions) > 0:
-                tract_mean = float(tract_predictions.mean())
-                target_val = target_svi.item()
-                if target_val > 0:
-                    error = abs(tract_mean - target_val) / target_val * 100
-                else:
-                    error = abs(tract_mean - target_val) * 100
-                per_tract_errors[fips] = error
-            else:
-                per_tract_errors[fips] = 0.0
-        
-        return per_tract_errors
-
-
-def normalize_accessibility_features(features, method='robust'):
-    """
-    Robust feature normalization to prevent training instability.
-    
-    Args:
-        features: Numpy array of accessibility features
-        method: 'robust' (default) or 'standard'
-    
-    Returns:
-        Tuple of (normalized_features, scaler)
-    """
-    if method == 'robust':
-        from sklearn.preprocessing import RobustScaler
-        scaler = RobustScaler()
-    else:
-        from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler()
-    
-    # Handle edge cases
-    if features.shape[1] == 0:
-        return features, scaler
-    
-    # Check for zero variance features
-    feature_stds = np.std(features, axis=0)
-    zero_var_mask = feature_stds < 1e-8
-    
-    if np.any(zero_var_mask):
-        print(f"{np.sum(zero_var_mask)} features have zero variance; proceeding")
-    
-    # Apply normalization
-    normalized_features = scaler.fit_transform(features)
-    
-    # Validation
-    if np.any(np.isnan(normalized_features)):
-        print("Error: NaN values after normalization")
-        normalized_features = np.nan_to_num(normalized_features)
-    
-    if np.any(np.isinf(normalized_features)):
-        print("Error: Infinite values after normalization")
-        normalized_features = np.nan_to_num(normalized_features)
-    
-    return normalized_features, scaler
-
-def generate_auxiliary_labels(accessibility_features, context_features, feature_names):
-    """
-    Generate ground truth labels for auxiliary tasks.
-    
-    Args:
-        accessibility_features: [n_addresses, n_features] numpy array
-        context_features: [n_addresses, 5] numpy array
-        feature_names: List of feature names
-    
-    Returns:
-        dict with 'accessibility_quintile', 'vehicle_ownership', 'employment_category'
-    """
-    n_addresses = len(accessibility_features)
-    
-    # Task 1: Accessibility quintile from travel times
-    time_indices = [i for i, name in enumerate(feature_names) if 'min_time' in name]
-    if len(time_indices) > 0:
-        avg_travel_time = accessibility_features[:, time_indices].mean(axis=1)
-        quintiles = np.argsort(np.argsort(avg_travel_time)) // (n_addresses // 5)
-        quintiles = np.clip(quintiles, 0, 4).astype(np.int64)
-    else:
-        quintiles = np.random.randint(0, 5, size=n_addresses)
-    
-    # Task 2: Vehicle ownership from context features
-    vehicle_ownership = context_features[:, 0]  # First context feature
-    
-    # Task 3: Employment category from employment counts
-    emp_indices = [i for i, name in enumerate(feature_names) if 'employment_count' in name]
-    if len(emp_indices) > 0:
-        emp_access = accessibility_features[:, emp_indices].sum(axis=1)
-        low_thresh = np.percentile(emp_access, 33)
-        high_thresh = np.percentile(emp_access, 67)
-        
-        employment_category = np.zeros(n_addresses, dtype=np.int64)
-        employment_category[emp_access >= low_thresh] = 1
-        employment_category[emp_access >= high_thresh] = 2
-    else:
-        employment_category = np.random.randint(0, 3, size=n_addresses)
-    
-    return {
-        'accessibility_quintile': quintiles,
-        'vehicle_ownership': vehicle_ownership,
-        'employment_category': employment_category
-    }
-
-
-def compute_multitask_loss(outputs, auxiliary_targets, weights=None):
-    """
-    Compute auxiliary task losses.
-    
-    Args:
-        outputs: Dict from model forward pass with all task predictions
-        auxiliary_targets: Dict with ground truth tensors
-        weights: Optional dict of loss weights
-    
-    Returns:
-        dict with 'total' and individual task losses
-    """
-    if weights is None:
-        weights = {'accessibility': 0.3, 'vehicle': 0.3, 'employment': 0.2}
-    
-    # Classification losses
-    acc_loss = F.cross_entropy(
-        outputs['accessibility_quintile_logits'],
-        auxiliary_targets['accessibility_quintile']
-    )
-    
-    emp_loss = F.cross_entropy(
-        outputs['employment_category_logits'],
-        auxiliary_targets['employment_category']
-    )
-    
-    # Regression loss
-    vehicle_loss = F.mse_loss(
-        outputs['vehicle_ownership'],
-        auxiliary_targets['vehicle_ownership']
-    )
-    
-    # Weighted combination
-    total = (
-        weights['accessibility'] * acc_loss +
-        weights['vehicle'] * vehicle_loss +
-        weights['employment'] * emp_loss
-    )
-    
-    return {
-        'total': total,
-        'accessibility': acc_loss,
-        'vehicle': vehicle_loss,
-        'employment': emp_loss
-    }
-
-# ============================================================================
-# MIXTURE OF EXPERTS SUPPORT
-# ============================================================================
-# These functions enable MoE usage while keeping single-model code unchanged
-
-def create_standard_model(accessibility_features_dim, context_features_dim=5,
-                         hidden_dim=64, dropout=0.3, seed=42):
-    """Factory for standard single-expert GNN."""
-    return AccessibilitySVIGNN(
-        accessibility_features_dim=accessibility_features_dim,
-        context_features_dim=context_features_dim,
-        hidden_dim=hidden_dim,
-        dropout=dropout,
-        seed=seed,
-        use_context_gating=True,
-        use_multitask=True
-    )
-
-
-def get_model_type(config):
-    """Determine if training single model or mixture."""
-    use_mixture = config.get('training', {}).get('use_mixture', False)
-    return 'mixture' if use_mixture else 'standard'
+                    errors.append(error)
+        return np.mean(errors) if errors else 0.0

@@ -399,6 +399,9 @@ class EnhancedAccessibilityComputer:
                             drive_advantage = float((walk_avg - drive_avg) / walk_avg)
                             drive_advantage = np.clip(drive_advantage, -0.2, 1.0)
                 
+                #debugging
+                #print(f"drive_advantage stats: min={drive_advantage.min():.4f}, max={drive_advantage.max():.4f}, std={drive_advantage.std():.6f}")
+
                 # Dispersion
                 if len(combined_times) > 1:
                     dispersion = np.std(combined_times) / (mean_time + 1e-8)

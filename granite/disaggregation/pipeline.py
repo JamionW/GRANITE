@@ -10,7 +10,7 @@ import pandas as pd
 import geopandas as gpd
 import torch
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple
 
 from ..models.gnn import (
     set_random_seed, 
@@ -84,7 +84,7 @@ class GRANITEPipeline:
         return result
     
     def _load_data(self) -> Dict:
-        """Load all required data."""
+        """Load all required data including block groups."""
         self._log("Loading data...")
         
         state_fips = self.config.get('data', {}).get('state_fips', '47')
@@ -94,16 +94,131 @@ class GRANITEPipeline:
         county_name = self.data_loader._get_county_name(state_fips, county_fips)
         svi = self.data_loader.load_svi_data(state_fips, county_name)
         
+        # Load block groups
+        block_groups, bg_svi = self._load_block_groups(state_fips, county_fips)
+        
         data = {
             'tracts': tracts.merge(svi, on='FIPS', how='inner'),
-            'svi': svi
+            'svi': svi,
+            'block_groups': block_groups,
+            'bg_svi': bg_svi
         }
         
         self._log(f"Loaded {len(data['tracts'])} tracts with SVI data")
+        if block_groups is not None:
+            self._log(f"Loaded {len(block_groups)} block groups")
+        
         return data
+
+    def _load_block_groups(self, state_fips: str, county_fips: str) -> Tuple[gpd.GeoDataFrame, pd.DataFrame]:
+        """
+        Load block group geometries and SVI values.
+        
+        Returns:
+            Tuple of (block_group_geometries, block_group_svi)
+        """
+        # Load geometries
+        bg_file = os.path.join(self.data_dir, 'raw', f'tl_2020_{state_fips}_bg.shp')
+        if not os.path.exists(bg_file):
+            self._log(f"Block group shapefile not found: {bg_file}", level='WARN')
+            return None, None
+        
+        bg_gdf = gpd.read_file(bg_file)
+        county_bg = bg_gdf[bg_gdf['COUNTYFP'] == county_fips].copy()
+        county_bg['GEOID'] = county_bg['GEOID'].astype(str)
+        county_bg['tract_fips'] = state_fips + county_fips + county_bg['TRACTCE'].astype(str)
+        
+        if county_bg.crs is None:
+            county_bg.set_crs(epsg=4326, inplace=True)
+        elif county_bg.crs != 'EPSG:4326':
+            county_bg = county_bg.to_crs(epsg=4326)
+        
+        # Load SVI
+        svi_file = os.path.join(self.data_dir, 'processed', 'acs_block_groups_svi.csv')
+        if not os.path.exists(svi_file):
+            self._log(f"Block group SVI file not found: {svi_file}", level='WARN')
+            return county_bg, None
+        
+        bg_svi = pd.read_csv(svi_file, dtype={'GEOID': str})
+        
+        self._log(f"Loaded {len(county_bg)} block groups, {bg_svi['SVI'].notna().sum()} with SVI")
+        
+        return county_bg, bg_svi
+
+    def _assign_addresses_to_block_groups(self, 
+                                        addresses: gpd.GeoDataFrame,
+                                        block_groups: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        """Spatial join addresses to block groups."""
+        if addresses.crs != block_groups.crs:
+            addresses = addresses.to_crs(block_groups.crs)
+        
+        joined = gpd.sjoin(
+            addresses,
+            block_groups[['GEOID', 'geometry']],
+            how='left',
+            predicate='within'
+        )
+        
+        joined = joined.rename(columns={'GEOID': 'block_group_id'})
+        
+        if 'index_right' in joined.columns:
+            joined = joined.drop(columns=['index_right'])
+        
+        return joined
+
+    def _create_bg_masks_and_targets(self,
+                                    addresses: gpd.GeoDataFrame,
+                                    bg_svi: pd.DataFrame,
+                                    training_bg_ids: List[str] = None) -> Tuple[Dict, Dict]:
+        """
+        Create block group masks and SVI targets for training.
+        
+        Args:
+            addresses: GeoDataFrame with 'block_group_id' column
+            bg_svi: DataFrame with 'GEOID' and 'SVI' columns
+            training_bg_ids: Optional list of BG IDs to use (for holdout)
+        
+        Returns:
+            Tuple of (bg_masks dict, bg_svis dict)
+        """
+        if 'block_group_id' not in addresses.columns:
+            self._log("Addresses not assigned to block groups", level='WARN')
+            return {}, {}
+        
+        # Create SVI lookup
+        svi_lookup = dict(zip(bg_svi['GEOID'], bg_svi['SVI']))
+        
+        bg_masks = {}
+        bg_svis = {}
+        
+        for bg_id in addresses['block_group_id'].dropna().unique():
+            # Skip if not in training set (holdout mode)
+            if training_bg_ids is not None and bg_id not in training_bg_ids:
+                continue
+            
+            # Skip if no SVI available
+            if bg_id not in svi_lookup or pd.isna(svi_lookup[bg_id]):
+                continue
+            
+            mask = (addresses['block_group_id'] == bg_id).values
+            if mask.sum() >= 3:  # minimum addresses per BG
+                bg_masks[bg_id] = mask
+                bg_svis[bg_id] = svi_lookup[bg_id]
+        
+        self._log(f"Created {len(bg_masks)} block group constraints for training")
+        
+        return bg_masks, bg_svis
     
-    def _run_single_tract(self, target_fips: str, data: Dict) -> Dict:
-        """Process a single tract."""
+    def _run_single_tract(self, target_fips: str, data: Dict,
+                        training_bg_ids: List[str] = None) -> Dict:
+        """
+        Process a single tract with block group supervision.
+        
+        Args:
+            target_fips: Census tract FIPS code
+            data: Loaded data dict with tracts, svi, block_groups, bg_svi
+            training_bg_ids: Optional list of BG IDs for training (holdout mode)
+        """
         self._log(f"Processing tract {target_fips}")
         
         # Get tract info
@@ -121,17 +236,43 @@ class GRANITEPipeline:
         
         self._log(f"Found {len(addresses)} addresses, tract SVI: {tract_svi:.4f}")
         
+        # Assign addresses to block groups
+        if data.get('block_groups') is not None:
+            addresses = self._assign_addresses_to_block_groups(
+                addresses, data['block_groups']
+            )
+            
+            # Create BG masks and targets
+            bg_masks, bg_svis = self._create_bg_masks_and_targets(
+                addresses, 
+                data.get('bg_svi'),
+                training_bg_ids
+            )
+        else:
+            bg_masks, bg_svis = {}, {}
+        
         # Compute spatial features
         features, feature_names = self.feature_computer.compute_features(
-            addresses, tract_geom
+            addresses, tract_geom, data_loader=self.data_loader
         )
         normalized_features, scaler = normalize_spatial_features(features)
         
         # Build graph
         k_neighbors = self.config.get('model', {}).get('k_neighbors', 8)
-        graph_data = self.data_loader.create_spatial_graph(
-            addresses, normalized_features, k_neighbors
-        )
+        state_fips = self.config.get('data', {}).get('state_fips', '47')
+        county_fips = self.config.get('data', {}).get('county_fips', '065')
+
+        # Use road network graph if available, otherwise fall back to k-NN
+        use_road_network = self.config.get('model', {}).get('use_road_network', True)
+
+        if use_road_network:
+            graph_data = self.data_loader.create_road_network_graph(
+                addresses, normalized_features, state_fips, county_fips, k_neighbors
+            )
+        else:
+            graph_data = self.data_loader.create_spatial_graph(
+                addresses, normalized_features, k_neighbors
+            )
         
         # Train GNN
         model = SpatialDisaggregationGNN(
@@ -143,11 +284,23 @@ class GRANITEPipeline:
         trainer = SpatialGNNTrainer(
             model,
             learning_rate=self.config.get('training', {}).get('learning_rate', 0.001),
-            constraint_weight=self.config.get('training', {}).get('constraint_weight', 2.0)
+            constraint_weight=self.config.get('training', {}).get('constraint_weight', 0.0),
+            bg_weight=self.config.get('training', {}).get('bg_weight', 2.0),
+            coherence_weight=self.config.get('training', {}).get('coherence_weight', 1.0),
+            discrimination_weight=self.config.get('training', {}).get('discrimination_weight', 0.5),
+            smoothness_weight=self.config.get('training', {}).get('smoothness_weight', 0.3),
+            variation_weight=self.config.get('training', {}).get('variation_weight', 1.0)
         )
         
         epochs = self.config.get('training', {}).get('epochs', 100)
-        training_result = trainer.train(graph_data, tract_svi, epochs, self.verbose)
+        training_result = trainer.train(
+            graph_data, 
+            tract_svi, 
+            epochs, 
+            self.verbose,
+            bg_masks=bg_masks,
+            bg_svis=bg_svis
+        )
         
         if not training_result['success']:
             return training_result
@@ -174,11 +327,13 @@ class GRANITEPipeline:
             'training_history': training_result['training_history'],
             'baselines': baseline_results,
             'validation': validation,
+            'n_bg_constraints': training_result.get('n_bg_constraints', 0),
             'summary': {
                 'addresses_processed': len(addresses),
                 'spatial_features': len(feature_names),
                 'spatial_variation': float(np.std(final_predictions)),
-                'constraint_error': float(abs(np.mean(final_predictions) - tract_svi) / tract_svi * 100)
+                'constraint_error': float(abs(np.mean(final_predictions) - tract_svi) / tract_svi * 100),
+                'bg_constraints_used': training_result.get('n_bg_constraints', 0)
             }
         }
     
@@ -214,7 +369,7 @@ class GRANITEPipeline:
             tract_geom = data['tracts'][data['tracts']['FIPS'] == fips].geometry.iloc[0]
             
             features, feature_names = self.feature_computer.compute_features(
-                tract_addresses, tract_geom
+                tract_addresses, tract_geom, data_loader=self.data_loader
             )
             all_features.append(features)
         

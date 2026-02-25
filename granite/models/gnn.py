@@ -25,6 +25,114 @@ def set_random_seed(seed: int = 42):
     torch.backends.cudnn.benchmark = False
     torch.use_deterministic_algorithms(True, warn_only=True)
 
+def compute_block_group_loss(predictions: torch.Tensor,
+                              bg_masks: Dict[str, torch.Tensor],
+                              bg_targets: Dict[str, torch.Tensor]) -> torch.Tensor:
+    """
+    Supervised loss: predicted block group means must match known BG SVI.
+    
+    Args:
+        predictions: [n_addresses] tensor of predicted SVI
+        bg_masks: {bg_id: boolean tensor} indicating addresses in each BG
+        bg_targets: {bg_id: scalar tensor} of known BG SVI values
+    
+    Returns:
+        Mean squared error across all block groups
+    """
+    losses = []
+    for bg_id, mask in bg_masks.items():
+        if bg_id not in bg_targets:
+            continue
+        n_addresses = mask.sum()
+        if n_addresses < 3:
+            continue
+        bg_pred_mean = predictions[mask].mean()
+        bg_target = bg_targets[bg_id]
+        losses.append(F.mse_loss(bg_pred_mean, bg_target))
+    
+    if len(losses) == 0:
+        return torch.tensor(0.0, requires_grad=True)
+    
+    return torch.stack(losses).mean()
+
+def compute_within_bg_variance_loss(predictions: torch.Tensor,
+                                     bg_masks: Dict[str, torch.Tensor]) -> torch.Tensor:
+    """
+    Penalize high variance within each block group.
+    Addresses in the same BG should have similar predictions.
+    """
+    variances = []
+    for bg_id, mask in bg_masks.items():
+        n_addr = mask.sum()
+        if n_addr < 3:
+            continue
+        bg_preds = predictions[mask]
+        bg_var = bg_preds.var()
+        variances.append(bg_var)
+    
+    if len(variances) == 0:
+        return torch.tensor(0.0, requires_grad=True)
+    
+    return torch.stack(variances).mean()
+
+def compute_cross_bg_discrimination_loss(predictions: torch.Tensor,
+                                          bg_masks: Dict[str, torch.Tensor],
+                                          bg_targets: Dict[str, torch.Tensor]) -> torch.Tensor:
+    """
+    Encourage predicted BG means to be separated proportional to their target separation.
+    If two BGs have very different target SVIs, their predicted means should also differ.
+    """
+    bg_ids = list(bg_masks.keys())
+    if len(bg_ids) < 2:
+        return torch.tensor(0.0, requires_grad=True)
+    
+    # Compute predicted means for each BG
+    pred_means = {}
+    for bg_id in bg_ids:
+        mask = bg_masks[bg_id]
+        if mask.sum() >= 3 and bg_id in bg_targets:
+            pred_means[bg_id] = predictions[mask].mean()
+    
+    if len(pred_means) < 2:
+        return torch.tensor(0.0, requires_grad=True)
+    
+    # For each pair, penalize if predicted separation < target separation
+    loss_terms = []
+    bg_list = list(pred_means.keys())
+    
+    for i in range(len(bg_list)):
+        for j in range(i + 1, len(bg_list)):
+            bg_i, bg_j = bg_list[i], bg_list[j]
+            
+            target_diff = abs(float(bg_targets[bg_i]) - float(bg_targets[bg_j]))
+            pred_diff = torch.abs(pred_means[bg_i] - pred_means[bg_j])
+            
+            # Penalize if predicted difference is smaller than target difference
+            margin_loss = F.relu(target_diff - pred_diff)
+            loss_terms.append(margin_loss)
+    
+    if len(loss_terms) == 0:
+        return torch.tensor(0.0, requires_grad=True)
+    
+    return torch.stack(loss_terms).mean()
+
+def compute_smoothness_loss(predictions: torch.Tensor,
+                            edge_index: torch.Tensor) -> torch.Tensor:
+    """
+    Spatial smoothness prior: neighboring addresses should have similar SVI.
+    Implements Tobler's first law as a soft constraint.
+    
+    Args:
+        predictions: [n_addresses] tensor
+        edge_index: [2, n_edges] graph connectivity
+    
+    Returns:
+        Mean squared difference between connected nodes
+    """
+    src, dst = edge_index[0], edge_index[1]
+    neighbor_diff = predictions[src] - predictions[dst]
+    return torch.mean(neighbor_diff ** 2)
+
 
 class SpatialDisaggregationGNN(nn.Module):
     """
@@ -150,20 +258,33 @@ class SpatialGNNTrainer:
     """
     
     def __init__(self, 
-                 model: SpatialDisaggregationGNN,
-                 learning_rate: float = 0.001,
-                 constraint_weight: float = 2.0,
-                 seed: int = 42):
+                model: SpatialDisaggregationGNN,
+                learning_rate: float = 0.001,
+                constraint_weight: float = 0.0,
+                bg_weight: float = 2.0,
+                coherence_weight: float = 1.0,      # NEW
+                discrimination_weight: float = 0.5,  # NEW
+                smoothness_weight: float = 0.3,
+                variation_weight: float = 1.0,
+                seed: int = 42):
         """
         Args:
             model: SpatialDisaggregationGNN instance
             learning_rate: Optimizer learning rate
-            constraint_weight: Weight for tract mean constraint loss
+            constraint_weight: Deprecated tract-level constraint (default 0)
+            bg_weight: Weight for block group supervision loss
+            smoothness_weight: Weight for spatial smoothness prior
+            variation_weight: Weight for variation regularization
             seed: Random seed
         """
         self.model = model
         self.seed = seed
         self.constraint_weight = constraint_weight
+        self.bg_weight = bg_weight
+        self.smoothness_weight = smoothness_weight
+        self.variation_weight = variation_weight
+        self.coherence_weight = coherence_weight
+        self.discrimination_weight = discrimination_weight
         
         set_random_seed(seed)
         
@@ -179,32 +300,58 @@ class SpatialGNNTrainer:
         
         self.training_history = {
             'losses': [],
+            'bg_losses': [],
+            'smoothness_losses': [],
             'constraint_errors': [],
             'spatial_stds': []
         }
     
     def train(self, 
-              graph_data: Data,
-              tract_svi: float,
-              epochs: int = 100,
-              verbose: bool = True) -> Dict:
+            graph_data: Data,
+            tract_svi: float,
+            epochs: int = 100,
+            verbose: bool = True,
+            bg_masks: Dict[str, np.ndarray] = None,
+            bg_svis: Dict[str, float] = None) -> Dict:
         """
-        Train the GNN with tract mean constraint.
+        Train the GNN with block group supervision.
         
         Args:
             graph_data: PyG Data object with x (features) and edge_index
-            tract_svi: Known tract-level SVI value (constraint target)
+            tract_svi: Known tract-level SVI value (for post-hoc correction)
             epochs: Number of training epochs
             verbose: Print progress
+            bg_masks: {bg_id: boolean array} for training block groups
+            bg_svis: {bg_id: SVI value} for training block groups
         
         Returns:
             Dict with training results
         """
         set_random_seed(self.seed)
-        
         self.model.train()
-        target_svi = torch.FloatTensor([tract_svi])
-        n_addresses = graph_data.x.shape[0]
+        
+        # Convert block group data to tensors
+        bg_masks_tensor = {}
+        bg_targets_tensor = {}
+        if bg_masks is not None and bg_svis is not None:
+            for bg_id, mask in bg_masks.items():
+                if bg_id in bg_svis and not np.isnan(bg_svis[bg_id]):
+                    bg_masks_tensor[bg_id] = torch.BoolTensor(mask)
+                    bg_targets_tensor[bg_id] = torch.FloatTensor([bg_svis[bg_id]])
+        
+        has_bg_supervision = len(bg_masks_tensor) > 0
+        if verbose:
+            if has_bg_supervision:
+                print(f"Training with {len(bg_masks_tensor)} block group constraints")
+            else:
+                print("Warning: No block group supervision available")
+            
+            print(f"Loss weights:")
+            print(f"  bg_weight:            {self.bg_weight}")
+            print(f"  coherence_weight:     {self.coherence_weight}")
+            print(f"  discrimination_weight:{self.discrimination_weight}")
+            print(f"  smoothness_weight:    {self.smoothness_weight}")
+            print(f"  variation_weight:     {self.variation_weight}")
         
         best_loss = float('inf')
         patience_counter = 0
@@ -212,25 +359,28 @@ class SpatialGNNTrainer:
         for epoch in range(epochs):
             self.optimizer.zero_grad()
             
-            # Forward pass
             predictions = self.model(graph_data.x, graph_data.edge_index)
             
             # Compute losses
-            losses = self._compute_losses(predictions, target_svi)
+            losses = self._compute_losses_v2(
+                predictions, 
+                graph_data.edge_index,
+                bg_masks_tensor,
+                bg_targets_tensor,
+                tract_svi
+            )
             total_loss = losses['total']
             
-            # Backward pass
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
             self.scheduler.step(total_loss)
             
             # Track metrics
-            constraint_error = float(abs(predictions.mean() - tract_svi) / tract_svi * 100)
             spatial_std = float(predictions.std())
-            
             self.training_history['losses'].append(total_loss.item())
-            self.training_history['constraint_errors'].append(constraint_error)
+            self.training_history['bg_losses'].append(losses['bg'].item())
+            self.training_history['smoothness_losses'].append(losses['smoothness'].item())
             self.training_history['spatial_stds'].append(spatial_std)
             
             # Early stopping
@@ -245,10 +395,10 @@ class SpatialGNNTrainer:
                     print(f"Early stopping at epoch {epoch}")
                 break
             
-            # Progress
             if verbose and epoch % 20 == 0:
                 print(f"Epoch {epoch:3d}: Loss={total_loss.item():.6f}, "
-                      f"Constraint={constraint_error:.2f}%, Std={spatial_std:.4f}")
+                    f"BG={losses['bg'].item():.4f}, Smooth={losses['smoothness'].item():.4f}, "
+                    f"Std={spatial_std:.4f}")
         
         # Final evaluation
         self.model.eval()
@@ -259,12 +409,56 @@ class SpatialGNNTrainer:
             'success': True,
             'raw_predictions': final_predictions.numpy(),
             'final_spatial_std': float(final_predictions.std()),
-            'constraint_error': float(abs(final_predictions.mean() - tract_svi)),
             'epochs_trained': epoch + 1,
-            'training_history': self.training_history
+            'training_history': self.training_history,
+            'n_bg_constraints': len(bg_masks_tensor)
+        }
+
+    def _compute_losses_v2(self, 
+                        predictions: torch.Tensor,
+                        edge_index: torch.Tensor,
+                        bg_masks: Dict[str, torch.Tensor],
+                        bg_targets: Dict[str, torch.Tensor],
+                        tract_svi: float) -> Dict:
+        """Compute training losses with block group supervision."""
+        
+        # 1. Block group mean constraint (PRIMARY LEARNING SIGNAL)
+        bg_loss = compute_block_group_loss(predictions, bg_masks, bg_targets)
+        
+        # 2. Within-BG coherence (NEW - reduce within-BG variance)
+        coherence_loss = compute_within_bg_variance_loss(predictions, bg_masks)
+        
+        # 3. Cross-BG discrimination (NEW - separate BG predictions)
+        discrimination_loss = compute_cross_bg_discrimination_loss(
+            predictions, bg_masks, bg_targets
+        )
+        
+        # 4. Spatial smoothness (GEOGRAPHIC PRIOR)
+        smoothness_loss = compute_smoothness_loss(predictions, edge_index)
+        
+        # 5. Variation regularization (PREVENT COLLAPSE)
+        spatial_std = predictions.std()
+        variation_loss = F.relu(torch.tensor(0.02) - spatial_std)
+        
+        # Combine
+        total_loss = (
+            self.bg_weight * bg_loss +
+            self.coherence_weight * coherence_loss +
+            self.discrimination_weight * discrimination_loss +
+            self.smoothness_weight * smoothness_loss +
+            self.variation_weight * variation_loss
+        )
+        
+        return {
+            'total': total_loss,
+            'bg': bg_loss,
+            'coherence': coherence_loss,
+            'discrimination': discrimination_loss,
+            'smoothness': smoothness_loss,
+            'variation': variation_loss
         }
     
-    def _compute_losses(self, predictions: torch.Tensor, target_svi: torch.Tensor) -> Dict:
+    def _compute_losses_legacy(self, predictions: torch.Tensor, target_svi: torch.Tensor) -> Dict:
         """Compute training losses."""
         
         # 1. Constraint loss (tract mean must match)

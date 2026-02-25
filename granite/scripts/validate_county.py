@@ -104,8 +104,8 @@ class CountyWideValidation:
         valid_svi = self.bg_svi['SVI'].notna().sum()
         self._log(f"Loaded SVI for {valid_svi}/{len(self.bg_svi)} block groups")
     
-    def run_single_tract(self, fips: str) -> Optional[Dict]:
-        """Run GRANITE pipeline on a single tract."""
+    def run_single_tract(self, fips: str, training_bg_ids: List[str] = None) -> Optional[Dict]:
+        """Run GRANITE pipeline on a single tract with optional BG holdout."""
         from granite.disaggregation.pipeline import GRANITEPipeline
         from granite.models.gnn import set_random_seed
         
@@ -115,16 +115,30 @@ class CountyWideValidation:
                 'state_fips': fips[:2],
                 'county_fips': fips[2:5],
             },
-            'model': {'hidden_dim': 32, 'k_neighbors': 8, 'dropout': 0.2},
-            'training': {'epochs': 100, 'learning_rate': 0.001, 'constraint_weight': 2.0},
-            'processing': {'verbose': False, 'random_seed': 42}
+            'model': {'hidden_dim': 32, 'k_neighbors': 8, 'dropout': 0.2, 'use_road_network': True},
+            'training': {
+                'epochs': 100, 
+                'learning_rate': 0.001, 
+                'constraint_weight': 0.0,  # deprecated
+                'bg_weight': 0.2,
+                'coherence_weight': 0.0,
+                'discrimination_weight': 0.0,
+                'smoothness_weight': 2.0,
+                'variation_weight': 1.5
+            },
+            'processing': {'verbose': self.verbose, 'random_seed': 42}
         }
         
         set_random_seed(42)
         
         try:
             pipeline = GRANITEPipeline(config, data_dir=self.data_dir, output_dir=self.output_dir)
-            results = pipeline.run()
+            
+            # Load data with block groups
+            data = pipeline._load_data()
+            
+            # Run with training BG subset
+            results = pipeline._run_single_tract(fips, data, training_bg_ids=training_bg_ids)
             
             if results.get('success'):
                 return results
@@ -155,14 +169,18 @@ class CountyWideValidation:
         return joined
     
     def run_county_validation(self, 
-                              tract_list: List[str] = None,
-                              max_tracts: int = None) -> Dict:
+                            tract_list: List[str] = None,
+                            max_tracts: int = None,
+                            holdout_fraction: float = 0.2,
+                            seed: int = 42) -> Dict:
         """
-        Run GRANITE on multiple tracts and aggregate validation.
+        Run GRANITE on multiple tracts with block group holdout validation.
         
         Args:
             tract_list: Optional list of FIPS codes (default: all usable tracts)
             max_tracts: Optional limit on number of tracts to process
+            holdout_fraction: Fraction of block groups to hold out for validation
+            seed: Random seed for holdout split
         
         Returns:
             Comprehensive validation results
@@ -171,6 +189,12 @@ class CountyWideValidation:
         
         # Load block groups
         self.load_block_groups()
+        
+        # Create holdout split
+        training_bg_ids, validation_bg_ids = self.create_holdout_split(
+            holdout_fraction=holdout_fraction,
+            seed=seed
+        )
         
         # Get tract list
         if tract_list is None:
@@ -185,9 +209,11 @@ class CountyWideValidation:
         
         self._log(f"Processing {len(tract_list)} tracts...")
         print(f"\n{'='*70}")
-        print(f"GRANITE COUNTY-WIDE VALIDATION")
+        print(f"GRANITE COUNTY-WIDE VALIDATION (Block Group Supervision)")
         print(f"{'='*70}")
         print(f"Tracts to process: {len(tract_list)}")
+        print(f"Training block groups: {len(training_bg_ids)}")
+        print(f"Validation block groups: {len(validation_bg_ids)}")
         print(f"{'='*70}\n")
         
         # Collect all predictions
@@ -199,98 +225,156 @@ class CountyWideValidation:
             progress = f"[{i+1}/{len(tract_list)}]"
             print(f"{progress} Processing tract {fips}...", end=" ", flush=True)
             
-            results = self.run_single_tract(fips)
+            # Pass training BGs to pipeline
+            results = self.run_single_tract(fips, training_bg_ids=training_bg_ids)
             
             if results is None:
-                print("FAILED")
                 failed_tracts.append(fips)
+                print("FAILED")
                 continue
             
-            # Get predictions
-            addresses = results['addresses'].copy()
-            gnn_preds = results['predictions']
-            
-            baselines = results.get('baselines', {})
-            idw_preds = baselines.get('idw', {}).get('predictions')
-            kriging_preds = baselines.get('kriging', {}).get('predictions')
-            
-            if idw_preds is None:
-                idw_preds = np.full(len(gnn_preds), results['tract_svi'])
-            if kriging_preds is None:
-                kriging_preds = np.full(len(gnn_preds), results['tract_svi'])
-            
-            # Assign to block groups
-            addresses = self.assign_addresses_to_block_groups(addresses)
-            
-            # Store per-address data
-            for j in range(len(addresses)):
-                bg_id = addresses.iloc[j].get('block_group_id')
-                if pd.notna(bg_id):
-                    all_bg_data.append({
-                        'tract_fips': fips,
-                        'block_group_id': bg_id,
-                        'gnn_pred': gnn_preds[j],
-                        'idw_pred': idw_preds[j],
-                        'kriging_pred': kriging_preds[j],
-                        'tract_svi': results['tract_svi']
-                    })
-            
             successful_tracts += 1
-            n_addr = len(addresses)
-            gnn_std = np.std(gnn_preds)
-            print(f"OK ({n_addr} addresses, GNN std={gnn_std:.3f})")
+            n_bg = results.get('n_bg_constraints', 0)
+            print(f"OK ({n_bg} BG constraints)")
+            
+            # Collect address-level predictions
+            addresses = results['addresses']
+            addresses = addresses.copy()
+            addresses['GNN_pred'] = results['predictions']
+            
+            if 'idw' in results.get('baselines', {}):
+                idw = results['baselines']['idw']
+                if 'predictions' in idw:
+                    addresses['IDW_pred'] = idw['predictions']
+            
+            if 'kriging' in results.get('baselines', {}):
+                kriging = results['baselines']['kriging']
+                if 'predictions' in kriging:
+                    addresses['Kriging_pred'] = kriging['predictions']
+            
+            addresses['tract_fips'] = fips
+            all_bg_data.append(addresses)
+        
+        if len(all_bg_data) == 0:
+            return {'success': False, 'error': 'No tracts processed successfully'}
+        
+        # Combine all addresses
+        all_addresses = pd.concat(all_bg_data, ignore_index=True)
+        all_addresses = gpd.GeoDataFrame(all_addresses, crs='EPSG:4326')
         
         print(f"\n{'='*70}")
-        print(f"PROCESSING COMPLETE")
+        print(f"Aggregating to block groups...")
         print(f"{'='*70}")
-        print(f"Successful: {successful_tracts}/{len(tract_list)} tracts")
-        if failed_tracts:
-            print(f"Failed: {failed_tracts[:5]}{'...' if len(failed_tracts) > 5 else ''}")
         
-        if not all_bg_data:
-            return {'success': False, 'error': 'No data collected'}
+        # Aggregate to validation block groups ONLY
+        validation_results = self._aggregate_to_validation_bgs(
+            all_addresses, validation_bg_ids
+        )
         
-        # Create DataFrame
-        df = pd.DataFrame(all_bg_data)
+        # Also compute training set metrics (to detect overfitting)
+        training_results = self._aggregate_to_validation_bgs(
+            all_addresses, training_bg_ids
+        )
         
-        # Aggregate to block groups
-        print(f"\nAggregating to block groups...")
-        bg_agg = df.groupby('block_group_id').agg(
-            gnn_mean=('gnn_pred', 'mean'),
-            gnn_std=('gnn_pred', 'std'),
-            idw_mean=('idw_pred', 'mean'),
-            idw_std=('idw_pred', 'std'),
-            kriging_mean=('kriging_pred', 'mean'),
-            kriging_std=('kriging_pred', 'std'),
-            tract_svi=('tract_svi', 'first'),
-            n_addresses=('gnn_pred', 'count')
-        ).reset_index()
+        elapsed = time.time() - start_time
         
-        bg_agg.columns = ['GEOID', 'GNN_pred', 'GNN_std', 'IDW_pred', 'IDW_std',
-                         'Kriging_pred', 'Kriging_std', 'tract_svi', 'n_addresses']
+        return {
+            'success': True,
+            'validation': validation_results,
+            'training': training_results,
+            'n_tracts': successful_tracts,
+            'n_failed': len(failed_tracts),
+            'failed_tracts': failed_tracts,
+            'n_training_bgs': len(training_bg_ids),
+            'n_validation_bgs': len(validation_bg_ids),
+            'elapsed_time': elapsed,
+            'holdout_fraction': holdout_fraction
+        }
+
+
+    def _aggregate_to_validation_bgs(self, 
+                                    addresses: gpd.GeoDataFrame,
+                                    bg_ids: List[str]) -> Dict:
+        """
+        Aggregate address predictions to specified block groups and compute metrics.
         
-        # Merge with ground truth
-        merged = bg_agg.merge(
+        Args:
+            addresses: GeoDataFrame with predictions and block_group_id
+            bg_ids: List of block group IDs to aggregate to
+        
+        Returns:
+            Dict with aggregated predictions and metrics
+        """
+        # Filter to specified BGs
+        bg_set = set(bg_ids)
+        
+        if 'block_group_id' not in addresses.columns:
+            # Spatial join if needed
+            addresses = self.assign_addresses_to_block_groups(addresses)
+        
+        addr_in_bgs = addresses[addresses['block_group_id'].isin(bg_set)].copy()
+        
+        if len(addr_in_bgs) == 0:
+            return {'success': False, 'error': 'No addresses in specified block groups'}
+        
+        # Aggregate predictions by block group
+        agg_dict = {'GNN_pred': 'mean'}
+        if 'IDW_pred' in addr_in_bgs.columns:
+            agg_dict['IDW_pred'] = 'mean'
+        if 'Kriging_pred' in addr_in_bgs.columns:
+            agg_dict['Kriging_pred'] = 'mean'
+        agg_dict['geometry'] = 'count'  # count addresses
+        
+        bg_agg = addr_in_bgs.groupby('block_group_id').agg(agg_dict).reset_index()
+        bg_agg = bg_agg.rename(columns={'geometry': 'n_addresses'})
+        
+        # Merge with ground truth SVI
+        bg_agg = bg_agg.merge(
             self.bg_svi[['GEOID', 'SVI']], 
-            on='GEOID', 
+            left_on='block_group_id', 
+            right_on='GEOID',
             how='inner'
         )
         
-        # Filter to valid SVI
-        merged = merged[merged['SVI'].notna()]
+        # Filter to BGs with valid SVI
+        bg_agg = bg_agg[bg_agg['SVI'].notna()].copy()
         
-        print(f"Block groups with ground truth: {len(merged)}")
-        print(f"Total addresses covered: {merged['n_addresses'].sum():,}")
+        if len(bg_agg) < 5:
+            return {'success': False, 'error': f'Only {len(bg_agg)} BGs with valid SVI'}
         
-        # Compute correlations
-        results = self._compute_validation_stats(merged)
-        results['processing_time'] = time.time() - start_time
-        results['n_tracts_processed'] = successful_tracts
-        results['n_tracts_failed'] = len(failed_tracts)
-        results['validation_data'] = merged
-        results['raw_data'] = df
+        # Compute metrics for each method
+        methods = {}
         
-        return results
+        for method in ['GNN', 'IDW', 'Kriging']:
+            pred_col = f'{method}_pred'
+            if pred_col not in bg_agg.columns:
+                continue
+            
+            valid = bg_agg[[pred_col, 'SVI']].dropna()
+            if len(valid) < 5:
+                continue
+            
+            r, p = stats.pearsonr(valid['SVI'], valid[pred_col])
+            rho, _ = stats.spearmanr(valid['SVI'], valid[pred_col])
+            rmse = np.sqrt(np.mean((valid['SVI'] - valid[pred_col])**2))
+            mae = np.mean(np.abs(valid['SVI'] - valid[pred_col]))
+            
+            methods[method] = {
+                'pearson_r': r,
+                'pearson_p': p,
+                'spearman_rho': rho,
+                'rmse': rmse,
+                'mae': mae,
+                'n_block_groups': len(valid)
+            }
+        
+        return {
+            'success': True,
+            'methods': methods,
+            'n_block_groups': len(bg_agg),
+            'n_addresses': int(bg_agg['n_addresses'].sum()),
+            'validation_data': bg_agg
+        }
     
     def _compute_validation_stats(self, merged: pd.DataFrame) -> Dict:
         """Compute comprehensive validation statistics."""
@@ -370,88 +454,126 @@ class CountyWideValidation:
         return results
     
     def print_report(self, results: Dict):
-        """Print comprehensive validation report."""
+        """Print comprehensive validation report with train/val split."""
         if not results.get('success'):
-            print(f"\nValidation failed: {results.get('error')}")
+            print(f"Validation failed: {results.get('error')}")
             return
         
-        print(f"\n{'='*75}")
-        print("COUNTY-WIDE BLOCK GROUP VALIDATION REPORT")
-        print(f"{'='*75}")
+        print(f"\n{'='*70}")
+        print("GRANITE COUNTY-WIDE VALIDATION REPORT")
+        print(f"{'='*70}")
         
-        print(f"\nSAMPLE SIZE:")
-        print(f"  Tracts processed: {results['n_tracts_processed']}")
-        print(f"  Block groups validated: {results['n_block_groups']}")
-        print(f"  Total addresses: {results['n_addresses']:,}")
-        print(f"  Processing time: {results['processing_time']:.1f} seconds")
+        print(f"\nData Summary:")
+        print(f"  Tracts processed: {results['n_tracts']}")
+        print(f"  Training block groups: {results['n_training_bgs']}")
+        print(f"  Validation block groups: {results['n_validation_bgs']}")
+        print(f"  Holdout fraction: {results['holdout_fraction']:.0%}")
+        print(f"  Elapsed time: {results['elapsed_time']:.1f}s")
         
-        print(f"\nGROUND TRUTH DISTRIBUTION:")
-        print(f"  SVI range: {results['ground_truth_svi_range'][0]:.3f} - {results['ground_truth_svi_range'][1]:.3f}")
-        print(f"  SVI mean: {results['ground_truth_svi_mean']:.3f}")
+        # Validation set results (PRIMARY)
+        print(f"\n{'='*70}")
+        print("VALIDATION SET RESULTS (Held-out block groups)")
+        print(f"{'='*70}")
         
-        print(f"\n{'-'*75}")
-        print("METHOD COMPARISON")
-        print(f"{'-'*75}")
-        print(f"{'Method':<10} {'Pearson r':>12} {'p-value':>12} {'Spearman ρ':>12} {'RMSE':>10} {'R²':>10}")
-        print("-" * 68)
-        
-        for method in ['GNN', 'IDW', 'Kriging']:
-            s = results['methods'][method]
-            sig = '***' if s['pearson_p'] < 0.001 else '**' if s['pearson_p'] < 0.01 else '*' if s['pearson_p'] < 0.05 else ''
-            print(f"{method:<10} {s['pearson_r']:>11.4f}{sig} {s['pearson_p']:>12.4f} "
-                  f"{s['spearman_rho']:>12.4f} {s['rmse']:>10.4f} {s['r_squared']:>10.4f}")
-        
-        print(f"\n{'-'*75}")
-        print("STATISTICAL COMPARISON: GNN vs IDW")
-        print(f"{'-'*75}")
-        
-        comp = results['comparison']
-        gnn_r = results['methods']['GNN']['pearson_r']
-        idw_r = results['methods']['IDW']['pearson_r']
-        
-        print(f"  GNN r = {gnn_r:.4f}")
-        print(f"  IDW r = {idw_r:.4f}")
-        print(f"  Difference: {comp['gnn_vs_idw_r_diff']:+.4f}")
-        print(f"  Z-statistic: {comp['gnn_vs_idw_z_stat']:.3f}")
-        print(f"  p-value: {comp['gnn_vs_idw_p_value']:.4f}")
-        
-        print(f"\n{'-'*75}")
-        print("CONCLUSION")
-        print(f"{'-'*75}")
-        
-        if comp['gnn_significantly_better']:
-            print(f"  ★ GNN SIGNIFICANTLY OUTPERFORMS IDW (p < 0.05)")
-            print(f"    → The extra spatial variation captured by GNN is SIGNAL, not noise")
-            print(f"    → GNN disaggregation captures real vulnerability gradients")
-        elif gnn_r > idw_r + 0.02:
-            print(f"  ◉ GNN performs better than IDW, but not statistically significant")
-            print(f"    → Suggestive evidence for GNN advantage, need more data")
-        elif abs(gnn_r - idw_r) <= 0.02:
-            print(f"  ~ GNN and IDW perform similarly")
-            print(f"    → Both methods capture similar spatial patterns")
+        val = results['validation']
+        if val.get('success'):
+            print(f"\n  Block groups: {val['n_block_groups']}")
+            print(f"  Addresses: {val['n_addresses']:,}")
+            print(f"\n  {'Method':<12} {'Pearson r':<12} {'RMSE':<12} {'MAE':<12}")
+            print(f"  {'-'*48}")
+            
+            for method in ['GNN', 'IDW', 'Kriging']:
+                if method in val['methods']:
+                    m = val['methods'][method]
+                    sig = '***' if m['pearson_p'] < 0.001 else '**' if m['pearson_p'] < 0.01 else '*' if m['pearson_p'] < 0.05 else ''
+                    print(f"  {method:<12} {m['pearson_r']:.4f}{sig:<6} {m['rmse']:.4f}       {m['mae']:.4f}")
         else:
-            print(f"  ✗ IDW outperforms GNN")
-            print(f"    → GNN's extra variation may be noise, not signal")
+            print(f"  Error: {val.get('error')}")
         
-        # Interpretation of absolute performance
-        best_r = max(gnn_r, idw_r)
-        if best_r > 0.7:
-            print(f"\n  ★★ Excellent overall performance (r > 0.7)")
-        elif best_r > 0.5:
-            print(f"\n  ★ Good overall performance (r > 0.5)")
-        elif best_r > 0.3:
-            print(f"\n  ◉ Moderate performance (r > 0.3)")
-        elif best_r > 0.15:
-            print(f"\n  ○ Weak but detectable signal (r > 0.15)")
-        else:
-            print(f"\n  ✗ No meaningful correlation with ground truth")
+        # Training set results (for overfitting check)
+        print(f"\n{'='*70}")
+        print("TRAINING SET RESULTS (for overfitting check)")
+        print(f"{'='*70}")
         
-        print(f"\n{'='*75}")
+        train = results['training']
+        if train.get('success'):
+            print(f"\n  Block groups: {train['n_block_groups']}")
+            print(f"\n  {'Method':<12} {'Pearson r':<12} {'RMSE':<12}")
+            print(f"  {'-'*36}")
+            
+            for method in ['GNN', 'IDW', 'Kriging']:
+                if method in train['methods']:
+                    m = train['methods'][method]
+                    print(f"  {method:<12} {m['pearson_r']:.4f}       {m['rmse']:.4f}")
+        
+        # Compare GNN vs IDW on validation set
+        if val.get('success') and 'GNN' in val['methods'] and 'IDW' in val['methods']:
+            gnn_r = val['methods']['GNN']['pearson_r']
+            idw_r = val['methods']['IDW']['pearson_r']
+            diff = gnn_r - idw_r
+            
+            print(f"\n{'='*70}")
+            print("STATISTICAL COMPARISON (Validation Set)")
+            print(f"{'='*70}")
+            print(f"\n  GNN r = {gnn_r:.4f}")
+            print(f"  IDW r = {idw_r:.4f}")
+            print(f"  Difference = {diff:+.4f}")
+            
+            # Fisher z-test for correlation comparison
+            n = val['n_block_groups']
+            z_gnn = 0.5 * np.log((1 + gnn_r) / (1 - gnn_r))
+            z_idw = 0.5 * np.log((1 + idw_r) / (1 - idw_r))
+            se = np.sqrt(2 / (n - 3))
+            z_stat = (z_gnn - z_idw) / se
+            p_value = 2 * (1 - stats.norm.cdf(abs(z_stat)))
+            
+            print(f"\n  Fisher z-test: z = {z_stat:.3f}, p = {p_value:.4f}")
+            
+            if p_value < 0.05 and gnn_r > idw_r:
+                print(f"\n  ★ GNN SIGNIFICANTLY BETTER THAN IDW (p < 0.05)")
+            elif p_value < 0.05 and idw_r > gnn_r:
+                print(f"\n  ★ IDW SIGNIFICANTLY BETTER THAN GNN (p < 0.05)")
+            else:
+                print(f"\n  ~ No significant difference between methods")
     
     def create_validation_plots(self, results: Dict) -> plt.Figure:
         """Create comprehensive validation visualization."""
         if not results.get('success'):
             return None
+
+        # Adapt to new nested structure
+        if 'validation' in results:
+            val = results['validation']
+            merged = val.get('validation_data')
+            
+            # Compute comparison stats on the fly
+            gnn_r = val['methods']['GNN']['pearson_r']
+            idw_r = val['methods']['IDW']['pearson_r']
+            n = val['n_block_groups']
+            
+            # Fisher z-test
+            z_gnn = 0.5 * np.log((1 + gnn_r) / (1 - gnn_r))
+            z_idw = 0.5 * np.log((1 + idw_r) / (1 - idw_r))
+            se = np.sqrt(2 / (n - 3))
+            z_stat = (z_gnn - z_idw) / se
+            p_value = 2 * (1 - stats.norm.cdf(abs(z_stat)))
+            
+            results = {
+                **results,
+                'n_block_groups': val.get('n_block_groups'),
+                'n_addresses': val.get('n_addresses'),
+                'n_tracts_processed': results.get('n_tracts'),
+                'methods': val.get('methods', {}),
+                'validation_data': merged,
+                'ground_truth_svi_range': [merged['SVI'].min(), merged['SVI'].max()],
+                'ground_truth_svi_mean': merged['SVI'].mean(),
+                'comparison': {
+                    'gnn_vs_idw_r_diff': gnn_r - idw_r,
+                    'gnn_vs_idw_z_stat': z_stat,
+                    'gnn_vs_idw_p_value': p_value,
+                    'gnn_significantly_better': p_value < 0.05 and gnn_r > idw_r
+                }
+            }
         
         merged = results['validation_data']
         
@@ -606,31 +728,102 @@ class CountyWideValidation:
         print(f"\nValidation plot saved to: {filepath}")
         
         return fig
+
+    def create_holdout_split(self, 
+                            holdout_fraction: float = 0.2,
+                            seed: int = 42) -> Tuple[List[str], List[str]]:
+        """
+        Split block groups into training and validation sets.
+        
+        Stratifies by tract to ensure each tract has both training and
+        validation block groups where possible.
+        
+        Args:
+            holdout_fraction: Fraction of BGs to hold out for validation
+            seed: Random seed for reproducibility
+        
+        Returns:
+            Tuple of (training_bg_ids, validation_bg_ids)
+        """
+        np.random.seed(seed)
+        
+        if self.block_groups is None or self.bg_svi is None:
+            raise ValueError("Must load block groups before creating split")
+        
+        # Get BGs with valid SVI
+        valid_bg = self.bg_svi[self.bg_svi['SVI'].notna()]['GEOID'].tolist()
+        
+        # Group by tract
+        bg_to_tract = dict(zip(
+            self.block_groups['GEOID'],
+            self.block_groups['tract_fips']
+        ))
+        
+        tract_to_bgs = {}
+        for bg_id in valid_bg:
+            if bg_id in bg_to_tract:
+                tract = bg_to_tract[bg_id]
+                if tract not in tract_to_bgs:
+                    tract_to_bgs[tract] = []
+                tract_to_bgs[tract].append(bg_id)
+        
+        # Stratified split within each tract
+        training_bgs = []
+        validation_bgs = []
+        
+        for tract, bgs in tract_to_bgs.items():
+            n_bgs = len(bgs)
+            if n_bgs == 1:
+                # Single BG tract: assign to training
+                training_bgs.extend(bgs)
+            elif n_bgs == 2:
+                # Two BG tract: one train, one validate
+                np.random.shuffle(bgs)
+                training_bgs.append(bgs[0])
+                validation_bgs.append(bgs[1])
+            else:
+                # 3+ BGs: proportional split
+                np.random.shuffle(bgs)
+                n_holdout = max(1, int(n_bgs * holdout_fraction))
+                validation_bgs.extend(bgs[:n_holdout])
+                training_bgs.extend(bgs[n_holdout:])
+        
+        self._log(f"Holdout split: {len(training_bgs)} training, {len(validation_bgs)} validation BGs")
+        
+        return training_bgs, validation_bgs
     
     def save_results(self, results: Dict):
         """Save detailed results to CSV."""
         if not results.get('success'):
             return
         
-        # Save block group level results
-        merged = results['validation_data']
+        # Handle nested structure
+        if 'validation' in results:
+            val = results['validation']
+            merged = val.get('validation_data')
+            methods = val.get('methods', {})
+        else:
+            merged = results.get('validation_data')
+            methods = results.get('methods', {})
+        
+        if merged is None:
+            print("No validation data to save")
+            return
         bg_file = os.path.join(self.output_dir, 'county_validation_block_groups.csv')
         merged.to_csv(bg_file, index=False)
         print(f"Block group results saved to: {bg_file}")
         
         # Save summary statistics
         summary_rows = []
-        for method, stats in results['methods'].items():
+        for method, stats in methods.items():
             summary_rows.append({
                 'method': method,
-                'pearson_r': stats['pearson_r'],
-                'pearson_p': stats['pearson_p'],
-                'spearman_rho': stats['spearman_rho'],
-                'r_squared': stats['r_squared'],
-                'rmse': stats['rmse'],
-                'mae': stats['mae'],
-                'predicted_mean': stats['predicted_mean'],
-                'predicted_std': stats['predicted_std']
+                'pearson_r': stats.get('pearson_r'),
+                'pearson_p': stats.get('pearson_p'),
+                'spearman_rho': stats.get('spearman_rho'),
+                'r_squared': stats.get('pearson_r', 0)**2,  # compute from r
+                'rmse': stats.get('rmse'),
+                'mae': stats.get('mae'),
             })
         
         summary_df = pd.DataFrame(summary_rows)

@@ -32,7 +32,8 @@ class SpatialFeatureComputer:
                         addresses: gpd.GeoDataFrame,
                         tract_geometry,
                         include_density: bool = True,
-                        include_boundary: bool = True) -> Tuple[np.ndarray, List[str]]:
+                        include_boundary: bool = True,
+                        data_loader=None) -> Tuple[np.ndarray, List[str]]:
         """
         Compute spatial features for all addresses.
         
@@ -99,6 +100,28 @@ class SpatialFeatureComputer:
         # Stack into feature matrix
         feature_matrix = np.column_stack(features)
         
+        # 6. Accessibility features (if data_loader provided)
+        if data_loader is not None:
+            try:
+                self._log("Computing accessibility features...")
+                accessibility_features = data_loader.compute_simple_accessibility_features(addresses)
+                
+                accessibility_names = [
+                    'employment_min_time', 'employment_mean_time', 'employment_median_time',
+                    'employment_count_5min', 'employment_count_10min', 'employment_count_15min',
+                    'healthcare_min_time', 'healthcare_mean_time', 'healthcare_median_time',
+                    'healthcare_count_5min', 'healthcare_count_10min', 'healthcare_count_15min',
+                    'grocery_min_time', 'grocery_mean_time', 'grocery_median_time',
+                    'grocery_count_5min', 'grocery_count_10min', 'grocery_count_15min',
+                ]
+                
+                feature_matrix = np.column_stack([feature_matrix, accessibility_features])
+                feature_names.extend(accessibility_names)
+                
+                self._log(f"Added {len(accessibility_names)} accessibility features")
+            except Exception as e:
+                self._log(f"Accessibility features failed: {e}, using spatial only")
+        
         self._log(f"Computed {len(feature_names)} features: {feature_names}")
         self._log(f"Feature matrix shape: {feature_matrix.shape}")
         
@@ -107,7 +130,7 @@ class SpatialFeatureComputer:
             nan_count = np.sum(np.isnan(feature_matrix))
             self._log(f"WARNING: {nan_count} NaN values in features, replacing with 0")
             feature_matrix = np.nan_to_num(feature_matrix, nan=0.0)
-        
+
         self.feature_names = feature_names
         return feature_matrix, feature_names
     

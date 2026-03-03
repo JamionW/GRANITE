@@ -225,7 +225,7 @@ class BlockGroupLoader:
         
         # API has variable limits per request, so we chunk
         var_list = list(self.ACS_VARIABLES.keys())
-        chunk_size = 48  # Safe limit under 50-variable cap
+        chunk_size = 48 # Safe limit under 50-variable cap
         
         all_data = None
         
@@ -241,7 +241,7 @@ class BlockGroupLoader:
                 f"&key={self.api_key}"
             )
             
-            self._log(f"  Fetching variables {i+1}-{min(i+chunk_size, len(var_list))}...")
+            self._log(f" Fetching variables {i+1}-{min(i+chunk_size, len(var_list))}...")
             response = requests.get(url, timeout=60)
             
             if response.status_code != 200:
@@ -590,25 +590,25 @@ def test_svi_computation(api_key: str, data_dir: str = './data'):
     
     print(f"\nRaw data columns ({len(raw_df.columns)}):")
     acs_cols = [c for c in raw_df.columns if c.startswith('B')]
-    print(f"  ACS columns: {len(acs_cols)}")
+    print(f" ACS columns: {len(acs_cols)}")
     
     # Check income columns
     print(f"\nIncome columns check:")
     for col in ['B19013_001E', 'B19301_001E']:
         if col in raw_df.columns:
             non_null = raw_df[col].notna().sum()
-            print(f"  {col}: {non_null} non-null, sample: {raw_df[col].head(3).tolist()}")
+            print(f" {col}: {non_null} non-null, sample: {raw_df[col].head(3).tolist()}")
         else:
-            print(f"  {col}: NOT FOUND")
+            print(f" {col}: NOT FOUND")
     
     # Check vehicle columns
     print(f"\nVehicle columns check:")
     for col in ['B25044_001E', 'B25044_003E', 'B25044_010E']:
         if col in raw_df.columns:
             non_null = raw_df[col].notna().sum()
-            print(f"  {col}: {non_null} non-null, sample: {raw_df[col].head(3).tolist()}")
+            print(f" {col}: {non_null} non-null, sample: {raw_df[col].head(3).tolist()}")
         else:
-            print(f"  {col}: NOT FOUND")
+            print(f" {col}: NOT FOUND")
     
     # Reset cache to force recomputation
     loader._bg_demographics = None
@@ -618,26 +618,26 @@ def test_svi_computation(api_key: str, data_dir: str = './data'):
     demographics = loader.fetch_acs_demographics()
     
     print(f"\nResults:")
-    print(f"  Block groups: {len(demographics)}")
-    print(f"  Complete SVI: {demographics['svi_complete'].sum()}")
+    print(f" Block groups: {len(demographics)}")
+    print(f" Complete SVI: {demographics['svi_complete'].sum()}")
     
     # Check which core vars are null
     print(f"\nCore variable coverage:")
     for var in ['EP_MHI', 'EP_PCI', 'EP_UNEMP', 'EP_NOHSDP', 'EP_NOVEH']:
         non_null = demographics[var].notna().sum()
-        print(f"  {var}: {non_null}/{len(demographics)} non-null")
+        print(f" {var}: {non_null}/{len(demographics)} non-null")
     
     if demographics['SVI'].notna().any():
-        print(f"\n  SVI range: {demographics['SVI'].min():.3f} - {demographics['SVI'].max():.3f}")
-        print(f"  SVI mean: {demographics['SVI'].mean():.3f}")
+        print(f"\n SVI range: {demographics['SVI'].min():.3f} - {demographics['SVI'].max():.3f}")
+        print(f" SVI mean: {demographics['SVI'].mean():.3f}")
         
         # Show distribution
         print(f"\nSVI Distribution:")
         for threshold in [0.25, 0.50, 0.75]:
             count = (demographics['SVI'] <= threshold).sum()
-            print(f"  <= {threshold}: {count} ({count/len(demographics)*100:.1f}%)")
+            print(f" <= {threshold}: {count} ({count/len(demographics)*100:.1f}%)")
     else:
-        print("\n  SVI computation failed - all values NaN")
+        print("\n SVI computation failed - all values NaN")
     
     return demographics
 

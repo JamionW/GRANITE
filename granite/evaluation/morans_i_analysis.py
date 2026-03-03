@@ -50,7 +50,7 @@ def compute_spatial_weights(coordinates, method='knn', k=8, threshold=None):
         for i in range(n):
             # Get k nearest neighbors (excluding self)
             distances = dist_matrix[i]
-            neighbors = np.argsort(distances)[1:k+1]  # Exclude self (index 0)
+            neighbors = np.argsort(distances)[1:k+1] # Exclude self (index 0)
             W[i, neighbors] = 1
     
     elif method == 'threshold':
@@ -68,7 +68,7 @@ def compute_spatial_weights(coordinates, method='knn', k=8, threshold=None):
     
     # Row-standardize
     row_sums = W.sum(axis=1)
-    row_sums[row_sums == 0] = 1  # Avoid division by zero
+    row_sums[row_sums == 0] = 1 # Avoid division by zero
     W = W / row_sums[:, np.newaxis]
     
     return sparse.csr_matrix(W)
@@ -162,7 +162,7 @@ def local_morans_i(values, W, permutations=999, seed=42):
         W = W.toarray()
     
     # Local Moran's I for each observation
-    lag_z = W @ z  # Spatial lag of z
+    lag_z = W @ z # Spatial lag of z
     I_local = z * lag_z
     
     # Permutation inference for each location
@@ -203,7 +203,7 @@ def local_morans_i(values, W, permutations=999, seed=42):
 def analyze_spatial_autocorrelation(addresses, predictions, ground_truth=None,
                                     method='knn', k=8, permutations=999, seed=42):
     """
-    Comprehensive spatial autocorrelation analysis for GRANITE validation.
+    spatial autocorrelation analysis for GRANITE validation.
     
     Args:
         addresses: GeoDataFrame with address points
@@ -230,19 +230,19 @@ def analyze_spatial_autocorrelation(addresses, predictions, ground_truth=None,
     moran_pred = morans_i(predictions, W, permutations=permutations, seed=seed)
     results['predictions'] = moran_pred
     
-    print(f"  Moran's I = {moran_pred['I']:.4f}")
-    print(f"  Expected I = {moran_pred['E_I']:.4f}")
-    print(f"  Z-score = {moran_pred['z_score']:.2f}")
-    print(f"  p-value = {moran_pred['p_value']:.4f}")
+    print(f" Moran's I = {moran_pred['I']:.4f}")
+    print(f" Expected I = {moran_pred['E_I']:.4f}")
+    print(f" Z-score = {moran_pred['z_score']:.2f}")
+    print(f" p-value = {moran_pred['p_value']:.4f}")
     
     if moran_pred['p_value'] < 0.05:
         if moran_pred['I'] > 0:
-            print("  -> SIGNIFICANT positive spatial autocorrelation")
+            print(" -> SIGNIFICANT positive spatial autocorrelation")
             print("     Nearby addresses have similar predicted values (good!)")
         else:
-            print("  -> SIGNIFICANT negative spatial autocorrelation (dispersed)")
+            print(" -> SIGNIFICANT negative spatial autocorrelation (dispersed)")
     else:
-        print("  -> No significant spatial autocorrelation")
+        print(" -> No significant spatial autocorrelation")
     
     # Moran's I for residuals (if ground truth provided)
     if ground_truth is not None:
@@ -251,19 +251,19 @@ def analyze_spatial_autocorrelation(addresses, predictions, ground_truth=None,
         moran_resid = morans_i(residuals, W, permutations=permutations, seed=seed)
         results['residuals'] = moran_resid
         
-        print(f"  Moran's I = {moran_resid['I']:.4f}")
-        print(f"  Expected I = {moran_resid['E_I']:.4f}")
-        print(f"  Z-score = {moran_resid['z_score']:.2f}")
-        print(f"  p-value = {moran_resid['p_value']:.4f}")
+        print(f" Moran's I = {moran_resid['I']:.4f}")
+        print(f" Expected I = {moran_resid['E_I']:.4f}")
+        print(f" Z-score = {moran_resid['z_score']:.2f}")
+        print(f" p-value = {moran_resid['p_value']:.4f}")
         
         if moran_resid['p_value'] < 0.05:
             if moran_resid['I'] > 0:
-                print("  -> SIGNIFICANT positive autocorrelation in residuals")
+                print(" -> SIGNIFICANT positive autocorrelation in residuals")
                 print("     Model is missing some spatial structure")
             else:
-                print("  -> SIGNIFICANT negative autocorrelation in residuals")
+                print(" -> SIGNIFICANT negative autocorrelation in residuals")
         else:
-            print("  -> No significant spatial autocorrelation in residuals")
+            print(" -> No significant spatial autocorrelation in residuals")
             print("     Model captures spatial structure well!")
     
     return results
@@ -347,7 +347,7 @@ def demo_with_synthetic_data():
     
     # Create "ground truth" and predictions
     ground_truth = smoothed
-    predictions = ground_truth + np.random.randn(n) * 0.2  # Add noise
+    predictions = ground_truth + np.random.randn(n) * 0.2 # Add noise
     
     # Create mock GeoDataFrame
     import geopandas as gpd

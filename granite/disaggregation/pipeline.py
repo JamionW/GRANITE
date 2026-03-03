@@ -39,7 +39,7 @@ class GRANITEPipeline:
     1. Load spatial data (addresses, tracts, destinations)
     2. Compute multi-modal accessibility features
     3. Build accessibility-similarity graph
-    4. Train GNN: accessibility features -> SVI predictions
+    4. Train GNN: accessibility features → SVI predictions
     5. Validate against constraints and baselines
     """
     
@@ -178,7 +178,7 @@ class GRANITEPipeline:
         return data
 
     def _process_single_tract(self, target_fips, data):
-        """Process single tract or multiple tracts with accessibility -> SVI approach"""
+        """Process single tract or multiple tracts with accessibility → SVI approach"""
         
         # Clear stale accessibility cache
         cache_dir = os.path.join(self.data_dir, 'cache', 'accessibility_features')
@@ -304,7 +304,7 @@ class GRANITEPipeline:
         if n_neighbor_tracts > 0:
             target_mask = tract_addresses['tract_fips'] == target_fips
             target_tract_addresses = tract_addresses[target_mask].copy()
-            target_tract_addresses.reset_index(drop=True, inplace=True) # CRITICAL
+            target_tract_addresses.reset_index(drop=True, inplace=True)  # CRITICAL
             
             target_predictions = training_result['raw_predictions'][target_mask]
 
@@ -416,7 +416,7 @@ class GRANITEPipeline:
             from ..visualization.attention_analysis import analyze_attention_patterns
             
             attention_results = analyze_attention_patterns(
-                attention_weights=training_result['attention_weights'][-1], # Last epoch
+                attention_weights=training_result['attention_weights'][-1],  # Last epoch
                 context_features=self._stored_context_features,
                 feature_names=feature_names,
                 output_dir=os.path.join(self.output_dir, 'attention_analysis')
@@ -436,12 +436,12 @@ class GRANITEPipeline:
             'success': True,
             'predictions': final_predictions,
             'tract_info': {'FIPS': target_fips, 'RPL_THEMES': target_tract_svi},
-            'accessibility_features': target_access_features, # Target tract only
-            'full_accessibility_features': full_accessibility_features, # All tracts (for feature importance)
+            'accessibility_features': target_access_features,  # Target tract only
+            'full_accessibility_features': full_accessibility_features,  # All tracts (for feature importance)
             'training_result': training_result,
             'baseline_comparisons': baseline_results, 
             'validation_results': validation_results,
-            'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility -> SVI',
+            'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility → SVI',
             'summary': {
                 'addresses_processed': len(target_addresses),
                 'total_training_addresses': len(tract_addresses),
@@ -536,7 +536,7 @@ class GRANITEPipeline:
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
                 dropout=self.config.get('model', {}).get('dropout', 0.3),
                 seed=seed,
-                use_context_gating=use_gating and has_context # Only if both enabled and available
+                use_context_gating=use_gating and has_context  # Only if both enabled and available
             )
 
             if use_gating and has_context:
@@ -820,7 +820,7 @@ class GRANITEPipeline:
                         )
                         
                         if cached_features is not None:
-                            self._log(f" Retrieved {dest_type} features from cache")
+                            self._log(f"  Retrieved {dest_type} features from cache")
                             all_features.append(cached_features)
                             feature_names.extend([
                                 f'{dest_type}_min_time', f'{dest_type}_mean_time', f'{dest_type}_median_time',
@@ -829,7 +829,7 @@ class GRANITEPipeline:
                                 f'{dest_type}_time_range', f'{dest_type}_percentile'
                             ])
                             successful_computations += 1
-                            continue # Skip to next destination type
+                            continue  # Skip to next destination type
                     
                     # If not cached, compute as normal
                     travel_times = accessibility_computer.calculate_realistic_travel_times(
@@ -950,16 +950,16 @@ class GRANITEPipeline:
                 try:
                     # Extract employment features for mode comparison example
                     emp_idx = [i for i, name in enumerate(feature_names) if 'employment' in name]
-                    if len(emp_idx) >= 3: # Need at least min_time, mean_time, median_time
-                        emp_features_flat = all_features[0] # First destination type (employment)
+                    if len(emp_idx) >= 3:  # Need at least min_time, mean_time, median_time
+                        emp_features_flat = all_features[0]  # First destination type (employment)
                         
                         # Compute car/transit ratio if we have the data
                         # This is a simplified example - adjust based on your actual feature structure
                         addr_hash, _ = _generate_cache_key(addresses, destinations)
                         
                         # Store a simple mode comparison metric
-                        if emp_features_flat.shape[1] >= 7: # Has drive_advantage column
-                            drive_advantage = emp_features_flat[:, 6] # Index 6 is drive_advantage
+                        if emp_features_flat.shape[1] >= 7:  # Has drive_advantage column
+                            drive_advantage = emp_features_flat[:, 6]  # Index 6 is drive_advantage
                             
                             accessibility_computer.cache.set_differential(
                                 drive_advantage,
@@ -1093,7 +1093,7 @@ class GRANITEPipeline:
                     negative_features.append(f"{feature_name}: {negative_count} negative values")
             
             if negative_features:
-                self._log(f"Unexpected negative values in: {negative_features[:3]}", level='WARN') # Show first 3
+                self._log(f"Unexpected negative values in: {negative_features[:3]}", level='WARN')  # Show first 3
             else:
                 self._log(" No unexpected negative values detected")
             
@@ -1261,7 +1261,7 @@ class GRANITEPipeline:
             batch_features = self._load_batch_cache(batch_addresses, batch_key, data)
             
             if batch_features is not None:
-                self._log(f" Loaded from batch cache ({batch_features.shape})")
+                self._log(f"  Loaded from batch cache ({batch_features.shape})")
                 all_batch_features.append(batch_features)
                 continue
             
@@ -1279,7 +1279,7 @@ class GRANITEPipeline:
                     self._log(f" ERROR: Feature count mismatch for batch {batch_idx}")
                     return None
                 
-                self._log(f" Computed {batch_features.shape} features")
+                self._log(f"  Computed {batch_features.shape} features")
                 
                 # Cache the batch result
                 self._save_batch_cache(batch_addresses, batch_features, batch_key)
@@ -1470,8 +1470,8 @@ class GRANITEPipeline:
         # Assuming features are organized as: [employment_8, healthcare_8, grocery_8]
         n_addresses = base_features.shape[0]
         
-        if base_features.shape[1] < 24: # Less than 3 destinations × 8 features
-            return np.zeros((n_addresses, 4)) # Return minimal derived features
+        if base_features.shape[1] < 24:  # Less than 3 destinations × 8 features
+            return np.zeros((n_addresses, 4))  # Return minimal derived features
         
         # Extract by destination type (8 features each)
         employment_features = base_features[:, :8]
@@ -1482,7 +1482,7 @@ class GRANITEPipeline:
         
         for i in range(n_addresses):
             # Overall accessibility balance
-            emp_score = employment_features[i, 7] # accessibility_score
+            emp_score = employment_features[i, 7]  # accessibility_score
             health_score = healthcare_features[i, 7]
             grocery_score = grocery_features[i, 7]
             
@@ -1491,7 +1491,7 @@ class GRANITEPipeline:
             # Accessibility diversity (how balanced is access across destination types)
             if total_accessibility > 0:
                 scores = np.array([emp_score, health_score, grocery_score]) / total_accessibility
-                diversity = -np.sum(scores * np.log(scores + 1e-8)) # Entropy
+                diversity = -np.sum(scores * np.log(scores + 1e-8))  # Entropy
             else:
                 diversity = 0.0
             
@@ -1586,9 +1586,9 @@ class GRANITEPipeline:
             if constraint_error < 10 and spatial_std > 0.01:
                 self._log(" Training quality: GOOD")
             elif constraint_error < 25:
-                self._log(" Training quality: ACCEPTABLE")
+                self._log("⚠ Training quality: ACCEPTABLE")
             else:
-                self._log(" Training quality: POOR - consider hyperparameter tuning")
+                self._log("✗ Training quality: POOR - consider hyperparameter tuning")
             
             return {
                 'success': True,
@@ -1691,12 +1691,12 @@ class GRANITEPipeline:
             'address_id': [addr.get('address_id', i) for i, (_, addr) in enumerate(addresses.iterrows())],
             'x': x_coords,
             'y': y_coords,
-            'mean': adjusted_predictions, # Raw GNN output (adjustment = 0)
+            'mean': adjusted_predictions,  # Raw GNN output (adjustment = 0)
             'sd': total_uncertainty,
             'q025': np.clip(adjusted_predictions - 1.96 * total_uncertainty, 0.0, 1.0),
             'q975': np.clip(adjusted_predictions + 1.96 * total_uncertainty, 0.0, 1.0),
-            'raw_prediction': predictions, # Same as 'mean' (no correction)
-            'adjustment': adjustment # Will be 0.0
+            'raw_prediction': predictions,  # Same as 'mean' (no correction)
+            'adjustment': adjustment  # Will be 0.0
         })
         
         self._log(f"Finalized predictions (RAW, uncorrected): {len(final_predictions)} addresses")
@@ -1755,13 +1755,13 @@ class GRANITEPipeline:
         self._log(f"Actual tract SVI: {tract_svi:.4f}")
         self._log(f"Predicted mean (unconstrained): {predicted_mean:.4f}")
         self._log(f"Mean error: {mean_error_pct:.2f}%")
-        self._log(f"Natural convergence: {'YES ' if natural_convergence else 'NO '}")
+        self._log(f"Natural convergence: {'YES ' if natural_convergence else 'NO ✗'}")
         self._log(f"Prediction std: {predicted_std:.4f}")
         self._log(f"Accessibility-SVI correlation: {correlation:.4f}")
         
         if not natural_convergence:
-            self._log("\n WARNING: Model does not naturally approach correct mean")
-            self._log(" This suggests constraints are masking poor learning")
+            self._log("\n⚠ WARNING: Model does not naturally approach correct mean")
+            self._log("  This suggests constraints are masking poor learning")
         
         return {
             'predicted_mean': predicted_mean,
@@ -1837,7 +1837,7 @@ class GRANITEPipeline:
         train_graph = self.data_loader.create_spatial_accessibility_graph(
             addresses=train_addresses_df,
             accessibility_features=normalized_train_features,
-            context_features=normalized_train_context, # NEW: Pass context
+            context_features=normalized_train_context,  # NEW: Pass context
             state_fips=state_fips,
             county_fips=county_fips
         )
@@ -1904,7 +1904,7 @@ class GRANITEPipeline:
         holdout_graph = self.data_loader.create_spatial_accessibility_graph(
             addresses=holdout_addresses,
             accessibility_features=normalized_holdout_features,
-            context_features=normalized_holdout_context, # NEW: Pass context
+            context_features=normalized_holdout_context,  # NEW: Pass context
             state_fips=state_fips,
             county_fips=county_fips
         )
@@ -1978,7 +1978,7 @@ class GRANITEPipeline:
         if raw_predictions is not None:
             self._log("Running spatial learning diagnostics on RAW predictions...")
             
-            # Run diagnostics
+            # Run comprehensive diagnostics
             diagnostic_results = diagnostics.comprehensive_evaluation(
                 raw_predictions=raw_predictions['mean'].values,
                 accessibility_features=accessibility_features,
@@ -1998,7 +1998,7 @@ class GRANITEPipeline:
                 'mean_bias': diagnostic_results['quality_assessment']['mean_bias'],
                 'has_spatial_structure': diagnostic_results['quality_assessment']['has_spatial_structure'],
                 'meaningful_accessibility_relationship': diagnostic_results['quality_assessment']['meaningful_accessibility_relationship'],
-                'full_results': diagnostic_results # Include full results for integration
+                'full_results': diagnostic_results  # Include full results for integration
             }
         else:
             self._log("Warning: Could not access raw predictions for diagnostics")
@@ -2050,8 +2050,8 @@ class GRANITEPipeline:
             'accessibility_svi_correlations': accessibility_svi_correlations,
             'quality_metrics': quality_metrics,
             'n_addresses': len(predictions),
-            'method': 'Direct Accessibility -> SVI',
-            'spatial_diagnostics': diagnostic_summary # RETURN this for integration
+            'method': 'Direct Accessibility → SVI',
+            'spatial_diagnostics': diagnostic_summary  # RETURN this for integration
         }
         
         self._log("Standard Validation Results:")
@@ -2089,7 +2089,7 @@ class GRANITEPipeline:
         final_mean = np.mean(corrected_predictions)
         final_error = abs(final_mean - tract_svi) / tract_svi * 100
         
-        if final_error > 1.0: # Still > 1% error
+        if final_error > 1.0:  # Still > 1% error
             # Apply proportional scaling as backup
             if tract_svi > 0:
                 scale_factor = tract_svi / current_mean
@@ -2110,7 +2110,7 @@ class GRANITEPipeline:
                 'gnn_predictions': results['predictions'],
                 'accessibility_features': results['accessibility_features'],
                 'learned_accessibility': results['accessibility_features'],
-                'traditional_accessibility': results['accessibility_features'], # For comparison
+                'traditional_accessibility': results['accessibility_features'],  # For comparison
                 'tract_svi': results['tract_svi'],
                 'validation_results': results['validation_results'],
                 'training_result': results['training_result']
@@ -2154,7 +2154,7 @@ class GRANITEPipeline:
         ax1.set_ylabel('Constraint Error (%)')
         ax1.set_title('Error Distribution by Quintile')
         ax1.axhline(y=20, color='green', linestyle='--', alpha=0.7)
-        plt.suptitle('') # Remove automatic title
+        plt.suptitle('')  # Remove automatic title
         
         # Panel 2: Mean error with CI by quintile
         ax2 = axes[0, 1]
@@ -2299,7 +2299,7 @@ class GRANITEPipeline:
         
         # Show regression line
         x_line = np.linspace(0, 1, 100)
-        y_line = (x_line - offset) / scale if scale != 0 else x_line # Inverse transform
+        y_line = (x_line - offset) / scale if scale != 0 else x_line  # Inverse transform
         ax1.plot(actual_svis, [scale * m + offset for m in raw_means], 
                 'r-', alpha=0.5, linewidth=2, label='Affine fit')
         
@@ -2482,7 +2482,7 @@ class GRANITEPipeline:
     def _create_disaggregation_visualizations(self, test_results, training_results=None,
                                                expert_usage=None, tract_gdf=None, all_addresses=None):
         """
-        Create disaggregation visualizations.
+        Create comprehensive disaggregation visualizations.
         
         Generates:
         1. Aggregate baseline comparison dashboard
@@ -2783,11 +2783,11 @@ ACCESSIBILITY-VULNERABILITY
         plt.savefig(os.path.join(output_dir, 'disaggregation_dashboard.png'), 
                    dpi=300, bbox_inches='tight')
         plt.close()
-        self._log(" Created: disaggregation_dashboard.png")
+        self._log("  Created: disaggregation_dashboard.png")
 
     def _analyze_feature_usage(self, features, feature_names, predictions, output_dir):
         """
-        feature usage analysis for transparency.
+        Comprehensive feature usage analysis for transparency.
         
         Generates:
         - Feature correlation matrix with SVI proxy
@@ -2846,7 +2846,7 @@ ACCESSIBILITY-VULNERABILITY
         }
 
     def _plot_feature_transparency(self, feature_analysis, output_dir):
-        """Create feature transparency visualizations."""
+        """Create comprehensive feature transparency visualizations."""
         import matplotlib.pyplot as plt
         
         stats_df = feature_analysis['feature_stats']
@@ -3029,7 +3029,7 @@ ACCESSIBILITY-VULNERABILITY
         plt.savefig(os.path.join(output_dir, 'per_tract_disaggregation.png'),
                    dpi=300, bbox_inches='tight')
         plt.close()
-        self._log(" Created: per_tract_disaggregation.png")
+        self._log("  Created: per_tract_disaggregation.png")
 
     def _plot_geographic_disaggregation(self, results, output_dir, all_addresses, tract_gdf):
         """
@@ -3121,7 +3121,7 @@ ACCESSIBILITY-VULNERABILITY
             scatter = ax.scatter(
                 x, y, 
                 c=deviations, 
-                cmap='RdBu_r', # Red = above tract mean, Blue = below
+                cmap='RdBu_r',  # Red = above tract mean, Blue = below
                 norm=norm,
                 s=30,
                 alpha=0.7,
@@ -3171,7 +3171,7 @@ ACCESSIBILITY-VULNERABILITY
                    dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         
-        self._log(" Created: geographic_disaggregation.png")
+        self._log("  Created: geographic_disaggregation.png")
 
     def _plot_accessibility_svi_relationship(self, results, output_dir):
         """Plot accessibility-SVI relationship across tracts."""
@@ -3231,7 +3231,7 @@ ACCESSIBILITY-VULNERABILITY
         plt.savefig(os.path.join(output_dir, 'accessibility_svi_relationship.png'),
                    dpi=300, bbox_inches='tight')
         plt.close()
-        self._log(" Created: accessibility_svi_relationship.png")
+        self._log("  Created: accessibility_svi_relationship.png")
 
     def _plot_expert_routing(self, results, expert_usage, output_dir):
         """Plot expert routing analysis for MoE models."""
@@ -3297,7 +3297,7 @@ ACCESSIBILITY-VULNERABILITY
         plt.savefig(os.path.join(output_dir, 'expert_routing_analysis.png'),
                    dpi=300, bbox_inches='tight')
         plt.close()
-        self._log(" Created: expert_routing_analysis.png")
+        self._log("  Created: expert_routing_analysis.png")
 
     def _plot_constraint_analysis(self, results, output_dir):
         """Plot constraint satisfaction analysis."""
@@ -3363,7 +3363,7 @@ ACCESSIBILITY-VULNERABILITY
         plt.savefig(os.path.join(output_dir, 'constraint_analysis.png'),
                    dpi=300, bbox_inches='tight')
         plt.close()
-        self._log(" Created: constraint_analysis.png")
+        self._log("  Created: constraint_analysis.png")
 
     def save_results(self, results, output_dir=None):
         """Save pipeline results"""
@@ -3426,10 +3426,10 @@ ACCESSIBILITY-VULNERABILITY
             pred_svi = predicted_svi[idx]
             
             # Extract key accessibility metrics
-            emp_min_time = accessibility_features[idx, 0] # employment min time
-            emp_count_5min = accessibility_features[idx, 3] # employment count in 5min
-            health_min_time = accessibility_features[idx, 10] # healthcare min time  
-            grocery_min_time = accessibility_features[idx, 20] # grocery min time
+            emp_min_time = accessibility_features[idx, 0]  # employment min time
+            emp_count_5min = accessibility_features[idx, 3]  # employment count in 5min
+            health_min_time = accessibility_features[idx, 10]  # healthcare min time  
+            grocery_min_time = accessibility_features[idx, 20]  # grocery min time
             
             # Overall accessibility score (lower times = better access)
             avg_min_time = (emp_min_time + health_min_time + grocery_min_time) / 3
@@ -3441,8 +3441,8 @@ ACCESSIBILITY-VULNERABILITY
             self._log(f"   Grocery: {grocery_min_time:.1f}min")
             
             # RED FLAG CHECK: If high vulnerability has very good accessibility
-            if avg_min_time < 6.0: # Very good accessibility (< 6min average)
-                self._log(f"    RED FLAG: High vulnerability but excellent accessibility!")
+            if avg_min_time < 6.0:  # Very good accessibility (< 6min average)
+                self._log(f"   🚨 RED FLAG: High vulnerability but excellent accessibility!")
         
         self._log("\nLOW VULNERABILITY ADDRESSES (should have GOOD accessibility):")
         
@@ -3464,8 +3464,8 @@ ACCESSIBILITY-VULNERABILITY
             self._log(f"   Grocery: {grocery_min_time:.1f}min")
             
             # RED FLAG CHECK: If low vulnerability has very poor accessibility
-            if avg_min_time > 12.0: # Poor accessibility (> 12min average)
-                self._log(f"    RED FLAG: Low vulnerability but poor accessibility!")
+            if avg_min_time > 12.0:  # Poor accessibility (> 12min average)
+                self._log(f"   🚨 RED FLAG: Low vulnerability but poor accessibility!")
         
         return {
             'high_vuln_sample': high_vuln_indices,
@@ -3488,7 +3488,7 @@ ACCESSIBILITY-VULNERABILITY
             if 'min_time' in feature_name or 'mean_time' in feature_name or 'median_time' in feature_name:
                 # Time features: lower = better accessibility
                 good_access_profile.append(3.0)   # 3 minutes - very good
-                poor_access_profile.append(15.0) # 15 minutes - poor
+                poor_access_profile.append(15.0)  # 15 minutes - poor
                 
             elif 'count' in feature_name:
                 # Count features: higher = better accessibility
@@ -3503,8 +3503,8 @@ ACCESSIBILITY-VULNERABILITY
             else:
                 # Other features - use median values
                 median_val = np.median(accessibility_features[:, i])
-                good_access_profile.append(median_val * 1.2) # Slightly above median
-                poor_access_profile.append(median_val * 0.8) # Slightly below median
+                good_access_profile.append(median_val * 1.2)  # Slightly above median
+                poor_access_profile.append(median_val * 0.8)  # Slightly below median
         
         # Test what your model would predict for these synthetic profiles
         good_access_array = np.array(good_access_profile).reshape(1, -1)
@@ -3512,11 +3512,11 @@ ACCESSIBILITY-VULNERABILITY
         
         self._log("THEORETICAL TEST:")
         self._log("Good accessibility profile (should predict LOW vulnerability):")
-        for i, (name, val) in enumerate(zip(feature_names[:10], good_access_profile[:10])): # Show first 10
+        for i, (name, val) in enumerate(zip(feature_names[:10], good_access_profile[:10])):  # Show first 10
             self._log(f" {name}: {val:.2f}")
         
         self._log("Poor accessibility profile (should predict HIGH vulnerability):")
-        for i, (name, val) in enumerate(zip(feature_names[:10], poor_access_profile[:10])): # Show first 10
+        for i, (name, val) in enumerate(zip(feature_names[:10], poor_access_profile[:10])):  # Show first 10
             self._log(f" {name}: {val:.2f}")
         
         # Calculate what the correlation SHOULD be if features are coded correctly
@@ -3636,23 +3636,23 @@ ACCESSIBILITY-VULNERABILITY
         # Features that should correlate POSITIVELY with vulnerability
         # (Higher values = worse accessibility = higher vulnerability)
         positive_indicators = [
-            'min_time', 'mean_time', 'median_time', # Longer travel times = worse
-            'drive_advantage', # Higher car dependency = worse
-            'dispersion', # More scattered destinations = worse
-            'time_range', # Greater time variation = worse
-            'percentile', # Higher percentile = worse relative position
-            'accessibility_percentile' # Higher percentile = worse accessibility
+            'min_time', 'mean_time', 'median_time',  # Longer travel times = worse
+            'drive_advantage',  # Higher car dependency = worse
+            'dispersion',  # More scattered destinations = worse
+            'time_range',  # Greater time variation = worse
+            'percentile',  # Higher percentile = worse relative position
+            'accessibility_percentile'  # Higher percentile = worse accessibility
         ]
         
         # Features that should correlate NEGATIVELY with vulnerability
         # (Higher values = better accessibility = lower vulnerability)
         negative_indicators = [
-            'count_5min', 'count_10min', 'count_15min', # More nearby destinations = better
-            'local_accessibility_index', # Higher index = better
-            'modal_flexibility', # More options = better
-            'accessibility_score', # Higher score = better
-            'accessibility_equity', # Higher equity = better
-            'geographic_accessibility' # Higher = better
+            'count_5min', 'count_10min', 'count_15min',  # More nearby destinations = better
+            'local_accessibility_index',  # Higher index = better
+            'modal_flexibility',  # More options = better
+            'accessibility_score',  # Higher score = better
+            'accessibility_equity',  # Higher equity = better
+            'geographic_accessibility'  # Higher = better
         ]
         
         # Check positive indicators first (more specific)
@@ -3710,14 +3710,14 @@ ACCESSIBILITY-VULNERABILITY
         correct_count = 0
         known_count = 0
         
-        for i, corr_info in enumerate(correlations[:15]): # Show top 15
+        for i, corr_info in enumerate(correlations[:15]):  # Show top 15
             if corr_info['correct'] is None:
                 status = "?"
             elif corr_info['correct']:
                 status = ""
                 correct_count += 1
             else:
-                status = ""
+                status = "✗"
             
             if corr_info['expected'] != "UNKNOWN":
                 known_count += 1
@@ -3733,14 +3733,14 @@ ACCESSIBILITY-VULNERABILITY
             self._log(f"(Excluding {len(correlations) - known_count} features with unknown expected direction)")
             
             if correctness_rate < 60:
-                self._log(" MAJOR ISSUE: Less than 60% of features have correct correlation direction!")
+                self._log("🚨 MAJOR ISSUE: Less than 60% of features have correct correlation direction!")
                 self._log("   This suggests systematic feature encoding problems OR confounding factors.")
             elif correctness_rate < 80:
-                self._log(" WARNING: Some features may be incorrectly encoded or model is learning confounding patterns")
+                self._log("⚠️  WARNING: Some features may be incorrectly encoded or model is learning confounding patterns")
             else:
                 self._log(" Feature directions appear mostly correct")
         else:
-            self._log("\n WARNING: No features with known expected directions found")
+            self._log("\n⚠️  WARNING: No features with known expected directions found")
         
         return correlations
 
@@ -3803,7 +3803,7 @@ ACCESSIBILITY-VULNERABILITY
             addresses = addresses[['address_id', 'geometry', 'full_address']].copy()
             addresses['tract_fips'] = fips
             train_addresses.append(addresses)
-            print(f"[DEBUG] Filtered {len(addresses)} addresses from {fips}")
+            print(f"[DEBUG]  Filtered {len(addresses)} addresses from {fips}")
 
             # Store tract SVI
             tract_data = data['tracts'][data['tracts']['FIPS'] == fips]
@@ -3886,7 +3886,7 @@ ACCESSIBILITY-VULNERABILITY
         # Configure for multi-task learning without strict constraints
         training_config = self.config.get('training', {}).copy()
         training_config['enforce_constraints'] = True
-        training_config['constraint_weight'] = 1.0 # Lower weight for diverse data
+        training_config['constraint_weight'] = 1.0  # Lower weight for diverse data
         training_config['use_multitask'] = True
         
         trainer = MultiTractGNNTrainer(model, config=training_config, seed=seed)
@@ -3945,7 +3945,7 @@ ACCESSIBILITY-VULNERABILITY
             Dict with baseline comparison results
         """
         try:
-            comparison = DisaggregationComparison(verbose=False) # Quiet for batch
+            comparison = DisaggregationComparison(verbose=False)  # Quiet for batch
             
             comparison.add_baseline(NaiveUniformBaseline())
             comparison.add_baseline(IDWDisaggregation(power=2.0, n_neighbors=8))
@@ -4115,7 +4115,7 @@ ACCESSIBILITY-VULNERABILITY
         self._log("\nCreating Mixture of Experts model...")
         moe_model = create_moe_model(
             accessibility_features_dim=training_graphs[0].x.shape[1],
-            context_features_dim=5, # 5 context features (NO tract SVI)
+            context_features_dim=5,  # 5 context features (NO tract SVI)
             hidden_dim=64,
             dropout=0.3,
             seed=seed
@@ -4159,7 +4159,7 @@ ACCESSIBILITY-VULNERABILITY
                     test_addresses = addresses_with_tracts[tract_mask].copy()
                     
                     if len(test_addresses) == 0:
-                        self._log(f" {test_fips}: No addresses, skipping")
+                        self._log(f"  {test_fips}: No addresses, skipping")
                         continue
                     
                     test_addresses = test_addresses[['address_id', 'geometry', 'full_address']].copy()
@@ -4254,11 +4254,11 @@ ACCESSIBILITY-VULNERABILITY
                     
                     # Log results
                     idw_std = baseline_results.get('methods', {}).get('IDW_p2.0', {}).get('std', 0)
-                    self._log(f" {test_fips}: SVI={actual_svi:.3f}, Shift={shift:+.3f}, "
+                    self._log(f"  {test_fips}: SVI={actual_svi:.3f}, Shift={shift:+.3f}, "
                              f"Std={spatial_std:.4f}, Expert={expert_names[dominant_expert]}")
                     
                 except Exception as e:
-                    self._log(f" {test_fips}: ERROR - {str(e)}", level='ERROR')
+                    self._log(f"  {test_fips}: ERROR - {str(e)}", level='ERROR')
                     import traceback
                     traceback.print_exc()
         
@@ -4323,7 +4323,7 @@ ACCESSIBILITY-VULNERABILITY
                         combined_addresses, method_predictions
                     )
                     
-                    # Generate report with visualizations
+                    # Generate comprehensive report with visualizations
                     validation_dir = os.path.join(self.output_dir, 'block_group_validation')
                     os.makedirs(validation_dir, exist_ok=True)
                     validator.create_validation_report(validation_dir)
@@ -4337,7 +4337,7 @@ ACCESSIBILITY-VULNERABILITY
                         r = svi_corr.get('pearson_r', np.nan)
                         p = svi_corr.get('p_value', np.nan)
                         n = result['diagnostics'].get('n_block_groups_validated', 0)
-                        self._log(f" {method}: r={r:.3f}, p={p:.4f}, n={n} block groups")
+                        self._log(f"  {method}: r={r:.3f}, p={p:.4f}, n={n} block groups")
                     self._log(f"{'='*60}")
                     self._log(f"Validation report saved to: {validation_dir}")
                     
@@ -4370,7 +4370,7 @@ ACCESSIBILITY-VULNERABILITY
             training_results=training_results,
             expert_usage=usage_stats,
             tract_gdf=data['tracts'],
-            all_addresses=addresses_with_tracts # Pass addresses for geographic viz
+            all_addresses=addresses_with_tracts  # Pass addresses for geographic viz
         )
         
         return {
@@ -4465,7 +4465,7 @@ ACCESSIBILITY-VULNERABILITY
         fig = plt.figure(figsize=(16, 12))
         gs = GridSpec(3, 3, figure=fig, hspace=0.3, wspace=0.3)
         
-        fig.suptitle('GRANITE Validation Report', 
+        fig.suptitle('GRANITE Comprehensive Validation Report', 
                     fontsize=16, fontweight='bold')
         
         # Panel 1: Constraint satisfaction comparison
@@ -4581,7 +4581,7 @@ ACCESSIBILITY-VULNERABILITY
             
             self._log(f"Time-Count correlation: {time_count_correlation:.3f} (should be negative)")
             
-            if time_count_correlation > 0.1: # Should be negative
+            if time_count_correlation > 0.1:  # Should be negative
                 self._log("ERROR: Time and count features are positively correlated")
                 return False
             else:
@@ -4593,7 +4593,7 @@ ACCESSIBILITY-VULNERABILITY
         
         self._log(f"Low variation features: {low_variation_count}/{features.shape[1]}")
         
-        if low_variation_count > features.shape[1] * 0.3: # >30% low variation
+        if low_variation_count > features.shape[1] * 0.3:  # >30% low variation
             self._log("ERROR: Too many features have low variation")
             return False
         

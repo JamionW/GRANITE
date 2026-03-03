@@ -23,7 +23,7 @@ warnings.filterwarnings('ignore')
 class SpatialLearningDiagnostics:
     """
     Enhanced diagnostic tools to evaluate if GNN is learning meaningful spatial patterns
-    Maintains original API while adding diagnostic capabilities
+    Maintains original API while adding comprehensive diagnostic capabilities
     """
     
     def __init__(self, verbose=True):
@@ -52,11 +52,11 @@ class SpatialLearningDiagnostics:
         # Create weights matrix
         W = np.zeros((n, n))
         for i in range(n):
-            for j_idx in range(1, len(indices[i])): # Skip self
+            for j_idx in range(1, len(indices[i])):  # Skip self
                 j = indices[i][j_idx]
                 distance = distances[i][j_idx]
                 if distance > 0:
-                    W[i, j] = 1.0 / distance # Inverse distance weighting
+                    W[i, j] = 1.0 / distance  # Inverse distance weighting
         
         # Row-normalize weights
         row_sums = W.sum(axis=1)
@@ -110,7 +110,7 @@ class SpatialLearningDiagnostics:
         
         # 2. Linear regression on accessibility features
         X = accessibility_features
-        y = np.full(len(X), target_mean) + np.random.normal(0, 0.01, len(X)) # Synthetic target
+        y = np.full(len(X), target_mean) + np.random.normal(0, 0.01, len(X))  # Synthetic target
         
         lr = LinearRegression()
         lr.fit(X, y)
@@ -123,13 +123,13 @@ class SpatialLearningDiagnostics:
         
         return baselines
     
-    def_evaluation(self, raw_predictions, accessibility_features, 
+    def comprehensive_evaluation(self, raw_predictions, accessibility_features, 
                                 coordinates, target_svi):
         """
         Original method - complete diagnostic evaluation of model learning quality
         Enhanced with additional diagnostics
         """
-        self._log("Running spatial learning evaluation...")
+        self._log("Running comprehensive spatial learning evaluation...")
         
         results = {}
         
@@ -176,7 +176,7 @@ class SpatialLearningDiagnostics:
         quality_assessment = self._assess_learning_quality(results, target_svi)
         results['quality_assessment'] = quality_assessment
         
-        # 6. ENHANCED DIAGNOSTICS
+        # 6. ENHANCED DIAGNOSTICS - NEW!
         self._log("Running enhanced diagnostic analysis...")
         enhanced_results = self._run_enhanced_diagnostics()
         results['enhanced_diagnostics'] = enhanced_results
@@ -188,7 +188,7 @@ class SpatialLearningDiagnostics:
     
     def print_diagnostic_report(self, results):
         """
-        Original method - print a diagnostic report
+        Original method - print a comprehensive diagnostic report
         Enhanced with additional insights
         """
         print("\n" + "="*60)
@@ -205,7 +205,7 @@ class SpatialLearningDiagnostics:
         acc_corr = results['accessibility_correlations']['overall']
         print(f"\n2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP")
         print(f"   Overall correlation: {acc_corr:.4f}")
-        print(f"   Expected: Negative correlation (better access -> lower vulnerability)")
+        print(f"   Expected: Negative correlation (better access → lower vulnerability)")
         print(f"   Strength: {'Strong' if abs(acc_corr) > 0.3 else 'Moderate' if abs(acc_corr) > 0.1 else 'Weak'}")
         
         # Original prediction characteristics
@@ -232,24 +232,24 @@ class SpatialLearningDiagnostics:
         print(f"   Meaningful accessibility relationship: {quality['meaningful_accessibility_relationship']}")
         print(f"   Mean bias: {quality['mean_bias']:.2%}")
         
-        # ENHANCED DIAGNOSTICS SECTION
+        # ENHANCED DIAGNOSTICS SECTION - NEW!
         if 'enhanced_diagnostics' in results:
             self._print_enhanced_diagnostic_section(results['enhanced_diagnostics'])
         
         # Original recommendations
         print(f"\n6. RECOMMENDATIONS")
         if quality['overall_verdict'] == 'failing':
-            print("    Model is not learning meaningful patterns")
-            print("   -> Consider revising architecture, features, or training approach")
-            print("   -> Mean adjustment is masking fundamental model failure")
+            print("   ❌ Model is not learning meaningful patterns")
+            print("   → Consider revising architecture, features, or training approach")
+            print("   → Mean adjustment is masking fundamental model failure")
         elif quality['overall_verdict'] == 'poor':
-            print("     Model learning is weak but present")
-            print("   -> Investigate training stability and feature engineering")
-            print("   -> Mean adjustment may be appropriate but monitor closely")
+            print("   ⚠️  Model learning is weak but present")
+            print("   → Investigate training stability and feature engineering")
+            print("   → Mean adjustment may be appropriate but monitor closely")
         else:
-            print("    Model appears to be learning meaningful patterns")
-            print("   -> Mean adjustment is likely correcting systematic bias")
-            print("   -> Continue monitoring spatial and accessibility relationships")
+            print("   ✅ Model appears to be learning meaningful patterns")
+            print("   → Mean adjustment is likely correcting systematic bias")
+            print("   → Continue monitoring spatial and accessibility relationships")
         
         # Enhanced recommendations
         if 'enhanced_diagnostics' in results:
@@ -257,7 +257,7 @@ class SpatialLearningDiagnostics:
             if enhanced_recs:
                 print(f"\n7. ENHANCED RECOMMENDATIONS")
                 for rec in enhanced_recs:
-                    print(f"   -> {rec}")
+                    print(f"   → {rec}")
         
         print("\n" + "="*60)
         
@@ -266,7 +266,7 @@ class SpatialLearningDiagnostics:
     # ===== ENHANCED DIAGNOSTIC METHODS (NEW) =====
     
     def _run_enhanced_diagnostics(self) -> dict:
-        """Run enhanced diagnostics"""
+        """Run comprehensive enhanced diagnostics"""
         
         enhanced_results = {}
         
@@ -362,7 +362,7 @@ class SpatialLearningDiagnostics:
             if time_features:
                 time_values = self.accessibility_features[:, time_features]
                 suspicious_patterns['unrealistic_times'] = {
-                    'extremely_high': bool(np.any(time_values > 300)), # > 5 hours
+                    'extremely_high': bool(np.any(time_values > 300)),  # > 5 hours
                     'negative_times': bool(np.any(time_values < 0)),
                     'zero_variance': bool(np.any(np.std(time_values, axis=0) < 0.01))
                 }
@@ -378,7 +378,7 @@ class SpatialLearningDiagnostics:
             if count_features:
                 count_values = self.accessibility_features[:, count_features]
                 suspicious_patterns['unrealistic_counts'] = {
-                    'extremely_high': bool(np.any(count_values > 50)), # > 50 destinations
+                    'extremely_high': bool(np.any(count_values > 50)),  # > 50 destinations
                     'negative_counts': bool(np.any(count_values < 0)),
                     'all_zeros': bool(np.any(np.all(count_values == 0, axis=0)))
                 }
@@ -405,8 +405,8 @@ class SpatialLearningDiagnostics:
                 'zero_variance_features': zero_var_features,
                 'high_variance_features': high_var_features,
                 'high_correlations': high_correlations,
-                'suspicious_patterns': suspicious_patterns, # This key is required by downstream code
-                'feature_quality_score': len(zero_var_features) / n_features if n_features > 0 else 0 # Lower is better
+                'suspicious_patterns': suspicious_patterns,  # This key is required by downstream code
+                'feature_quality_score': len(zero_var_features) / n_features if n_features > 0 else 0  # Lower is better
             }
             
         except Exception as e:
@@ -820,7 +820,7 @@ class SpatialLearningDiagnostics:
         
         # Analyze PC correlations with predictions
         pc_correlations = []
-        for i in range(min(5, pca_features.shape[1])): # Top 5 PCs
+        for i in range(min(5, pca_features.shape[1])):  # Top 5 PCs
             corr = np.corrcoef(pca_features[:, i], self.raw_predictions)[0, 1]
             pc_correlations.append(corr)
         
@@ -1046,13 +1046,13 @@ class SpatialLearningDiagnostics:
     # ===== VISUALIZATION METHODS (NEW) =====
     
     def create_enhanced_diagnostic_plots(self, output_dir='./enhanced_diagnostics'):
-        """Create diagnostic visualizations"""
+        """Create comprehensive diagnostic visualizations"""
         
         import os
         os.makedirs(output_dir, exist_ok=True)
         
         if not hasattr(self, 'diagnostic_results') or not self.diagnostic_results:
-            self._log("No diagnostic results available. Run_evaluation first.")
+            self._log("No diagnostic results available. Run comprehensive_evaluation first.")
             return
         
         # 1. Feature correlation analysis
@@ -1067,7 +1067,7 @@ class SpatialLearningDiagnostics:
         self._log(f"Enhanced diagnostic plots saved to {output_dir}")
     
     def _plot_feature_correlations(self, output_dir):
-        """Plot feature correlation analysis"""
+        """Plot comprehensive feature correlation analysis"""
         
         if 'enhanced_diagnostics' not in self.diagnostic_results:
             return
@@ -1301,7 +1301,7 @@ def run_enhanced_spatial_diagnostics(raw_predictions, accessibility_features, co
     
     diagnostics = SpatialLearningDiagnostics(verbose=True)
     
-    # Run analysis (includes both original and enhanced diagnostics)
+    # Run comprehensive analysis (includes both original and enhanced diagnostics)
     results = diagnostics.comprehensive_evaluation(
         raw_predictions=raw_predictions,
         accessibility_features=accessibility_features,

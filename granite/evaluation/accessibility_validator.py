@@ -20,7 +20,7 @@ warnings.filterwarnings('ignore')
 
 class AccessibilityFeatureValidator:
     """
-    validator for accessibility feature computation
+    Comprehensive validator for accessibility feature computation
     Identifies systematic issues in travel time calculation and feature engineering
     """
     
@@ -38,7 +38,7 @@ class AccessibilityFeatureValidator:
                                       feature_names: List[str] = None,
                                       tract_svi: float = None) -> Dict:
         """
-        Main validation function - analysis of accessibility computation
+        Main validation function - comprehensive analysis of accessibility computation
         
         Args:
             addresses: GeoDataFrame of address points
@@ -48,10 +48,10 @@ class AccessibilityFeatureValidator:
             tract_svi: Target SVI for relationship validation
         
         Returns:
-            validation results
+            Comprehensive validation results
         """
         
-        self.log("Starting accessibility feature validation...")
+        self.log("Starting comprehensive accessibility feature validation...")
         
         # Store data
         self.addresses = addresses
@@ -94,7 +94,7 @@ class AccessibilityFeatureValidator:
         # Store results
         self.validation_results = results
         
-        # Print report
+        # Print comprehensive report
         self._print_validation_report(results)
         
         return results
@@ -116,9 +116,9 @@ class AccessibilityFeatureValidator:
         validation['realism_checks'] = {
             'negative_times': int(np.sum(time_values < 0)),
             'zero_times': int(np.sum(time_values == 0)),
-            'extremely_high_times': int(np.sum(time_values > 180)), # > 3 hours
+            'extremely_high_times': int(np.sum(time_values > 180)),  # > 3 hours
             'unrealistic_times': int(np.sum(time_values > 300)),     # > 5 hours
-            'reasonable_range': int(np.sum((time_values >= 1) & (time_values <= 120))) # 1min - 2hrs
+            'reasonable_range': int(np.sum((time_values >= 1) & (time_values <= 120)))  # 1min - 2hrs
         }
         
         # 2. Statistical properties
@@ -184,8 +184,8 @@ class AccessibilityFeatureValidator:
                 distances, times = zip(*distance_time_pairs)
                 
                 # Expected travel time ranges based on distance
-                expected_walk_times = [d / 5.0 * 60 for d in distances] # 5 km/h
-                expected_drive_times = [d / 30.0 * 60 for d in distances] # 30 km/h
+                expected_walk_times = [d / 5.0 * 60 for d in distances]  # 5 km/h
+                expected_drive_times = [d / 30.0 * 60 for d in distances]  # 30 km/h
                 
                 dest_validation = {
                     'correlation': pearsonr(distances, times)[0],
@@ -195,7 +195,7 @@ class AccessibilityFeatureValidator:
                     'mean_expected_drive_time': np.mean(expected_drive_times),
                     'time_distance_ratio': np.mean(times) / np.mean(distances) if np.mean(distances) > 0 else 0,
                     'reasonable_ratios': sum(1 for d, t in zip(distances, times) 
-                                           if 0.5 <= (t / (d * 10)) <= 5.0) # Rough reasonableness check
+                                           if 0.5 <= (t / (d * 10)) <= 5.0)  # Rough reasonableness check
                 }
             
             validation[dest_type] = dest_validation
@@ -215,7 +215,7 @@ class AccessibilityFeatureValidator:
             if start_idx + 2 < time_values.shape[1]:
                 min_times = time_values[:, start_idx]      # min_time
                 mean_times = time_values[:, start_idx + 1] # mean_time
-                p90_times = time_values[:, start_idx + 2] # 90th_time
+                p90_times = time_values[:, start_idx + 2]  # 90th_time
                 
                 # Check ordering: min <= mean <= 90th
                 valid_ordering = np.sum((min_times <= mean_times) & (mean_times <= p90_times))
@@ -287,7 +287,7 @@ class AccessibilityFeatureValidator:
             available_destinations = len(self.destinations.get(dest_type, []))
             
             for count_idx, count_type in enumerate(count_types):
-                feature_idx = dest_idx * 10 + 3 + count_idx # Count features start at offset 3
+                feature_idx = dest_idx * 10 + 3 + count_idx  # Count features start at offset 3
                 
                 if feature_idx < count_values.shape[1]:
                     counts = count_values[:, feature_idx]
@@ -310,7 +310,7 @@ class AccessibilityFeatureValidator:
         dest_types = ['employment', 'healthcare', 'grocery']
         
         for dest_idx, dest_type in enumerate(dest_types):
-            start_idx = dest_idx * 10 + 3 # Count features start at offset 3
+            start_idx = dest_idx * 10 + 3  # Count features start at offset 3
             
             if start_idx + 2 < self.accessibility_features.shape[1]:
                 count_5min = self.accessibility_features[:, start_idx]
@@ -397,9 +397,9 @@ class AccessibilityFeatureValidator:
             if len(group) > 1:
                 ranges = group['range'].values
                 max_range = np.max(ranges)
-                min_range = np.min(ranges[ranges > 0]) # Exclude zero ranges
+                min_range = np.min(ranges[ranges > 0])  # Exclude zero ranges
                 
-                if min_range > 0 and max_range / min_range > 100: # 100x difference
+                if min_range > 0 and max_range / min_range > 100:  # 100x difference
                     mismatches.extend(group['feature'].tolist())
         
         return mismatches
@@ -414,7 +414,7 @@ class AccessibilityFeatureValidator:
         for i in range(len(self.feature_names)):
             for j in range(i + 1, len(self.feature_names)):
                 corr = correlation_matrix[i, j]
-                if abs(corr) > 0.95: # Very high correlation
+                if abs(corr) > 0.95:  # Very high correlation
                     high_correlations.append({
                         'feature1': self.feature_names[i],
                         'feature2': self.feature_names[j],
@@ -535,7 +535,7 @@ class AccessibilityFeatureValidator:
             
             if start_idx + 7 < len(self.feature_names):
                 min_time = self.accessibility_features[:, start_idx]
-                count_10min = self.accessibility_features[:, start_idx + 4] # 10min count
+                count_10min = self.accessibility_features[:, start_idx + 4]  # 10min count
                 
                 if np.std(min_time) > 0 and np.std(count_5) > 0:
                     corr = pearsonr(min_time, count_5)[0]
@@ -555,8 +555,8 @@ class AccessibilityFeatureValidator:
             start_idx = dest_idx * 10
             
             if start_idx + 7 < len(self.feature_names):
-                score = self.accessibility_features[:, start_idx + 7] # accessibility_score
-                count_10min = self.accessibility_features[:, start_idx + 4] # 60min count
+                score = self.accessibility_features[:, start_idx + 7]  # accessibility_score
+                count_10min = self.accessibility_features[:, start_idx + 4]  # 60min count
                 
                 if np.std(score) > 0 and np.std(count_5) > 0:
                     corr = pearsonr(score, count_5)[0]
@@ -590,7 +590,7 @@ class AccessibilityFeatureValidator:
         
         center_periphery_analysis['overall_accessibility_vs_distance'] = {
             'correlation': center_corr,
-            'expected_negative': center_corr < 0, # Center should have better access
+            'expected_negative': center_corr < 0,  # Center should have better access
             'pattern_strength': 'strong' if abs(center_corr) > 0.5 else 'moderate' if abs(center_corr) > 0.3 else 'weak'
         }
         
@@ -638,7 +638,7 @@ class AccessibilityFeatureValidator:
                         corr = pearsonr(accessibility_scores[i], accessibility_scores[j])[0]
                         cross_correlations[f'{dest_types[i]}_vs_{dest_types[j]}'] = {
                             'correlation': corr,
-                            'expected_positive': corr > 0, # Generally expect positive correlation
+                            'expected_positive': corr > 0,  # Generally expect positive correlation
                             'strength': 'strong' if abs(corr) > 0.5 else 'moderate' if abs(corr) > 0.3 else 'weak'
                         }
                 
@@ -701,7 +701,7 @@ class AccessibilityFeatureValidator:
         # Create weights matrix
         W = np.zeros((n, n))
         for i in range(n):
-            for j_idx in range(1, len(indices[i])): # Skip self
+            for j_idx in range(1, len(indices[i])):  # Skip self
                 j = indices[i][j_idx]
                 dist = distances[i][j_idx]
                 if dist > 0:
@@ -763,7 +763,7 @@ class AccessibilityFeatureValidator:
                 
                 decay_analysis[dest_type] = {
                     'distance_accessibility_correlation': correlation,
-                    'expected_negative': correlation < 0, # Further = less accessible
+                    'expected_negative': correlation < 0,  # Further = less accessible
                     'mean_distance_km': np.mean(min_distances),
                     'distance_range': [np.min(min_distances), np.max(min_distances)],
                     'decay_strength': 'strong' if correlation < -0.5 else 'moderate' if correlation < -0.3 else 'weak'
@@ -831,7 +831,7 @@ class AccessibilityFeatureValidator:
             avg_time = np.mean(self.accessibility_features[:, time_features], axis=1)
             avg_count = np.mean(self.accessibility_features[:, count_features], axis=1)
             expected_correlation = pearsonr(avg_time, avg_count)[0]
-            consistency_score = max(0, -expected_correlation) # Should be negative
+            consistency_score = max(0, -expected_correlation)  # Should be negative
             quality_indicators.append(consistency_score)
         
         overall_quality = np.mean(quality_indicators)
@@ -855,7 +855,7 @@ class AccessibilityFeatureValidator:
         issues = []
         
         # Check for extreme values
-        if np.any(self.accessibility_features > 500): # > 8+ hours travel time
+        if np.any(self.accessibility_features > 500):  # > 8+ hours travel time
             issues.append("Extremely high travel times detected (>8 hours)")
         
         if np.any(self.accessibility_features < 0):
@@ -1056,14 +1056,14 @@ class AccessibilityFeatureValidator:
             base_features.extend([
                 f'{dest_type}_min_time', 
                 f'{dest_type}_mean_time', 
-                f'{dest_type}_median_time',     # <- Changed from 90th_time
+                f'{dest_type}_median_time',     # ← Changed from 90th_time
                 f'{dest_type}_count_5min', 
                 f'{dest_type}_count_10min', 
                 f'{dest_type}_count_15min',
-                f'{dest_type}_drive_advantage', # <- NEW
-                f'{dest_type}_dispersion',       # <- NEW (not concentration)
-                f'{dest_type}_time_range',       # <- NEW
-                f'{dest_type}_percentile'        # <- NEW (not accessibility_score)
+                f'{dest_type}_drive_advantage',  # ← NEW
+                f'{dest_type}_dispersion',       # ← NEW (not concentration)
+                f'{dest_type}_time_range',       # ← NEW
+                f'{dest_type}_percentile'        # ← NEW (not accessibility_score)
             ])
         
         derived_features = ['total_accessibility', 'accessibility_diversity', 
@@ -1101,7 +1101,7 @@ class AccessibilityFeatureValidator:
     # ===== REPORTING METHODS =====
     
     def _print_validation_report(self, results: Dict):
-        """Print validation report"""
+        """Print comprehensive validation report"""
         
         print("\n" + "="*80)
         print("ACCESSIBILITY FEATURE VALIDATION REPORT")
@@ -1109,10 +1109,10 @@ class AccessibilityFeatureValidator:
         
         # Data Overview
         print(f"\nDATA OVERVIEW")
-        print(f" Addresses: {self.n_addresses:,}")
-        print(f" Features: {len(self.feature_names)}")
-        print(f" Destinations: {sum(len(dest_gdf) for dest_gdf in self.destinations.values())}")
-        print(f" Target SVI: {self.tract_svi:.4f}" if self.tract_svi else " Target SVI: Not provided")
+        print(f"  Addresses: {self.n_addresses:,}")
+        print(f"  Features: {len(self.feature_names)}")
+        print(f"  Destinations: {sum(len(dest_gdf) for dest_gdf in self.destinations.values())}")
+        print(f"  Target SVI: {self.tract_svi:.4f}" if self.tract_svi else "  Target SVI: Not provided")
         
         # Travel Time Validation
         if 'travel_time_validation' in results:
@@ -1131,7 +1131,7 @@ class AccessibilityFeatureValidator:
                 for dest_type, dist_data in time_val['distance_validation'].items():
                     if isinstance(dist_data, dict):
                         corr = dist_data.get('correlation', 0)
-                        status = '' if corr > 0.3 else ''
+                        status = '✓' if corr > 0.3 else '✗'
                         print(f"     {dest_type}: r={corr:.3f} {status}")
         
         # Destination Validation
@@ -1149,7 +1149,7 @@ class AccessibilityFeatureValidator:
                 print(f"   Count progression validity:")
                 for dest_type, prog_data in dest_val['count_progression'].items():
                     rate = prog_data.get('progression_validity_rate', 0)
-                    status = '' if rate > 0.9 else '' if rate > 0.7 else ''
+                    status = '✓' if rate > 0.9 else '⚠' if rate > 0.7 else '✗'
                     print(f"     {dest_type}: {rate:.1%} {status}")
         
         # Theoretical Validation
@@ -1166,7 +1166,7 @@ class AccessibilityFeatureValidator:
                         dest = corr_data['destination']
                         corr = corr_data['correlation']
                         expected = corr_data['expected_negative']
-                        status = '' if expected else ''
+                        status = '✓' if expected else '✗'
                         print(f"     {dest}: r={corr:.3f} {status}")
         
         # Data Quality
@@ -1197,7 +1197,7 @@ class AccessibilityFeatureValidator:
             
             if 'priority_fixes' in root_cause:
                 print(f"   Priority Fixes:")
-                for fix in root_cause['priority_fixes'][:3]: # Top 3
+                for fix in root_cause['priority_fixes'][:3]:  # Top 3
                     priority = fix['priority']
                     issue = fix['issue']
                     confidence = fix['confidence']
@@ -1205,15 +1205,15 @@ class AccessibilityFeatureValidator:
             
             if 'recommended_actions' in root_cause:
                 print(f"\n6. RECOMMENDED ACTIONS")
-                for action in root_cause['recommended_actions'][:5]: # Top 5
-                    print(f"   -> {action}")
+                for action in root_cause['recommended_actions'][:5]:  # Top 5
+                    print(f"   → {action}")
         
         print("\n" + "="*80)
     
     # ===== VISUALIZATION METHODS =====
     
     def create_validation_visualizations(self, output_dir: str = './accessibility_validation'):
-        """Create validation visualizations"""
+        """Create comprehensive validation visualizations"""
         
         import os
         os.makedirs(output_dir, exist_ok=True)
@@ -1249,7 +1249,7 @@ class AccessibilityFeatureValidator:
         
         # 1. Travel time distributions
         ax1 = axes[0, 0]
-        for i, name in enumerate(time_names[:3]): # First 3 for visibility
+        for i, name in enumerate(time_names[:3]):  # First 3 for visibility
             ax1.hist(time_values[:, i], bins=30, alpha=0.7, label=name.split('_')[0], density=True)
         ax1.set_xlabel('Travel Time (minutes)')
         ax1.set_ylabel('Density')
@@ -1516,7 +1516,7 @@ class AccessibilityFeatureValidator:
             missing_count = np.sum(np.isnan(feature_values)) + np.sum(np.isinf(feature_values))
             missing_rate = missing_count / len(feature_values)
             missing_rates.append(missing_rate)
-            feature_display_names.append(name[:15]) # Truncate for display
+            feature_display_names.append(name[:15])  # Truncate for display
         
         bars = ax1.bar(range(len(missing_rates)), missing_rates, alpha=0.7)
         ax1.set_xlabel('Feature Index')
@@ -1566,7 +1566,7 @@ class AccessibilityFeatureValidator:
         corr_matrix = np.corrcoef(self.accessibility_features.T)
         
         # Count high correlations
-        high_corr_count = np.sum(np.abs(corr_matrix) > 0.9) - len(self.feature_names) # Subtract diagonal
+        high_corr_count = np.sum(np.abs(corr_matrix) > 0.9) - len(self.feature_names)  # Subtract diagonal
         perfect_corr_count = np.sum(np.abs(corr_matrix) > 0.99) - len(self.feature_names)
         
         categories = ['High Corr\n(>0.9)', 'Perfect Corr\n(>0.99)', 'Total Pairs']
@@ -1632,7 +1632,7 @@ def validate_granite_accessibility_features(addresses, accessibility_features, d
     
     validator = AccessibilityFeatureValidator(verbose=True)
     
-    # Run validation
+    # Run comprehensive validation
     results = validator.validate_accessibility_pipeline(
         addresses=addresses,
         accessibility_features=accessibility_features,

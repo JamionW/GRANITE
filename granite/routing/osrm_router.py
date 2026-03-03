@@ -119,7 +119,7 @@ class OSRMRouter:
             Dict mapping (origin_id, dest_id) -> time_in_minutes
         """
         url_base = self.driving_url if mode == 'driving' else self.walking_url
-        profile = mode # 'driving' or 'foot'
+        profile = mode  # 'driving' or 'foot'
         
         results = {}
         total_pairs = len(origins) * len(destinations)
@@ -168,7 +168,7 @@ class OSRMRouter:
                 processed += len(dest_batch)
                 batches += 1
         
-        self.log(f" Completed: {batches} batches, {processed} route pairs")
+        self.log(f"  Completed: {batches} batches, {processed} route pairs")
         
         return results
     
@@ -219,7 +219,7 @@ class OSRMRouter:
                 return [np.nan] * len(destinations)
             
             # Extract durations (in seconds) and convert to minutes
-            durations = data['durations'][0] # First row = origin to all destinations
+            durations = data['durations'][0]  # First row = origin to all destinations
             travel_times = [d / 60.0 if d is not None else np.nan for d in durations]
             
             return travel_times
@@ -249,14 +249,14 @@ class OSRMRouter:
         for dest in destinations:
             snapped = self._snap_to_road(dest, url_base, profile)
             if snapped is None:
-                snapped_destinations.append(dest) # Use original if snapping fails
+                snapped_destinations.append(dest)  # Use original if snapping fails
             else:
                 snapped_destinations.append(snapped)
         
         # Try routing again with snapped coordinates
         coords = [snapped_origin] + snapped_destinations
         coords_str = ";".join([f"{lon},{lat}" for lon, lat in coords])
-        dest_indices = ";".join([str(i) for i in range(1, len(coords))]) # Use semicolons!
+        dest_indices = ";".join([str(i) for i in range(1, len(coords))])  # Use semicolons!
         
         url = f"{url_base}/table/v1/{profile}/{coords_str}?sources=0&destinations={dest_indices}"
         

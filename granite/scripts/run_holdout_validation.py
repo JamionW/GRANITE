@@ -18,8 +18,8 @@ from granite.data.loaders import DataLoader
 def get_curated_training_tracts():
     """12 non-overlapping training tracts with balanced SVI coverage"""
     return [
-        '47065012000', '47065011205', '47065011100', # Very Low
-        '47065000600', '47065010413', '47065010501', # Low
+        '47065012000', '47065011205', '47065011100',  # Very Low
+        '47065000600', '47065010413', '47065010501',  # Low
         '47065012400', '47065002800',                  # Medium
         '47065010902', '47065011442',                  # High
         '47065003000', '47065001300',                  # Very High
@@ -63,7 +63,7 @@ def print_tract_summary(tract_list, label, loader):
     print(f"\nDistribution by SVI Quintile:")
     quintile_counts = selected['quintile'].value_counts().sort_index()
     for quintile, count in quintile_counts.items():
-        print(f" {quintile}: {count} tracts")
+        print(f"  {quintile}: {count} tracts")
     
     print(f"\nDetailed Tract List:")
     for _, row in selected.iterrows():
@@ -74,7 +74,7 @@ def print_tract_summary(tract_list, label, loader):
             n_addr = 0
         
         quintile = row['quintile']
-        print(f" {row['FIPS']}: SVI={row['RPL_THEMES']:.3f} ({quintile}), {n_addr:,} addresses")
+        print(f"  {row['FIPS']}: SVI={row['RPL_THEMES']:.3f} ({quintile}), {n_addr:,} addresses")
 
 
 def aggregate_baseline_results(test_results: dict) -> pd.DataFrame:
@@ -120,7 +120,7 @@ def aggregate_baseline_results(test_results: dict) -> pd.DataFrame:
 
 
 def print_baseline_summary(baseline_df: pd.DataFrame):
-    """Print baseline comparison summary."""
+    """Print comprehensive baseline comparison summary."""
     
     print(f"\n{'='*80}")
     print("BASELINE COMPARISON SUMMARY (GNN vs Traditional Methods)")
@@ -144,9 +144,9 @@ def print_baseline_summary(baseline_df: pd.DataFrame):
         print(f"\nGNN variation advantage over IDW: {gnn_advantage:+.4f}")
         
         if gnn_advantage > 0:
-            print(" -> GNN produces MORE spatial variation (better disaggregation)")
+            print("  -> GNN produces MORE spatial variation (better disaggregation)")
         else:
-            print(" -> IDW produces more variation (investigate)")
+            print("  -> IDW produces more variation (investigate)")
     
     # Accessibility correlation
     print(f"\n--- Accessibility-SVI Correlation ---")
@@ -273,15 +273,15 @@ def run_global_training_validation(seed=42):
         
         print(f"\nTest Set Performance ({len(valid_results)}/{len(test_tracts)} tracts):")
         print(f"\n--- Constraint Satisfaction ---")
-        print(f" Mean Error: {np.mean(errors):.2f}% +/- {np.std(errors):.2f}%")
-        print(f" Median Error: {np.median(errors):.2f}%")
-        print(f" Min Error: {np.min(errors):.2f}%")
-        print(f" Max Error: {np.max(errors):.2f}%")
-        print(f" Tracts < 10% error: {sum(1 for e in errors if e < 10)}/{len(errors)}")
-        print(f" Tracts < 20% error: {sum(1 for e in errors if e < 20)}/{len(errors)}")
+        print(f"  Mean Error: {np.mean(errors):.2f}% +/- {np.std(errors):.2f}%")
+        print(f"  Median Error: {np.median(errors):.2f}%")
+        print(f"  Min Error: {np.min(errors):.2f}%")
+        print(f"  Max Error: {np.max(errors):.2f}%")
+        print(f"  Tracts < 10% error: {sum(1 for e in errors if e < 10)}/{len(errors)}")
+        print(f"  Tracts < 20% error: {sum(1 for e in errors if e < 20)}/{len(errors)}")
         
         print(f"\n--- Cross-Tract Generalization ---")
-        print(f" R^2 (actual vs predicted): {np.corrcoef(actual_svis, predicted_svis)[0,1]**2:.3f}")
+        print(f"  R^2 (actual vs predicted): {np.corrcoef(actual_svis, predicted_svis)[0,1]**2:.3f}")
         
         # NEW: Aggregate and print baseline comparisons
         baseline_df = aggregate_baseline_results(valid_results)
@@ -449,10 +449,10 @@ if __name__ == '__main__':
     print("1. Train ONE global MoE model on 12 diverse tracts")
     print("2. Test on 10 separate holdout tracts")
     print("3. Compare GNN disaggregation vs IDW/Kriging/Naive baselines")
-    print("4. Generate performance analysis")
+    print("4. Generate comprehensive performance analysis")
     print("\nEstimated time:")
-    print(" - First run: ~60-90 minutes (computing accessibility features)")
-    print(" - Cached runs: ~10-15 minutes (training + validation only)")
+    print("  - First run: ~60-90 minutes (computing accessibility features)")
+    print("  - Cached runs: ~10-15 minutes (training + validation only)")
     print("\nPress Ctrl+C to cancel, or wait 5 seconds to continue...")
     
     import time

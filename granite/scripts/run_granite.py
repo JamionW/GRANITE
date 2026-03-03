@@ -144,8 +144,8 @@ def load_config(args):
 def get_curated_training_tracts():
     """13 non-overlapping training tracts with balanced SVI coverage."""
     return [
-        '47065012000', '47065011205', '47065011100', # Very Low SVI
-        '47065000600', '47065010413', '47065010501', # Low SVI
+        '47065012000', '47065011205', '47065011100',  # Very Low SVI
+        '47065000600', '47065010413', '47065010501',  # Low SVI
         '47065012400', '47065002800',                  # Medium SVI
         '47065010902', '47065011442',                  # High SVI
         '47065003000', '47065001300', '47065002300'    # Very High SVI
@@ -244,14 +244,14 @@ def run_global_training(args, config):
     # Training set summary
     print(f"\nTraining Set:")
     train_data = tract_data[tract_data['FIPS'].isin(training_tracts)]
-    print(f" SVI range: {train_data['RPL_THEMES'].min():.3f} - {train_data['RPL_THEMES'].max():.3f}")
-    print(f" Mean SVI: {train_data['RPL_THEMES'].mean():.3f}")
+    print(f"  SVI range: {train_data['RPL_THEMES'].min():.3f} - {train_data['RPL_THEMES'].max():.3f}")
+    print(f"  Mean SVI: {train_data['RPL_THEMES'].mean():.3f}")
     
     # Test set summary
     print(f"\nTest Set:")
     test_data = tract_data[tract_data['FIPS'].isin(test_tracts)]
-    print(f" SVI range: {test_data['RPL_THEMES'].min():.3f} - {test_data['RPL_THEMES'].max():.3f}")
-    print(f" Mean SVI: {test_data['RPL_THEMES'].mean():.3f}")
+    print(f"  SVI range: {test_data['RPL_THEMES'].min():.3f} - {test_data['RPL_THEMES'].max():.3f}")
+    print(f"  Mean SVI: {test_data['RPL_THEMES'].mean():.3f}")
     
     # Check for overlap
     overlap = set(training_tracts) & set(test_tracts)
@@ -309,15 +309,15 @@ def run_global_training(args, config):
     print(f"Test tracts evaluated: {len(valid_results)}/{len(test_tracts)}")
     
     print(f"\nConstraint Satisfaction:")
-    print(f" Mean error: {np.mean(errors):.2f}% +/- {np.std(errors):.2f}%")
-    print(f" Median error: {np.median(errors):.2f}%")
-    print(f" Min/Max error: {np.min(errors):.2f}% / {np.max(errors):.2f}%")
-    print(f" Tracts < 10% error: {sum(1 for e in errors if e < 10)}/{len(errors)}")
-    print(f" Tracts < 20% error: {sum(1 for e in errors if e < 20)}/{len(errors)}")
+    print(f"  Mean error: {np.mean(errors):.2f}% +/- {np.std(errors):.2f}%")
+    print(f"  Median error: {np.median(errors):.2f}%")
+    print(f"  Min/Max error: {np.min(errors):.2f}% / {np.max(errors):.2f}%")
+    print(f"  Tracts < 10% error: {sum(1 for e in errors if e < 10)}/{len(errors)}")
+    print(f"  Tracts < 20% error: {sum(1 for e in errors if e < 20)}/{len(errors)}")
     
     r_squared = np.corrcoef(actual_svis, predicted_svis)[0, 1] ** 2
     print(f"\nCross-Tract Generalization:")
-    print(f" R-squared: {r_squared:.3f}")
+    print(f"  R-squared: {r_squared:.3f}")
     
     print(f"\nPer-Tract Results:")
     print(f"{'FIPS':<14} {'Actual':<8} {'Predicted':<10} {'Error%':<8} {'Expert':<10}")

@@ -165,7 +165,7 @@ class OrdinaryKrigingDisaggregation(DisaggregationBaseline):
     def __init__(self, variogram_range: float = 5000.0, sill: float = 0.1, 
                  nugget: float = 0.01):
         super().__init__('Kriging')
-        self.variogram_range = variogram_range # meters
+        self.variogram_range = variogram_range  # meters
         self.sill = sill
         self.nugget = nugget
         self.tract_centroids = None
@@ -293,7 +293,7 @@ class DisaggregationComparison:
                        accessibility_features: np.ndarray = None,
                        svi_column: str = 'RPL_THEMES') -> Dict:
         """
-        Run comparison of GNN against baselines.
+        Run comprehensive comparison of GNN against baselines.
         
         Args:
             tract_gdf: All tract geometries with SVI
@@ -345,7 +345,7 @@ class DisaggregationComparison:
         # Baseline results
         for name, baseline in self.baselines.items():
             if self.verbose:
-                print(f"\n Running {name}...")
+                print(f"\n  Running {name}...")
             
             predictions = baseline.disaggregate(address_coords, tract_fips, tract_svi)
             results['methods'][name] = self._evaluate_method(
@@ -372,7 +372,7 @@ class DisaggregationComparison:
         constraint_error_pct = constraint_error_abs / tract_svi * 100 if tract_svi > 0 else 0
         
         # Spatial variation metrics
-        cv = pred_std / pred_mean if pred_mean > 0 else 0 # Coefficient of variation
+        cv = pred_std / pred_mean if pred_mean > 0 else 0  # Coefficient of variation
         
         # Accessibility correlation (if available)
         access_corr = None
@@ -410,7 +410,7 @@ class DisaggregationComparison:
         
         variation_ranking = sorted(
             methods.keys(),
-            key=lambda k: -methods[k]['std'] # Higher variation is better for disaggregation
+            key=lambda k: -methods[k]['std']  # Higher variation is better for disaggregation
         )
         
         # GNN vs baselines improvement
@@ -469,10 +469,10 @@ class DisaggregationComparison:
         var_vs_naive = comparison.get('gnn_variation_vs_naive', 0)
         if var_vs_naive > 0.01:
             print(f"+ GNN produces {var_vs_naive:.4f} MORE spatial variation than naive uniform")
-            print(" (Evidence of meaningful within-tract disaggregation)")
+            print("  (Evidence of meaningful within-tract disaggregation)")
         elif var_vs_naive < -0.01:
             print(f"- GNN produces {-var_vs_naive:.4f} LESS variation than naive")
-            print(" (Consider: is the tract truly homogeneous?)")
+            print("  (Consider: is the tract truly homogeneous?)")
         else:
             print("~ GNN variation similar to naive baseline")
         
@@ -482,7 +482,7 @@ class DisaggregationComparison:
             if abs(gnn_corr) > 0.3:
                 direction = "negative" if gnn_corr < 0 else "positive"
                 print(f"+ Strong {direction} accessibility-SVI correlation (r={gnn_corr:.3f})")
-                print(" (GNN disaggregation reflects accessibility patterns)")
+                print("  (GNN disaggregation reflects accessibility patterns)")
             elif abs(gnn_corr) > 0.1:
                 print(f"~ Moderate accessibility correlation (r={gnn_corr:.3f})")
             else:

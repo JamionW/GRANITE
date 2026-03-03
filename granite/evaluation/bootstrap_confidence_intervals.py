@@ -124,7 +124,7 @@ def bootstrap_correlation_difference(x, y1, y2, n_bootstrap=1000, ci=0.95, seed=
     # More conservative: p-value based on how often bootstrap crosses 0
     p_value_zero = np.mean(boot_diffs <= 0) if diff_observed > 0 else np.mean(boot_diffs >= 0)
     
-    significant = ci_lower > 0 or ci_upper < 0 # CI doesn't include 0
+    significant = ci_lower > 0 or ci_upper < 0  # CI doesn't include 0
     
     return {
         'r1': r1,
@@ -150,7 +150,7 @@ def run_bootstrap_validation(granite_predictions, idw_predictions, ground_truth,
         ground_truth: Array of actual block-group SVI values
         
     Returns:
-        dict with bootstrap results
+        dict with comprehensive bootstrap results
     """
     
     if verbose:
@@ -269,7 +269,7 @@ def demo_with_synthetic_data():
     print("="*70)
     
     np.random.seed(42)
-    n = 27 # Typical number of block groups
+    n = 27  # Typical number of block groups
     
     # Simulate ground truth
     ground_truth = np.random.uniform(0.1, 0.9, n)

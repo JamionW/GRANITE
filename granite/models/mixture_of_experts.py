@@ -452,7 +452,7 @@ class MixtureOfExpertsTrainer:
     
     def train(self, graph_data_list, tract_svi_list, finetune=False, verbose=True):
         """
-        Complete MoE training: experts → gate → optional fine-tuning.
+        Complete MoE training: experts -> gate -> optional fine-tuning.
         
         Args:
             graph_data_list: List of training graphs

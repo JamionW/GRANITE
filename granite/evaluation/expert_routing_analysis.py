@@ -2,7 +2,7 @@
 GRANITE Expert Routing Analysis
 
 Identifies what accessibility features distinguish tracts routed to each expert.
-Explains counterintuitive routing (e.g., why low-SVI tract 11900 → High expert).
+Explains counterintuitive routing (e.g., why low-SVI tract 11900 -> High expert).
 
 Key insight: Expert routing may be based on ACCESSIBILITY PATTERNS, not SVI.
 A low-SVI suburb with poor transit access may route to the same expert as

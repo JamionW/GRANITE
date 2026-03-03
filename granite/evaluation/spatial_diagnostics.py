@@ -23,7 +23,7 @@ warnings.filterwarnings('ignore')
 class SpatialLearningDiagnostics:
     """
     Enhanced diagnostic tools to evaluate if GNN is learning meaningful spatial patterns
-    Maintains original API while adding comprehensive diagnostic capabilities
+    Maintains original API while adding diagnostic capabilities
     """
     
     def __init__(self, verbose=True):
@@ -129,7 +129,7 @@ class SpatialLearningDiagnostics:
         Original method - complete diagnostic evaluation of model learning quality
         Enhanced with additional diagnostics
         """
-        self._log("Running comprehensive spatial learning evaluation...")
+        self._log("Running spatial learning evaluation...")
         
         results = {}
         
@@ -176,7 +176,7 @@ class SpatialLearningDiagnostics:
         quality_assessment = self._assess_learning_quality(results, target_svi)
         results['quality_assessment'] = quality_assessment
         
-        # 6. ENHANCED DIAGNOSTICS - NEW!
+        # 6. ENHANCED DIAGNOSTICS
         self._log("Running enhanced diagnostic analysis...")
         enhanced_results = self._run_enhanced_diagnostics()
         results['enhanced_diagnostics'] = enhanced_results
@@ -188,7 +188,7 @@ class SpatialLearningDiagnostics:
     
     def print_diagnostic_report(self, results):
         """
-        Original method - print a comprehensive diagnostic report
+        Original method - print a diagnostic report
         Enhanced with additional insights
         """
         print("\n" + "="*60)
@@ -205,7 +205,7 @@ class SpatialLearningDiagnostics:
         acc_corr = results['accessibility_correlations']['overall']
         print(f"\n2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP")
         print(f"   Overall correlation: {acc_corr:.4f}")
-        print(f"   Expected: Negative correlation (better access → lower vulnerability)")
+        print(f"   Expected: Negative correlation (better access -> lower vulnerability)")
         print(f"   Strength: {'Strong' if abs(acc_corr) > 0.3 else 'Moderate' if abs(acc_corr) > 0.1 else 'Weak'}")
         
         # Original prediction characteristics
@@ -232,24 +232,24 @@ class SpatialLearningDiagnostics:
         print(f"   Meaningful accessibility relationship: {quality['meaningful_accessibility_relationship']}")
         print(f"   Mean bias: {quality['mean_bias']:.2%}")
         
-        # ENHANCED DIAGNOSTICS SECTION - NEW!
+        # ENHANCED DIAGNOSTICS SECTION
         if 'enhanced_diagnostics' in results:
             self._print_enhanced_diagnostic_section(results['enhanced_diagnostics'])
         
         # Original recommendations
         print(f"\n6. RECOMMENDATIONS")
         if quality['overall_verdict'] == 'failing':
-            print("   ❌ Model is not learning meaningful patterns")
-            print("   → Consider revising architecture, features, or training approach")
-            print("   → Mean adjustment is masking fundamental model failure")
+            print("    Model is not learning meaningful patterns")
+            print("   -> Consider revising architecture, features, or training approach")
+            print("   -> Mean adjustment is masking fundamental model failure")
         elif quality['overall_verdict'] == 'poor':
-            print("   ⚠️  Model learning is weak but present")
-            print("   → Investigate training stability and feature engineering")
-            print("   → Mean adjustment may be appropriate but monitor closely")
+            print("     Model learning is weak but present")
+            print("   -> Investigate training stability and feature engineering")
+            print("   -> Mean adjustment may be appropriate but monitor closely")
         else:
-            print("   ✅ Model appears to be learning meaningful patterns")
-            print("   → Mean adjustment is likely correcting systematic bias")
-            print("   → Continue monitoring spatial and accessibility relationships")
+            print("    Model appears to be learning meaningful patterns")
+            print("   -> Mean adjustment is likely correcting systematic bias")
+            print("   -> Continue monitoring spatial and accessibility relationships")
         
         # Enhanced recommendations
         if 'enhanced_diagnostics' in results:
@@ -257,7 +257,7 @@ class SpatialLearningDiagnostics:
             if enhanced_recs:
                 print(f"\n7. ENHANCED RECOMMENDATIONS")
                 for rec in enhanced_recs:
-                    print(f"   → {rec}")
+                    print(f"   -> {rec}")
         
         print("\n" + "="*60)
         
@@ -266,7 +266,7 @@ class SpatialLearningDiagnostics:
     # ===== ENHANCED DIAGNOSTIC METHODS (NEW) =====
     
     def _run_enhanced_diagnostics(self) -> dict:
-        """Run comprehensive enhanced diagnostics"""
+        """Run enhanced diagnostics"""
         
         enhanced_results = {}
         
@@ -1046,7 +1046,7 @@ class SpatialLearningDiagnostics:
     # ===== VISUALIZATION METHODS (NEW) =====
     
     def create_enhanced_diagnostic_plots(self, output_dir='./enhanced_diagnostics'):
-        """Create comprehensive diagnostic visualizations"""
+        """Create diagnostic visualizations"""
         
         import os
         os.makedirs(output_dir, exist_ok=True)
@@ -1067,7 +1067,7 @@ class SpatialLearningDiagnostics:
         self._log(f"Enhanced diagnostic plots saved to {output_dir}")
     
     def _plot_feature_correlations(self, output_dir):
-        """Plot comprehensive feature correlation analysis"""
+        """Plot feature correlation analysis"""
         
         if 'enhanced_diagnostics' not in self.diagnostic_results:
             return
@@ -1301,7 +1301,7 @@ def run_enhanced_spatial_diagnostics(raw_predictions, accessibility_features, co
     
     diagnostics = SpatialLearningDiagnostics(verbose=True)
     
-    # Run comprehensive analysis (includes both original and enhanced diagnostics)
+    # Run analysis (includes both original and enhanced diagnostics)
     results = diagnostics.comprehensive_evaluation(
         raw_predictions=raw_predictions,
         accessibility_features=accessibility_features,

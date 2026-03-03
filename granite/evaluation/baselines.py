@@ -293,7 +293,7 @@ class DisaggregationComparison:
                        accessibility_features: np.ndarray = None,
                        svi_column: str = 'RPL_THEMES') -> Dict:
         """
-        Run comprehensive comparison of GNN against baselines.
+        Run comparison of GNN against baselines.
         
         Args:
             tract_gdf: All tract geometries with SVI

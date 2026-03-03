@@ -39,7 +39,7 @@ class GRANITEPipeline:
     1. Load spatial data (addresses, tracts, destinations)
     2. Compute multi-modal accessibility features
     3. Build accessibility-similarity graph
-    4. Train GNN: accessibility features → SVI predictions
+    4. Train GNN: accessibility features -> SVI predictions
     5. Validate against constraints and baselines
     """
     
@@ -178,7 +178,7 @@ class GRANITEPipeline:
         return data
 
     def _process_single_tract(self, target_fips, data):
-        """Process single tract or multiple tracts with accessibility → SVI approach"""
+        """Process single tract or multiple tracts with accessibility -> SVI approach"""
         
         # Clear stale accessibility cache
         cache_dir = os.path.join(self.data_dir, 'cache', 'accessibility_features')
@@ -441,7 +441,7 @@ class GRANITEPipeline:
             'training_result': training_result,
             'baseline_comparisons': baseline_results, 
             'validation_results': validation_results,
-            'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility → SVI',
+            'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility -> SVI',
             'summary': {
                 'addresses_processed': len(target_addresses),
                 'total_training_addresses': len(tract_addresses),
@@ -1586,9 +1586,9 @@ class GRANITEPipeline:
             if constraint_error < 10 and spatial_std > 0.01:
                 self._log(" Training quality: GOOD")
             elif constraint_error < 25:
-                self._log("⚠ Training quality: ACCEPTABLE")
+                self._log(" Training quality: ACCEPTABLE")
             else:
-                self._log("✗ Training quality: POOR - consider hyperparameter tuning")
+                self._log(" Training quality: POOR - consider hyperparameter tuning")
             
             return {
                 'success': True,
@@ -1755,12 +1755,12 @@ class GRANITEPipeline:
         self._log(f"Actual tract SVI: {tract_svi:.4f}")
         self._log(f"Predicted mean (unconstrained): {predicted_mean:.4f}")
         self._log(f"Mean error: {mean_error_pct:.2f}%")
-        self._log(f"Natural convergence: {'YES ' if natural_convergence else 'NO ✗'}")
+        self._log(f"Natural convergence: {'YES ' if natural_convergence else 'NO '}")
         self._log(f"Prediction std: {predicted_std:.4f}")
         self._log(f"Accessibility-SVI correlation: {correlation:.4f}")
         
         if not natural_convergence:
-            self._log("\n⚠ WARNING: Model does not naturally approach correct mean")
+            self._log("\n WARNING: Model does not naturally approach correct mean")
             self._log("  This suggests constraints are masking poor learning")
         
         return {
@@ -1978,7 +1978,7 @@ class GRANITEPipeline:
         if raw_predictions is not None:
             self._log("Running spatial learning diagnostics on RAW predictions...")
             
-            # Run comprehensive diagnostics
+            # Run diagnostics
             diagnostic_results = diagnostics.comprehensive_evaluation(
                 raw_predictions=raw_predictions['mean'].values,
                 accessibility_features=accessibility_features,
@@ -2050,7 +2050,7 @@ class GRANITEPipeline:
             'accessibility_svi_correlations': accessibility_svi_correlations,
             'quality_metrics': quality_metrics,
             'n_addresses': len(predictions),
-            'method': 'Direct Accessibility → SVI',
+            'method': 'Direct Accessibility -> SVI',
             'spatial_diagnostics': diagnostic_summary  # RETURN this for integration
         }
         
@@ -2482,7 +2482,7 @@ class GRANITEPipeline:
     def _create_disaggregation_visualizations(self, test_results, training_results=None,
                                                expert_usage=None, tract_gdf=None, all_addresses=None):
         """
-        Create comprehensive disaggregation visualizations.
+        Create disaggregation visualizations.
         
         Generates:
         1. Aggregate baseline comparison dashboard
@@ -2787,7 +2787,7 @@ ACCESSIBILITY-VULNERABILITY
 
     def _analyze_feature_usage(self, features, feature_names, predictions, output_dir):
         """
-        Comprehensive feature usage analysis for transparency.
+        feature usage analysis for transparency.
         
         Generates:
         - Feature correlation matrix with SVI proxy
@@ -2846,7 +2846,7 @@ ACCESSIBILITY-VULNERABILITY
         }
 
     def _plot_feature_transparency(self, feature_analysis, output_dir):
-        """Create comprehensive feature transparency visualizations."""
+        """Create feature transparency visualizations."""
         import matplotlib.pyplot as plt
         
         stats_df = feature_analysis['feature_stats']
@@ -3442,7 +3442,7 @@ ACCESSIBILITY-VULNERABILITY
             
             # RED FLAG CHECK: If high vulnerability has very good accessibility
             if avg_min_time < 6.0:  # Very good accessibility (< 6min average)
-                self._log(f"   🚨 RED FLAG: High vulnerability but excellent accessibility!")
+                self._log(f"    RED FLAG: High vulnerability but excellent accessibility!")
         
         self._log("\nLOW VULNERABILITY ADDRESSES (should have GOOD accessibility):")
         
@@ -3465,7 +3465,7 @@ ACCESSIBILITY-VULNERABILITY
             
             # RED FLAG CHECK: If low vulnerability has very poor accessibility
             if avg_min_time > 12.0:  # Poor accessibility (> 12min average)
-                self._log(f"   🚨 RED FLAG: Low vulnerability but poor accessibility!")
+                self._log(f"    RED FLAG: Low vulnerability but poor accessibility!")
         
         return {
             'high_vuln_sample': high_vuln_indices,
@@ -3717,7 +3717,7 @@ ACCESSIBILITY-VULNERABILITY
                 status = ""
                 correct_count += 1
             else:
-                status = "✗"
+                status = ""
             
             if corr_info['expected'] != "UNKNOWN":
                 known_count += 1
@@ -3733,14 +3733,14 @@ ACCESSIBILITY-VULNERABILITY
             self._log(f"(Excluding {len(correlations) - known_count} features with unknown expected direction)")
             
             if correctness_rate < 60:
-                self._log("🚨 MAJOR ISSUE: Less than 60% of features have correct correlation direction!")
+                self._log(" MAJOR ISSUE: Less than 60% of features have correct correlation direction!")
                 self._log("   This suggests systematic feature encoding problems OR confounding factors.")
             elif correctness_rate < 80:
-                self._log("⚠️  WARNING: Some features may be incorrectly encoded or model is learning confounding patterns")
+                self._log("  WARNING: Some features may be incorrectly encoded or model is learning confounding patterns")
             else:
                 self._log(" Feature directions appear mostly correct")
         else:
-            self._log("\n⚠️  WARNING: No features with known expected directions found")
+            self._log("\n  WARNING: No features with known expected directions found")
         
         return correlations
 
@@ -4323,7 +4323,7 @@ ACCESSIBILITY-VULNERABILITY
                         combined_addresses, method_predictions
                     )
                     
-                    # Generate comprehensive report with visualizations
+                    # Generate report with visualizations
                     validation_dir = os.path.join(self.output_dir, 'block_group_validation')
                     os.makedirs(validation_dir, exist_ok=True)
                     validator.create_validation_report(validation_dir)
@@ -4465,7 +4465,7 @@ ACCESSIBILITY-VULNERABILITY
         fig = plt.figure(figsize=(16, 12))
         gs = GridSpec(3, 3, figure=fig, hspace=0.3, wspace=0.3)
         
-        fig.suptitle('GRANITE Comprehensive Validation Report', 
+        fig.suptitle('GRANITE Validation Report', 
                     fontsize=16, fontweight='bold')
         
         # Panel 1: Constraint satisfaction comparison

@@ -1044,7 +1044,7 @@ class DataLoader:
         return travel_times
 
     def compute_accessibility_features(self, addresses: gpd.GeoDataFrame) -> np.ndarray:
-        """Compute comprehensive accessibility features for all addresses"""
+        """Compute accessibility features for all addresses"""
         self._log(f"Computing accessibility features for {len(addresses)} addresses...")
         
         destinations = {

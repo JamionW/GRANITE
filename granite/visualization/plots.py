@@ -837,7 +837,7 @@ class DisaggregationVisualizer:
                                       accessibility_features: np.ndarray = None,
                                       output_path: str = None) -> plt.Figure:
         """
-        Create comprehensive disaggregation comparison dashboard.
+        Create disaggregation comparison dashboard.
         
         Args:
             comparison_results: Output from DisaggregationComparison.run_comparison()

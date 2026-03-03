@@ -150,7 +150,7 @@ def run_bootstrap_validation(granite_predictions, idw_predictions, ground_truth,
         ground_truth: Array of actual block-group SVI values
         
     Returns:
-        dict with comprehensive bootstrap results
+        dict with bootstrap results
     """
     
     if verbose:

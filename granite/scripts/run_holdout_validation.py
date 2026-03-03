@@ -120,7 +120,7 @@ def aggregate_baseline_results(test_results: dict) -> pd.DataFrame:
 
 
 def print_baseline_summary(baseline_df: pd.DataFrame):
-    """Print comprehensive baseline comparison summary."""
+    """Print baseline comparison summary."""
     
     print(f"\n{'='*80}")
     print("BASELINE COMPARISON SUMMARY (GNN vs Traditional Methods)")
@@ -449,7 +449,7 @@ if __name__ == '__main__':
     print("1. Train ONE global MoE model on 12 diverse tracts")
     print("2. Test on 10 separate holdout tracts")
     print("3. Compare GNN disaggregation vs IDW/Kriging/Naive baselines")
-    print("4. Generate comprehensive performance analysis")
+    print("4. Generate performance analysis")
     print("\nEstimated time:")
     print("  - First run: ~60-90 minutes (computing accessibility features)")
     print("  - Cached runs: ~10-15 minutes (training + validation only)")

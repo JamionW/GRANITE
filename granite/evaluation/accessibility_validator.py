@@ -20,7 +20,7 @@ warnings.filterwarnings('ignore')
 
 class AccessibilityFeatureValidator:
     """
-    Comprehensive validator for accessibility feature computation
+    validator for accessibility feature computation
     Identifies systematic issues in travel time calculation and feature engineering
     """
     
@@ -38,7 +38,7 @@ class AccessibilityFeatureValidator:
                                       feature_names: List[str] = None,
                                       tract_svi: float = None) -> Dict:
         """
-        Main validation function - comprehensive analysis of accessibility computation
+        Main validation function - analysis of accessibility computation
         
         Args:
             addresses: GeoDataFrame of address points
@@ -48,10 +48,10 @@ class AccessibilityFeatureValidator:
             tract_svi: Target SVI for relationship validation
         
         Returns:
-            Comprehensive validation results
+            validation results
         """
         
-        self.log("Starting comprehensive accessibility feature validation...")
+        self.log("Starting accessibility feature validation...")
         
         # Store data
         self.addresses = addresses
@@ -94,7 +94,7 @@ class AccessibilityFeatureValidator:
         # Store results
         self.validation_results = results
         
-        # Print comprehensive report
+        # Print report
         self._print_validation_report(results)
         
         return results
@@ -1056,14 +1056,14 @@ class AccessibilityFeatureValidator:
             base_features.extend([
                 f'{dest_type}_min_time', 
                 f'{dest_type}_mean_time', 
-                f'{dest_type}_median_time',     # ← Changed from 90th_time
+                f'{dest_type}_median_time',     # <- Changed from 90th_time
                 f'{dest_type}_count_5min', 
                 f'{dest_type}_count_10min', 
                 f'{dest_type}_count_15min',
-                f'{dest_type}_drive_advantage',  # ← NEW
-                f'{dest_type}_dispersion',       # ← NEW (not concentration)
-                f'{dest_type}_time_range',       # ← NEW
-                f'{dest_type}_percentile'        # ← NEW (not accessibility_score)
+                f'{dest_type}_drive_advantage',  # <- NEW
+                f'{dest_type}_dispersion',       # <- NEW (not concentration)
+                f'{dest_type}_time_range',       # <- NEW
+                f'{dest_type}_percentile'        # <- NEW (not accessibility_score)
             ])
         
         derived_features = ['total_accessibility', 'accessibility_diversity', 
@@ -1101,7 +1101,7 @@ class AccessibilityFeatureValidator:
     # ===== REPORTING METHODS =====
     
     def _print_validation_report(self, results: Dict):
-        """Print comprehensive validation report"""
+        """Print validation report"""
         
         print("\n" + "="*80)
         print("ACCESSIBILITY FEATURE VALIDATION REPORT")
@@ -1131,7 +1131,7 @@ class AccessibilityFeatureValidator:
                 for dest_type, dist_data in time_val['distance_validation'].items():
                     if isinstance(dist_data, dict):
                         corr = dist_data.get('correlation', 0)
-                        status = '✓' if corr > 0.3 else '✗'
+                        status = '' if corr > 0.3 else ''
                         print(f"     {dest_type}: r={corr:.3f} {status}")
         
         # Destination Validation
@@ -1149,7 +1149,7 @@ class AccessibilityFeatureValidator:
                 print(f"   Count progression validity:")
                 for dest_type, prog_data in dest_val['count_progression'].items():
                     rate = prog_data.get('progression_validity_rate', 0)
-                    status = '✓' if rate > 0.9 else '⚠' if rate > 0.7 else '✗'
+                    status = '' if rate > 0.9 else '' if rate > 0.7 else ''
                     print(f"     {dest_type}: {rate:.1%} {status}")
         
         # Theoretical Validation
@@ -1166,7 +1166,7 @@ class AccessibilityFeatureValidator:
                         dest = corr_data['destination']
                         corr = corr_data['correlation']
                         expected = corr_data['expected_negative']
-                        status = '✓' if expected else '✗'
+                        status = '' if expected else ''
                         print(f"     {dest}: r={corr:.3f} {status}")
         
         # Data Quality
@@ -1206,14 +1206,14 @@ class AccessibilityFeatureValidator:
             if 'recommended_actions' in root_cause:
                 print(f"\n6. RECOMMENDED ACTIONS")
                 for action in root_cause['recommended_actions'][:5]:  # Top 5
-                    print(f"   → {action}")
+                    print(f"   -> {action}")
         
         print("\n" + "="*80)
     
     # ===== VISUALIZATION METHODS =====
     
     def create_validation_visualizations(self, output_dir: str = './accessibility_validation'):
-        """Create comprehensive validation visualizations"""
+        """Create validation visualizations"""
         
         import os
         os.makedirs(output_dir, exist_ok=True)
@@ -1632,7 +1632,7 @@ def validate_granite_accessibility_features(addresses, accessibility_features, d
     
     validator = AccessibilityFeatureValidator(verbose=True)
     
-    # Run comprehensive validation
+    # Run validation
     results = validator.validate_accessibility_pipeline(
         addresses=addresses,
         accessibility_features=accessibility_features,

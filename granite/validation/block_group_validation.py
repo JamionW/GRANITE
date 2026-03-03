@@ -280,7 +280,7 @@ class BlockGroupValidator:
         return results
     
     def create_validation_report(self, output_dir: str):
-        """Create comprehensive validation report with visualizations."""
+        """Create validation report with visualizations."""
         
         os.makedirs(output_dir, exist_ok=True)
         

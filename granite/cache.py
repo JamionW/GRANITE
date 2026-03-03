@@ -219,7 +219,7 @@ class WorkloadAnalyzer:
         ).size().to_dict()
     
     def generate_report(self) -> str:
-        """Generate comprehensive workload analysis report."""
+        """Generate workload analysis report."""
         report = []
         report.append("=" * 60)
         report.append("GRANITE Cache Workload Analysis Report")

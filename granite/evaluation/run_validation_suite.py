@@ -1,5 +1,5 @@
 """
-GRANITE Comprehensive Validation Suite
+GRANITE Validation Suite
 
 Runs all four priority validation analyses:
 1. Ablation study (accessibility-only vs full model)
@@ -62,7 +62,7 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
     
     os.makedirs(output_dir, exist_ok=True)
     
-    print_header("GRANITE COMPREHENSIVE VALIDATION SUITE")
+    print_header("GRANITE VALIDATION SUITE")
     print(f"Output directory: {output_dir}")
     print(f"Random seed: {seed}")
     
@@ -256,7 +256,7 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
 
 def main():
     parser = argparse.ArgumentParser(
-        description='GRANITE Comprehensive Validation Suite',
+        description='GRANITE Validation Suite',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

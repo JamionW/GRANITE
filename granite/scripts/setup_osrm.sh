@@ -26,6 +26,6 @@ docker run -t -v $(pwd):/data osrm/osrm-backend \
 docker run -t -v $(pwd):/data osrm/osrm-backend \
     osrm-customize /data/tennessee-latest.osrm
 
-echo "✓ OSRM setup complete!"
+echo " OSRM setup complete!"
 echo ""
 echo "To start servers, run: bash scripts/start_osrm.sh"

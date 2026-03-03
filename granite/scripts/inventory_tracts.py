@@ -38,10 +38,10 @@ def inventory_tracts():
         try:
             addresses = loader.get_addresses_for_tract(fips)
             n_addresses = len(addresses)
-            status = "✓" if n_addresses >= 50 else "⚠" if n_addresses > 0 else "✗"
+            status = "" if n_addresses >= 50 else "" if n_addresses > 0 else ""
         except Exception as e:
             n_addresses = 0
-            status = "✗"
+            status = ""
         
         results.append({
             'FIPS': fips,
@@ -69,9 +69,9 @@ def inventory_tracts():
     some_tracts = results_df[(results_df['Addresses'] > 0) & (results_df['Addresses'] < 50)]
     no_tracts = results_df[results_df['Addresses'] == 0]
     
-    print(f"✓ Good tracts (≥50 addresses):  {len(good_tracts)} tracts")
-    print(f"⚠ Sparse tracts (1-49 addresses): {len(some_tracts)} tracts")
-    print(f"✗ Empty tracts (0 addresses):    {len(no_tracts)} tracts")
+    print(f" Good tracts (≥50 addresses):  {len(good_tracts)} tracts")
+    print(f" Sparse tracts (1-49 addresses): {len(some_tracts)} tracts")
+    print(f" Empty tracts (0 addresses):    {len(no_tracts)} tracts")
     
     print(f"\nGood tracts SVI range: {good_tracts['SVI'].min():.3f} - {good_tracts['SVI'].max():.3f}")
     print(f"Good tracts address range: {good_tracts['Addresses'].min():,} - {good_tracts['Addresses'].max():,}")

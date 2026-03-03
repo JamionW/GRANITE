@@ -12,54 +12,54 @@ OSM_FILE="$OSRM_DATA_DIR/tennessee-latest.osm.pbf"
 
 # Check if we have the source OSM file
 if [ ! -f "$OSM_FILE" ]; then
- echo " Source OSM file not found: $OSM_FILE"
- exit 1
+    echo "✗ Source OSM file not found: $OSM_FILE"
+    exit 1
 fi
 
-echo "Found OSM source file: $(basename $OSM_FILE)"
+echo "✓ Found OSM source file: $(basename $OSM_FILE)"
 echo ""
 
 # Use the data directory directly (not a temp directory)
 cd "$OSRM_DATA_DIR"
 
 echo "Step 1: Extracting OSM data with car profile..."
-echo "This may take 5-15 minutes depending on data size..."
+echo "  This may take 5-15 minutes depending on data size..."
 docker run -t -v "$OSRM_DATA_DIR:/data" \
- osrm/osrm-backend \
- osrm-extract -p /opt/car.lua /data/$(basename $OSM_FILE)
+    osrm/osrm-backend \
+    osrm-extract -p /opt/car.lua /data/$(basename $OSM_FILE)
 
 if [ ! -f "$OSRM_DATA_DIR/tennessee-latest.osrm" ]; then
- echo " Extract failed - tennessee-latest.osrm not created"
- echo ""
- echo "Files created:"
- ls -lh tennessee-latest.osrm* 2>/dev/null | head -10
- exit 1
+    echo "✗ Extract failed - tennessee-latest.osrm not created"
+    echo ""
+    echo "Files created:"
+    ls -lh tennessee-latest.osrm* 2>/dev/null | head -10
+    exit 1
 fi
 
-echo "Extract complete"
+echo "✓ Extract complete"
 echo ""
 
 echo "Step 2: Partitioning graph..."
 docker run -t -v "$OSRM_DATA_DIR:/data" \
- osrm/osrm-backend \
- osrm-partition /data/tennessee-latest.osrm
+    osrm/osrm-backend \
+    osrm-partition /data/tennessee-latest.osrm
 
-echo "Partition complete"
+echo "✓ Partition complete"
 echo ""
 
 echo "Step 3: Customizing graph..."
 docker run -t -v "$OSRM_DATA_DIR:/data" \
- osrm/osrm-backend \
- osrm-customize /data/tennessee-latest.osrm
+    osrm/osrm-backend \
+    osrm-customize /data/tennessee-latest.osrm
 
-echo "Customize complete"
+echo "✓ Customize complete"
 echo ""
 
-echo "All processing complete!"
+echo "✓ All processing complete!"
 echo ""
 echo "Created files:"
 ls -lh "$OSRM_DATA_DIR"/tennessee-latest.osrm* | head -10
 echo "..."
 echo ""
 echo "You can now start OSRM with:"
-echo "bash granite/scripts/start_osrm.sh"
+echo "  bash granite/scripts/start_osrm.sh"

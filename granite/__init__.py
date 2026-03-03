@@ -19,9 +19,9 @@ from .evaluation import baselines
 from .visualization import plots
 
 __all__ = [
- "loaders",
- "gnn",
- "pipeline",
- "baselines",
- "plots",
+    "loaders",
+    "gnn",
+    "pipeline",
+    "baselines",
+    "plots",
 ]

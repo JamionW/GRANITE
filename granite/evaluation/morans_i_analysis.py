@@ -203,7 +203,7 @@ def local_morans_i(values, W, permutations=999, seed=42):
 def analyze_spatial_autocorrelation(addresses, predictions, ground_truth=None,
                                     method='knn', k=8, permutations=999, seed=42):
     """
-    Comprehensive spatial autocorrelation analysis for GRANITE validation.
+    spatial autocorrelation analysis for GRANITE validation.
     
     Args:
         addresses: GeoDataFrame with address points

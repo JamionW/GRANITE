@@ -964,11 +964,11 @@ def compute_baseline_predictions(addresses, tract_gdf, tract_results):
 # =============================================================================
 
 def generate_validation_report(all_results, output_dir):
-    """Generate comprehensive text report."""
+    """Generate text report."""
     
     lines = [
         "="*75,
-        "GRANITE COMPREHENSIVE VALIDATION REPORT",
+        "GRANITE VALIDATION REPORT",
         "="*75,
         "",
         f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",

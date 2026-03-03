@@ -217,14 +217,14 @@ class ContextGatedFeatureModulator(nn.Module):
     def __init__(self, accessibility_dim, context_dim, hidden_dim=32):
         super(ContextGatedFeatureModulator, self).__init__()
         
-        # Context encoder: Demographics → embedding
+        # Context encoder: Demographics -> embedding
         self.context_encoder = nn.Sequential(
             nn.Linear(context_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim)
         )
         
-        # Attention mechanism: Context → feature importance weights
+        # Attention mechanism: Context -> feature importance weights
         self.attention = nn.Sequential(
             nn.Linear(hidden_dim, accessibility_dim),
             nn.Softmax(dim=-1)
@@ -492,7 +492,7 @@ class AccessibilityGNNTrainer:
         context = getattr(graph_data, 'context', None)
 
         with torch.no_grad():
-            predictions, learned_accessibility, attention_weights = self.model(  # ← RIGHT: unpacking 3
+            predictions, learned_accessibility, attention_weights = self.model(  # <- RIGHT: unpacking 3
                 graph_data.x, 
                 graph_data.edge_index, 
                 return_accessibility=True,

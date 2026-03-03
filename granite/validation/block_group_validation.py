@@ -280,7 +280,7 @@ class BlockGroupValidator:
         return results
     
     def create_validation_report(self, output_dir: str):
-        """Create validation report with visualizations."""
+        """Create comprehensive validation report with visualizations."""
         
         os.makedirs(output_dir, exist_ok=True)
         
@@ -534,7 +534,7 @@ class BlockGroupValidator:
                         dpi=150, bbox_inches='tight')
             plt.close()
             
-            break # Only do first method for now
+            break  # Only do first method for now
     
     def _create_summary_table(self, results: Dict, output_dir: str):
         """Create CSV summary of all methods."""
@@ -575,16 +575,16 @@ class BlockGroupValidator:
             "=" * 75,
             "",
             "METHODOLOGY:",
-            " 1. Compute block-group SVI using CDC methodology with available ACS variables",
-            " 2. Aggregate address-level predictions to block group means",
-            " 3. Correlate predicted means with computed block-group SVI",
-            " 4. Positive correlation = meaningful spatial disaggregation",
+            "  1. Compute block-group SVI using CDC methodology with available ACS variables",
+            "  2. Aggregate address-level predictions to block group means",
+            "  3. Correlate predicted means with computed block-group SVI",
+            "  4. Positive correlation = meaningful spatial disaggregation",
             "",
             "GROUND TRUTH: Block-group SVI computed from:",
-            " - Theme 1 (Socioeconomic): Median HH income, per capita income, unemployment, education",
-            " - Theme 2 (Household): Age 65+, Age 17-, single parent households",
-            " - Theme 3 (Minority): Minority status",
-            " - Theme 4 (Housing): Multi-unit, mobile homes, crowding, no vehicle",
+            "  - Theme 1 (Socioeconomic): Median HH income, per capita income, unemployment, education",
+            "  - Theme 2 (Household): Age 65+, Age 17-, single parent households",
+            "  - Theme 3 (Minority): Minority status",
+            "  - Theme 4 (Housing): Multi-unit, mobile homes, crowding, no vehicle",
             "",
             "-" * 75,
             "RESULTS SUMMARY",
@@ -613,21 +613,21 @@ class BlockGroupValidator:
             "-" * 75,
             "",
             "Correlation Strength:",
-            " r > 0.5   : Strong positive - excellent spatial learning",
-            " r > 0.3   : Moderate positive - meaningful patterns captured",
-            " r > 0.15 : Weak positive - some signal detected",
-            " |r| < 0.15: No meaningful correlation",
-            " r < -0.15 : Negative correlation - systematic bias",
+            "  r > 0.5   : Strong positive - excellent spatial learning",
+            "  r > 0.3   : Moderate positive - meaningful patterns captured",
+            "  r > 0.15  : Weak positive - some signal detected",
+            "  |r| < 0.15: No meaningful correlation",
+            "  r < -0.15 : Negative correlation - systematic bias",
             "",
             "Statistical Significance:",
-            " p < 0.05 : Correlation is statistically significant",
-            " p < 0.01 : Highly significant",
+            "  p < 0.05  : Correlation is statistically significant",
+            "  p < 0.01  : Highly significant",
             "",
             "Key Insight:",
-            " A positive correlation indicates that addresses predicted to have",
-            " higher vulnerability tend to be in block groups that actually have",
-            " higher SVI according to ACS demographics. This validates that the",
-            " learned spatial disaggregation captures real vulnerability gradients.",
+            "  A positive correlation indicates that addresses predicted to have",
+            "  higher vulnerability tend to be in block groups that actually have",
+            "  higher SVI according to ACS demographics. This validates that the",
+            "  learned spatial disaggregation captures real vulnerability gradients.",
             "",
             "=" * 75
         ])

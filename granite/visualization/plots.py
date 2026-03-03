@@ -145,7 +145,7 @@ class GRANITEResearchVisualizer:
             
             # Use meaningful feature names
             feature_labels = []
-            for i in range(min(n_features, 9)): # Limit to 9 features
+            for i in range(min(n_features, 9)):  # Limit to 9 features
                 feature_name = self.feature_names.get(f'F{i+1}', f'F{i+1}')
                 # Shorten for display
                 short_name = feature_name.split('_')[0][:4] + '_' + feature_name.split('_')[-1][:2]
@@ -159,7 +159,7 @@ class GRANITEResearchVisualizer:
             # Add correlation values
             for i in range(len(feature_labels)):
                 for j in range(len(feature_labels)):
-                    if i != j: # Skip diagonal
+                    if i != j:  # Skip diagonal
                         color = 'white' if abs(corr_matrix[i, j]) > 0.5 else 'black'
                         ax2.text(j, i, f'{corr_matrix[i, j]:.2f}',
                                ha="center", va="center", color=color, fontsize=7)
@@ -182,7 +182,7 @@ class GRANITEResearchVisualizer:
         x_labels = []
         for i in range(n_display):
             feature_name = self.feature_names.get(f'F{i+1}', f'F{i+1}')
-            x_labels.append(feature_name.split('_')[-1][:4]) # Use last part of name
+            x_labels.append(feature_name.split('_')[-1][:4])  # Use last part of name
         
         ax3.set_xticks(x_positions)
         ax3.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=8)
@@ -372,7 +372,7 @@ Next Steps:
             sample_indices = np.random.choice(len(predictions), min(100, len(predictions)), replace=False)
             
             for i, idx1 in enumerate(sample_indices[:-1]):
-                for idx2 in sample_indices[i+1:i+6]: # Limit comparisons
+                for idx2 in sample_indices[i+1:i+6]:  # Limit comparisons
                     geo_dist = np.sqrt((x_coords[idx1] - x_coords[idx2])**2 + 
                                      (y_coords[idx1] - y_coords[idx2])**2)
                     pred_diff = abs(predictions[idx1] - predictions[idx2])
@@ -829,7 +829,7 @@ class DisaggregationVisualizer:
             'idw': '#1565C0',       # Blue
             'kriging': '#7B1FA2',   # Purple
             'naive': '#757575',     # Gray
-            'highlight': '#FF6F00' # Orange
+            'highlight': '#FF6F00'  # Orange
         }
     
     def plot_disaggregation_dashboard(self, 
@@ -837,7 +837,7 @@ class DisaggregationVisualizer:
                                       accessibility_features: np.ndarray = None,
                                       output_path: str = None) -> plt.Figure:
         """
-        Create disaggregation comparison dashboard.
+        Create comprehensive disaggregation comparison dashboard.
         
         Args:
             comparison_results: Output from DisaggregationComparison.run_comparison()
@@ -1055,7 +1055,7 @@ Addresses: {results['n_addresses']:,}
 
 GNN Disaggregation:
   Mean: {gnn.get('mean', 0):.4f}
-  Std: {gnn.get('std', 0):.4f}
+  Std:  {gnn.get('std', 0):.4f}
   Range: {gnn.get('range', 0):.4f}
   Constraint Error: {gnn.get('constraint_error_pct', 0):.2f}%
 
@@ -1109,7 +1109,7 @@ Comparison:
         
         # Highlight GNN row
         for i, cell in enumerate(table.get_celld().values()):
-            if i < len(columns): # Header row
+            if i < len(columns):  # Header row
                 cell.set_text_props(fontweight='bold')
         
         ax.set_title('Complete Metrics Comparison', fontsize=12, fontweight='bold', pad=20)

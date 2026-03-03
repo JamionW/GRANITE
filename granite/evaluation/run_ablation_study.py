@@ -86,8 +86,8 @@ class AblationConfig:
 def get_curated_training_tracts() -> List[str]:
     """12 non-overlapping training tracts with balanced SVI coverage."""
     return [
-        '47065012000', '47065011205', '47065011100', # Very Low SVI
-        '47065000600', '47065010413', '47065010501', # Low SVI
+        '47065012000', '47065011205', '47065011100',  # Very Low SVI
+        '47065000600', '47065010413', '47065010501',  # Low SVI
         '47065012400', '47065002800',                  # Medium SVI
         '47065010902', '47065011442',                  # High SVI
         '47065003000', '47065001300',                  # Very High SVI
@@ -235,8 +235,8 @@ def compute_euclidean_accessibility(
     features[:, 7] = np.sum(distances_km < 10.0, axis=1)   # count_10km
     
     # Concentration features
-    features[:, 8] = distances_km[:, 0] / (distances_km[:, -1] + 0.01) # concentration
-    features[:, 9] = np.max(distances_km, axis=1) - np.min(distances_km, axis=1) # range
+    features[:, 8] = distances_km[:, 0] / (distances_km[:, -1] + 0.01)  # concentration
+    features[:, 9] = np.max(distances_km, axis=1) - np.min(distances_km, axis=1)  # range
     
     return features
 
@@ -268,7 +268,7 @@ def compute_tract_features(
             addresses.iloc[0].get('tract_fips', 'unknown')
         )
         if cached is not None and len(cached) == len(addresses):
-            return cached[:, :30] # First 30 features (base accessibility)
+            return cached[:, :30]  # First 30 features (base accessibility)
     
     # Fall back to Euclidean
     emp_features = compute_euclidean_accessibility(
@@ -318,7 +318,7 @@ def create_unified_graph(
     # First pass: collect all data and compute total size
     all_features = []
     all_coords = []
-    tract_node_ranges = {} # {fips: (start_idx, end_idx)}
+    tract_node_ranges = {}  # {fips: (start_idx, end_idx)}
     tract_svis = {}
     expected_n_features = None
     
@@ -367,8 +367,8 @@ def create_unified_graph(
             train_indices.extend(range(start, end))
     
     scaler = RobustScaler()
-    scaler.fit(combined_features[train_indices]) # Fit only on training
-    features_normalized = scaler.transform(combined_features) # Transform all
+    scaler.fit(combined_features[train_indices])  # Fit only on training
+    features_normalized = scaler.transform(combined_features)  # Transform all
     features_normalized = np.nan_to_num(features_normalized, nan=0.0)
     
     # Feature replacement options
@@ -412,10 +412,10 @@ def create_unified_graph(
         L_norm = csr_matrix(np.eye(n_total)) - D_inv_sqrt @ adj @ D_inv_sqrt
         
         # Get smallest eigenvectors (excluding trivial one)
-        n_pe = min(8, n_total - 2) # 8 positional encoding dimensions
+        n_pe = min(8, n_total - 2)  # 8 positional encoding dimensions
         try:
             eigenvalues, eigenvectors = eigsh(L_norm, k=n_pe + 1, which='SM')
-            features_normalized = eigenvectors[:, 1:n_pe + 1] # Skip first (constant)
+            features_normalized = eigenvectors[:, 1:n_pe + 1]  # Skip first (constant)
         except:
             # Fallback to coordinates if eigsh fails
             coord_scaler = RobustScaler()
@@ -436,7 +436,7 @@ def create_unified_graph(
     
     edge_list = []
     for i in range(n_total):
-        for j in indices[i][1:]: # Skip self
+        for j in indices[i][1:]:  # Skip self
             edge_list.extend([[i, j], [j, i]])
     
     edge_index = torch.LongTensor(edge_list).t().contiguous()
@@ -481,11 +481,11 @@ def create_gnn_model(n_features: int, hidden_dim: int = 64, seed: int = 42):
     
     model = AccessibilitySVIGNN(
         accessibility_features_dim=n_features,
-        context_features_dim=5, # Standard context dim
+        context_features_dim=5,  # Standard context dim
         hidden_dim=hidden_dim,
         dropout=0.3,
         seed=seed,
-        use_context_gating=False, # Simpler for ablation
+        use_context_gating=False,  # Simpler for ablation
         use_multitask=False
     )
     
@@ -565,7 +565,7 @@ def train_gnn_inductive(
         )
         
         if torch.isnan(total_loss):
-            logger.log(f" Epoch {epoch}: NaN loss, skipping", level='WARN')
+            logger.log(f"  Epoch {epoch}: NaN loss, skipping", level='WARN')
             continue
         
         total_loss.backward()
@@ -581,7 +581,7 @@ def train_gnn_inductive(
             patience_counter += 1
         
         if patience_counter >= 15:
-            logger.log(f" Early stopping at epoch {epoch}")
+            logger.log(f"  Early stopping at epoch {epoch}")
             break
         
         if (epoch + 1) % 25 == 0:
@@ -597,7 +597,7 @@ def train_gnn_inductive(
                         errors.append(err)
             
             mean_err = np.mean(errors) if errors else 0
-            logger.log(f" Epoch {epoch+1}: loss={total_loss.item():.4f}, "
+            logger.log(f"  Epoch {epoch+1}: loss={total_loss.item():.4f}, "
                       f"constraint_err={mean_err:.1f}%, std={spatial_std.item():.4f}")
     
     return model
@@ -642,7 +642,7 @@ def evaluate_gnn_inductive(
             test_actual.append(actual_svi)
             test_predicted.append(pred_mean)
             
-            logger.log(f" {fips}: actual={actual_svi:.3f}, pred={pred_mean:.3f}, "
+            logger.log(f"  {fips}: actual={actual_svi:.3f}, pred={pred_mean:.3f}, "
                       f"err={abs(pred_mean-actual_svi)/actual_svi*100:.1f}%")
     
     return np.array(test_actual), np.array(test_predicted)
@@ -726,12 +726,12 @@ class RobustAblationStudy:
             try:
                 addresses = data['loader'].get_addresses_for_tract(fips)
                 if len(addresses) < 10:
-                    self.logger.log(f" Skipping {fips}: only {len(addresses)} addresses")
+                    self.logger.log(f"  Skipping {fips}: only {len(addresses)} addresses")
                     continue
                 
                 tract_svi = tracts[tracts['FIPS'] == fips]['RPL_THEMES'].values
                 if len(tract_svi) == 0:
-                    self.logger.log(f" Skipping {fips}: no SVI data")
+                    self.logger.log(f"  Skipping {fips}: no SVI data")
                     continue
                     
                 tract_svi = tract_svi[0]
@@ -751,10 +751,10 @@ class RobustAblationStudy:
                 }
                 processed_tracts.append(fips)
                 
-                self.logger.log(f" {fips}: {len(addresses)} addresses, SVI={tract_svi:.3f}")
+                self.logger.log(f"  {fips}: {len(addresses)} addresses, SVI={tract_svi:.3f}")
                 
             except Exception as e:
-                self.logger.log(f" Error processing {fips}: {e}", level='ERROR')
+                self.logger.log(f"  Error processing {fips}: {e}", level='ERROR')
                 continue
             
             # Checkpoint periodically
@@ -764,7 +764,7 @@ class RobustAblationStudy:
                     'processed_tracts': processed_tracts,
                     'stage': 'feature_computation'
                 })
-                self.logger.log(f" Checkpoint saved ({len(processed_tracts)} tracts)")
+                self.logger.log(f"  Checkpoint saved ({len(processed_tracts)} tracts)")
         
         # Filter to valid tracts
         valid_train = [f for f in train_fips if f in tract_data]
@@ -803,10 +803,10 @@ class RobustAblationStudy:
             healthcare = loader.create_healthcare_destinations(use_real_data=True)
             grocery = loader.create_grocery_destinations(use_real_data=True)
             
-            self.logger.log(f" Tracts: {len(tracts)}")
-            self.logger.log(f" Employment: {len(employment)}")
-            self.logger.log(f" Healthcare: {len(healthcare)}")
-            self.logger.log(f" Grocery: {len(grocery)}")
+            self.logger.log(f"  Tracts: {len(tracts)}")
+            self.logger.log(f"  Employment: {len(employment)}")
+            self.logger.log(f"  Healthcare: {len(healthcare)}")
+            self.logger.log(f"  Grocery: {len(grocery)}")
             
             return {
                 'loader': loader,
@@ -880,12 +880,12 @@ class RobustAblationStudy:
         # Log top 10
         self.logger.log("\nTop 10 features by |correlation| with tract SVI:")
         for i, feat in enumerate(correlations[:10]):
-            self.logger.log(f" {i+1}. {feat['name']}: r = {feat['correlation']:+.3f}")
+            self.logger.log(f"  {i+1}. {feat['name']}: r = {feat['correlation']:+.3f}")
         
         # Log bottom 5
         self.logger.log("\nBottom 5 features (weakest signal):")
         for feat in correlations[-5:]:
-            self.logger.log(f" {feat['name']}: r = {feat['correlation']:+.3f}")
+            self.logger.log(f"  {feat['name']}: r = {feat['correlation']:+.3f}")
         
         # Return indices of top features
         top_indices = [f['index'] for f in correlations]
@@ -984,9 +984,9 @@ class RobustAblationStudy:
                 n_features = graph.x.shape[1]
                 n_edges = graph.edge_index.shape[1] // 2
                 
-                self.logger.log(f" Graph: {n_total} nodes ({n_train} train, {n_test} test)")
-                self.logger.log(f" Edges: {n_edges}, Features: {n_features}")
-                self.logger.log(f" Train tracts: {len(train_fips)}, Test tracts: {len(test_fips)}")
+                self.logger.log(f"  Graph: {n_total} nodes ({n_train} train, {n_test} test)")
+                self.logger.log(f"  Edges: {n_edges}, Features: {n_features}")
+                self.logger.log(f"  Train tracts: {len(train_fips)}, Test tracts: {len(test_fips)}")
                 
                 # Train GNN (loss only on training nodes)
                 self.logger.log("\nTraining GNN (inductive)...")
@@ -1027,10 +1027,10 @@ class RobustAblationStudy:
                 }
                 
                 self.logger.log(f"\nResults for {config_name}:")
-                self.logger.log(f" Correlation: r = {correlation:.3f}")
-                self.logger.log(f" MAE: {mae:.3f}")
-                self.logger.log(f" RMSE: {rmse:.3f}")
-                self.logger.log(f" Time: {elapsed:.1f}s")
+                self.logger.log(f"  Correlation: r = {correlation:.3f}")
+                self.logger.log(f"  MAE: {mae:.3f}")
+                self.logger.log(f"  RMSE: {rmse:.3f}")
+                self.logger.log(f"  Time: {elapsed:.1f}s")
                 
             except Exception as e:
                 self.logger.log(f"Configuration {config_name} failed: {e}", level='ERROR')

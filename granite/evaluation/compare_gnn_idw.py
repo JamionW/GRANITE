@@ -229,7 +229,7 @@ def main():
         # Load addresses for this tract
         addresses = loader.get_addresses_for_tract(fips)
         if len(addresses) == 0:
-            print(f" No addresses found, skipping")
+            print(f"  No addresses found, skipping")
             continue
         
         # Get tract SVI
@@ -243,8 +243,8 @@ def main():
             addresses.geometry.y.values
         ])
         
-        print(f" Addresses: {len(coords)}")
-        print(f" Tract SVI: {tract_svi:.3f}")
+        print(f"  Addresses: {len(coords)}")
+        print(f"  Tract SVI: {tract_svi:.3f}")
         
         # Get neighbor centroids (exclude self)
         neighbor_mask = np.arange(len(all_centroids)) != tract_idx
@@ -252,31 +252,31 @@ def main():
         neighbor_svis = all_svis[neighbor_mask]
         
         # Debug: check for coordinate/SVI issues
-        print(f" Debug: {len(neighbor_centroids)} neighbors, {np.sum(~np.isnan(neighbor_svis))} with valid SVI")
-        print(f" Debug: Address coord range: x=[{coords[:, 0].min():.1f}, {coords[:, 0].max():.1f}], y=[{coords[:, 1].min():.1f}, {coords[:, 1].max():.1f}]")
-        print(f" Debug: Centroid coord range: x=[{neighbor_centroids[:, 0].min():.1f}, {neighbor_centroids[:, 0].max():.1f}], y=[{neighbor_centroids[:, 1].min():.1f}, {neighbor_centroids[:, 1].max():.1f}]")
+        print(f"  Debug: {len(neighbor_centroids)} neighbors, {np.sum(~np.isnan(neighbor_svis))} with valid SVI")
+        print(f"  Debug: Address coord range: x=[{coords[:, 0].min():.1f}, {coords[:, 0].max():.1f}], y=[{coords[:, 1].min():.1f}, {coords[:, 1].max():.1f}]")
+        print(f"  Debug: Centroid coord range: x=[{neighbor_centroids[:, 0].min():.1f}, {neighbor_centroids[:, 0].max():.1f}], y=[{neighbor_centroids[:, 1].min():.1f}, {neighbor_centroids[:, 1].max():.1f}]")
         
         # --- IDW Predictions ---
-        print(" Running IDW...")
+        print("  Running IDW...")
         idw_preds = compute_idw_predictions(
             coords, tract_svi, neighbor_centroids, neighbor_svis
         )
         
         # --- GNN Predictions (coordinate features) ---
-        print(" Running GNN (coordinates only)...")
-        graph = create_tract_graph(coords, coords) # Use coords as features
+        print("  Running GNN (coordinates only)...")
+        graph = create_tract_graph(coords, coords)  # Use coords as features
         gnn_preds = train_constrained_gnn(graph, tract_svi)
         
         # --- Statistics ---
-        print(f"\n Results:")
-        print(f" {'Method':<15} {'Mean':>8} {'Std':>8} {'Min':>8} {'Max':>8} {'Range':>8}")
-        print(f" {'-'*55}")
-        print(f" {'IDW':<15} {idw_preds.mean():>8.3f} {idw_preds.std():>8.3f} {idw_preds.min():>8.3f} {idw_preds.max():>8.3f} {idw_preds.max()-idw_preds.min():>8.3f}")
-        print(f" {'GNN (coords)':<15} {gnn_preds.mean():>8.3f} {gnn_preds.std():>8.3f} {gnn_preds.min():>8.3f} {gnn_preds.max():>8.3f} {gnn_preds.max()-gnn_preds.min():>8.3f}")
+        print(f"\n  Results:")
+        print(f"  {'Method':<15} {'Mean':>8} {'Std':>8} {'Min':>8} {'Max':>8} {'Range':>8}")
+        print(f"  {'-'*55}")
+        print(f"  {'IDW':<15} {idw_preds.mean():>8.3f} {idw_preds.std():>8.3f} {idw_preds.min():>8.3f} {idw_preds.max():>8.3f} {idw_preds.max()-idw_preds.min():>8.3f}")
+        print(f"  {'GNN (coords)':<15} {gnn_preds.mean():>8.3f} {gnn_preds.std():>8.3f} {gnn_preds.min():>8.3f} {gnn_preds.max():>8.3f} {gnn_preds.max()-gnn_preds.min():>8.3f}")
         
         # Correlation between methods
         corr = np.corrcoef(idw_preds, gnn_preds)[0, 1]
-        print(f"\n IDW-GNN correlation: r = {corr:.3f}")
+        print(f"\n  IDW-GNN correlation: r = {corr:.3f}")
         
         results.append({
             'fips': fips,

@@ -22,7 +22,7 @@ class EnhancedAccessibilityComputer:
         self.verbose = verbose
 
         self.enable_caching = enable_caching
-        self.cache = None # Default to None
+        self.cache = None  # Default to None
 
         if enable_caching:
             try:
@@ -113,7 +113,7 @@ class EnhancedAccessibilityComputer:
         # Compute angles from address to each destination
         dx = dest_points.geometry.x.values - address_point.x
         dy = dest_points.geometry.y.values - address_point.y
-        angles = np.arctan2(dy, dx) # radians, -π to π
+        angles = np.arctan2(dy, dx)  # radians, -π to π
         
         # Divide into 8 directional bins (N, NE, E, SE, S, SW, W, NW)
         bins = np.linspace(-np.pi, np.pi, 9)
@@ -291,7 +291,7 @@ class EnhancedAccessibilityComputer:
         """Travel time calculation with guardrails"""
         
         # Validate input distance
-        if distance_km < 0 or distance_km > 50: # Sanity check
+        if distance_km < 0 or distance_km > 50:  # Sanity check
             distance_km = max(0.1, min(distance_km, 50))
         
         times = {}
@@ -299,7 +299,7 @@ class EnhancedAccessibilityComputer:
         # Base speeds (km/h)
         base_speeds = {
             'walk': 4.5,    # Reduced from 5.0 - more realistic urban walking
-            'drive': 20.0, # Reduced from 25.0 - realistic urban driving with stops
+            'drive': 20.0,  # Reduced from 25.0 - realistic urban driving with stops
             'transit': 15.0 # Increased from 12.0 - more competitive transit
         }
         
@@ -319,13 +319,13 @@ class EnhancedAccessibilityComputer:
                     'morning': 1.4, 'midday': 1.1, 'evening': 1.5
                 }.get(time_period, 1.2)
                 
-                parking_time = np.random.uniform(2, 6) # 2-6 minutes parking
+                parking_time = np.random.uniform(2, 6)  # 2-6 minutes parking
                 variation = np.random.normal(0, 1.5)    # driving variation
                 
                 final_time = max(3.0, (base_time * traffic_multiplier) + parking_time + variation)
                 
-            else: # transit
-                base_wait = np.random.uniform(8, 15) # 8-15 min average wait
+            else:  # transit
+                base_wait = np.random.uniform(8, 15)  # 8-15 min average wait
                 
                 # Transfer penalty for longer trips
                 if distance_km > 8:
@@ -417,7 +417,7 @@ class EnhancedAccessibilityComputer:
                 else:
                     normalized_time_range = 0.0
                 
-                accessibility_percentile = 0.5 # Will be computed later
+                accessibility_percentile = 0.5  # Will be computed later
                 
                 # Assemble feature vector (24 features)
                 feature_vector = [
@@ -437,13 +437,13 @@ class EnhancedAccessibilityComputer:
             else:
                 # Fallback for addresses with no travel time data (24 features)
                 feature_vector = [
-                    120.0, 120.0, 120.0, # times
-                    0, 0, 0, # counts
-                    0.5, 0.5, 0.0, 0.5, # original features
-                    0.0, 0.0, 0.5, 1.0, # concentration, diversity, gradient
-                    0.0, 0.0, 0.0, # walkability
-                    0.0, 0.5, # quality, connectivity
-                    0, 1.0, 0.5, 1.0, 1.0 # counts, categories, stability, inequality, edge
+                    120.0, 120.0, 120.0,  # times
+                    0, 0, 0,  # counts
+                    0.5, 0.5, 0.0, 0.5,  # original features
+                    0.0, 0.0, 0.5, 1.0,  # concentration, diversity, gradient
+                    0.0, 0.0, 0.0,  # walkability
+                    0.0, 0.5,  # quality, connectivity
+                    0, 1.0, 0.5, 1.0, 1.0  # counts, categories, stability, inequality, edge
                 ]
             
             features.append(feature_vector)
@@ -496,7 +496,7 @@ class EnhancedAccessibilityComputer:
             
             # Check count features against maximum possible (6 destinations per address)
             if 'count' in name:
-                max_possible_per_address = 6 # We limit each address to 6 destinations
+                max_possible_per_address = 6  # We limit each address to 6 destinations
                 if max_val > max_possible_per_address:
                     self.log(f"ERROR: {name} max ({max_val}) exceeds max destinations per address ({max_possible_per_address})")
                     validation_passed = False
@@ -516,7 +516,7 @@ class EnhancedAccessibilityComputer:
             corr = np.corrcoef(min_times, count_5min)[0, 1]
             self.log(f"Min_time vs Count_5min correlation: {corr:.3f}")
             
-            if corr > 0.1: # Should be negative
+            if corr > 0.1:  # Should be negative
                 self.log(f"WARNING: Correlation should be negative, got {corr:.3f}")
                 validation_passed = False
             else:
@@ -614,13 +614,13 @@ class EnhancedAccessibilityComputer:
         # Import road loading functionality from loaders
         try:
             from ..data.loaders import DataLoader
-            loader = DataLoader() # You may need to pass config
+            loader = DataLoader()  # You may need to pass config
             
             # Get state/county from first origin coordinate
             first_origin = origins.iloc[0]
             # Estimate state/county from coordinates (rough approximation)
-            state_fips = '47' # Tennessee
-            county_fips = '065' # Hamilton
+            state_fips = '47'  # Tennessee
+            county_fips = '065'  # Hamilton
             
             roads = loader.load_road_network(state_fips=state_fips, county_fips=county_fips)
             
@@ -636,7 +636,7 @@ class EnhancedAccessibilityComputer:
                     coords = list(road.geometry.coords)
                     for i in range(len(coords) - 1):
                         u, v = coords[i], coords[i + 1]
-                        length = ((u[0] - v[0])**2 + (u[1] - v[1])**2)**0.5 * 111000 # Convert to meters
+                        length = ((u[0] - v[0])**2 + (u[1] - v[1])**2)**0.5 * 111000  # Convert to meters
                         road_graph.add_edge(u, v, length=length)
             
             # Map addresses to road nodes
@@ -650,14 +650,14 @@ class EnhancedAccessibilityComputer:
                 for orig_idx, origin in origins.iterrows():
                     coord = np.array([[origin.geometry.x, origin.geometry.y]])
                     distances, indices = tree.query(np.radians(coord), k=1)
-                    if distances[0][0] * 6371000 < 500: # Within 500m
+                    if distances[0][0] * 6371000 < 500:  # Within 500m
                         address_mapping[orig_idx] = tuple(road_nodes[indices[0][0]])
                 
                 # Map destinations  
                 for dest_idx, destination in destinations.iterrows():
                     coord = np.array([[destination.geometry.x, destination.geometry.y]])
                     distances, indices = tree.query(np.radians(coord), k=1)
-                    if distances[0][0] * 6371000 < 500: # Within 500m
+                    if distances[0][0] * 6371000 < 500:  # Within 500m
                         address_mapping[f"dest_{dest_idx}"] = tuple(road_nodes[indices[0][0]])
             
                 self.log(f"Mapped {len(address_mapping)} addresses to road network")
@@ -690,15 +690,15 @@ class EnhancedAccessibilityComputer:
             min_dest_dist = float('inf')
             
             for node in road_nodes:
-                node_coord = (node[1], node[0]) # lat, lon
+                node_coord = (node[1], node[0])  # lat, lon
                 
                 orig_dist = geodesic(orig_coord, node_coord).kilometers
-                if orig_dist < min_orig_dist and orig_dist < 0.5: # Within 500m
+                if orig_dist < min_orig_dist and orig_dist < 0.5:  # Within 500m
                     min_orig_dist = orig_dist
                     orig_node = node
                 
                 dest_dist = geodesic(dest_coord, node_coord).kilometers  
-                if dest_dist < min_dest_dist and dest_dist < 0.5: # Within 500m
+                if dest_dist < min_dest_dist and dest_dist < 0.5:  # Within 500m
                     min_dest_dist = dest_dist
                     dest_node = node
             
@@ -707,7 +707,7 @@ class EnhancedAccessibilityComputer:
                 path_length_m = nx.shortest_path_length(
                     road_graph, orig_node, dest_node, weight='length'
                 )
-                return path_length_m / 1000.0, True # Convert to km
+                return path_length_m / 1000.0, True  # Convert to km
             
         except (nx.NetworkXNoPath, nx.NetworkXError, Exception) as e:
             self.log(f"Network routing failed: {str(e)}")
@@ -743,17 +743,17 @@ class EnhancedAccessibilityComputer:
             min_dest_dist = float('inf')
             
             for node in search_nodes:
-                node_coord = (node[1], node[0]) # lat, lon
+                node_coord = (node[1], node[0])  # lat, lon
                 
                 # Check origin
                 orig_dist = geodesic(orig_coord, node_coord).kilometers
-                if orig_dist < min_orig_dist and orig_dist < 0.5: # Within 500m
+                if orig_dist < min_orig_dist and orig_dist < 0.5:  # Within 500m
                     min_orig_dist = orig_dist
                     orig_node = node
                 
                 # Check destination  
                 dest_dist = geodesic(dest_coord, node_coord).kilometers
-                if dest_dist < min_dest_dist and dest_dist < 0.5: # Within 500m
+                if dest_dist < min_dest_dist and dest_dist < 0.5:  # Within 500m
                     min_dest_dist = dest_dist
                     dest_node = node
             
@@ -767,7 +767,7 @@ class EnhancedAccessibilityComputer:
                     
                     # Sanity check - if network path is way longer than straight line, use approximation
                     path_length_km = path_length_m / 1000.0
-                    if path_length_km > straight_km * 3.0: # Network path > 3x straight line seems wrong
+                    if path_length_km > straight_km * 3.0:  # Network path > 3x straight line seems wrong
                         return straight_km * 1.4, False
                     
                     return path_length_km, True
@@ -802,7 +802,7 @@ class EnhancedAccessibilityComputer:
         
         origin_gdf = gpd.GeoDataFrame({
             'address_id': [orig_id],
-            'geometry': [Point(orig_coord[1], orig_coord[0])] # lon, lat order
+            'geometry': [Point(orig_coord[1], orig_coord[0])]  # lon, lat order
         }, crs='EPSG:4326')
         
         # Use OSRM to compute routes
@@ -830,7 +830,7 @@ class EnhancedAccessibilityComputer:
                 # Estimate network distance from drive time
                 drive_time = row['drive_time']
                 if pd.notna(drive_time) and drive_time > 0:
-                    network_km = (drive_time / 60.0) * 25.0 # Assume 25 km/h average
+                    network_km = (drive_time / 60.0) * 25.0  # Assume 25 km/h average
                 else:
                     network_km = straight_km * 1.3
                 
@@ -860,7 +860,7 @@ class EnhancedAccessibilityComputer:
 
     def _estimate_transit_time(self, distance_km, time_period):
         """Estimate transit time based on distance"""
-        base_speed = 15.0 # km/h
+        base_speed = 15.0  # km/h
         base_time = (distance_km / base_speed) * 60
         
         wait_time = np.random.uniform(8, 15)
@@ -904,7 +904,7 @@ class EnhancedAccessibilityComputer:
             
             # Distance-based probability
             if dist <= 1.5:
-                prob = 1.0 # Always include very close
+                prob = 1.0  # Always include very close
             elif dist <= 3.0:
                 prob = 0.9
             elif dist <= 5.0:
@@ -1002,8 +1002,8 @@ class EnhancedAccessibilityComputer:
                 validation_passed = False
                 
                 # Debug info
-                self.log(f" Distance range: {clean_distances.min():.2f} - {clean_distances.max():.2f} km")
-                self.log(f" Time range: {clean_times.min():.1f} - {clean_times.max():.1f} min")
+                self.log(f"  Distance range: {clean_distances.min():.2f} - {clean_distances.max():.2f} km")
+                self.log(f"  Time range: {clean_times.min():.1f} - {clean_times.max():.1f} min")
             else:
                 self.log(f"{mode} correlation acceptable")
         
@@ -1053,7 +1053,7 @@ class EnhancedAccessibilityComputer:
             is_correct = (correlation > 0.05) if expected_positive else (correlation < -0.05)
             
             status = "[OK]" if is_correct else "[FAIL]"
-            self.log(f" {status} {name}: r={correlation:.3f} (expected {'positive' if expected_positive else 'negative'})")
+            self.log(f"  {status} {name}: r={correlation:.3f} (expected {'positive' if expected_positive else 'negative'})")
             
             if not is_correct:
                 issues_found += 1
@@ -1079,7 +1079,7 @@ class EnhancedAccessibilityComputer:
         # Check for addresses with too few destinations  
         sparse_addresses = origin_dest_counts[origin_dest_counts < 2]
         
-        if len(sparse_addresses) > len(origin_dest_counts) * 0.1: # >10% of addresses
+        if len(sparse_addresses) > len(origin_dest_counts) * 0.1:  # >10% of addresses
             self.log(f"WARNING: {len(sparse_addresses)} addresses have <2 destinations")
         
         self.log("Destination counts within expected range")
@@ -1112,12 +1112,12 @@ class EnhancedAccessibilityComputer:
                 times = self._calculate_mode_times_fixed(network_km, time_period)
                 
                 print(f"\nOrigin {origin.get('address_id')} -> Dest {dest.get('dest_id')}")
-                print(f" Straight: {straight_km:.2f}km")
-                print(f" Network: {network_km:.2f}km (factor: {network_km/straight_km:.2f})")
-                print(f" Route found: {route_found}")
-                print(f" Walk: {times['walk']:.1f}min ({straight_km/(times['walk']/60):.1f} km/h)")
-                print(f" Drive: {times['drive']:.1f}min ({straight_km/(times['drive']/60):.1f} km/h)")
-                print(f" Transit: {times['transit']:.1f}min")
+                print(f"  Straight: {straight_km:.2f}km")
+                print(f"  Network: {network_km:.2f}km (factor: {network_km/straight_km:.2f})")
+                print(f"  Route found: {route_found}")
+                print(f"  Walk: {times['walk']:.1f}min ({straight_km/(times['walk']/60):.1f} km/h)")
+                print(f"  Drive: {times['drive']:.1f}min ({straight_km/(times['drive']/60):.1f} km/h)")
+                print(f"  Transit: {times['transit']:.1f}min")
                 
                 # Flag anomalies
                 if times['drive'] < 1.0 or times['drive'] > 60.0:

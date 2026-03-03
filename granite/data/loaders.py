@@ -633,7 +633,7 @@ class DataLoader:
         
         self._log(f"Multi-tract training with {len(tract_list)} tracts:")
         for fips in tract_list:
-            self._log(f" {fips}")
+            self._log(f"  {fips}")
         
         return tract_list
 
@@ -832,8 +832,8 @@ class DataLoader:
         network_count = sum(1 for t in edge_types if t == 'network')
         geographic_count = sum(1 for t in edge_types if t == 'geographic')
         
-        self._log(f" Network edges: {network_count//2}")
-        self._log(f" Geographic edges: {geographic_count//2}")
+        self._log(f"  Network edges: {network_count//2}")
+        self._log(f"  Geographic edges: {geographic_count//2}")
         
         return edge_index, edge_weight
 
@@ -942,7 +942,7 @@ class DataLoader:
                         continue
             
             if (i + 1) % 100 == 0:
-                self._log(f" Processed {i + 1}/{len(road_connected_addresses)} addresses...")
+                self._log(f"  Processed {i + 1}/{len(road_connected_addresses)} addresses...")
         
         self._log(f"Created {len(network_edges)} network edges")
         return network_edges
@@ -1044,7 +1044,7 @@ class DataLoader:
         return travel_times
 
     def compute_accessibility_features(self, addresses: gpd.GeoDataFrame) -> np.ndarray:
-        """Compute accessibility features for all addresses"""
+        """Compute comprehensive accessibility features for all addresses"""
         self._log(f"Computing accessibility features for {len(addresses)} addresses...")
         
         destinations = {
@@ -1056,7 +1056,7 @@ class DataLoader:
         all_features = []
         
         for dest_type, dest_gdf in destinations.items():
-            self._log(f" Computing {dest_type} accessibility...")
+            self._log(f"  Computing {dest_type} accessibility...")
             
             travel_times = self._calculate_simple_travel_times(addresses, dest_gdf)
             
@@ -1274,7 +1274,7 @@ class DataLoader:
             tract_height = tract_bounds[3] - tract_bounds[1]
             
             for dest_type, existing_dests in existing_destinations.items():
-                self._log(f" Enhancing {dest_type} destinations...")
+                self._log(f"  Enhancing {dest_type} destinations...")
                 
                 enhanced_dests = []
                 max_distance_deg = max(tract_width, tract_height) * 3

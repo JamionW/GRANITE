@@ -38,7 +38,7 @@ def compute_modal_features(
     pct_no_vehicle = np.array([
         tract_svi_data[fips]['EP_NOVEH'] 
         for fips in address_tract_ids
-    ]) / 100.0 # Convert to [0, 1]
+    ]) / 100.0  # Convert to [0, 1]
     
     modal_features = []
     modal_names = []
@@ -110,11 +110,11 @@ def validate_modal_correlations(
     from scipy.stats import pearsonr
     
     expected_directions = {
-        'transit_dependence': 'positive',      # More dependence -> higher vulnerability
-        'car_effective': 'negative',           # More car access -> lower vulnerability
-        'walk_effective': 'negative',          # More walk access -> lower vulnerability
-        'modal_access_gap': 'positive',        # Bigger gap -> higher vulnerability
-        'forced_walk_burden': 'positive',      # Forced to walk far -> higher vulnerability
+        'transit_dependence': 'positive',      # More dependence → higher vulnerability
+        'car_effective': 'negative',           # More car access → lower vulnerability
+        'walk_effective': 'negative',          # More walk access → lower vulnerability
+        'modal_access_gap': 'positive',        # Bigger gap → higher vulnerability
+        'forced_walk_burden': 'positive',      # Forced to walk far → higher vulnerability
     }
     
     n_correct = 0
@@ -139,7 +139,7 @@ def validate_modal_correlations(
             correct = (corr > 0) == (exp_dir == 'positive')
             n_correct += int(correct)
             
-            status = "" if correct else ""
+            status = "✓" if correct else "✗"
             print(f"{status} {name:45s} r={corr:+.3f} p={pval:.3f} (expected {exp_dir})")
     
     pct_correct = (n_correct / n_total * 100) if n_total > 0 else 0

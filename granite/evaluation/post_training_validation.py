@@ -15,7 +15,7 @@ Runs:
     5. (Optional) Ablation study - accessibility-only model
 
 Outputs:
-    - validation_report.txt (text report)
+    - validation_report.txt (comprehensive text report)
     - validation_summary.csv (key metrics)
     - bootstrap_comparison.png
     - morans_i_analysis.png
@@ -118,18 +118,18 @@ def load_test_tract_data(tract_fips_list, data, verbose=True):
             addresses = loader.get_addresses_for_tract(fips)
             if len(addresses) == 0:
                 if verbose:
-                    print(f" {fips}: No addresses, skipping")
+                    print(f"  {fips}: No addresses, skipping")
                 continue
             
             addresses['tract_fips'] = fips
             all_addresses.append(addresses)
             
             if verbose:
-                print(f" {fips}: {len(addresses)} addresses")
+                print(f"  {fips}: {len(addresses)} addresses")
                 
         except Exception as e:
             if verbose:
-                print(f" {fips}: Error - {e}")
+                print(f"  {fips}: Error - {e}")
     
     if all_addresses:
         combined_addresses = pd.concat(all_addresses, ignore_index=True)
@@ -139,7 +139,7 @@ def load_test_tract_data(tract_fips_list, data, verbose=True):
     else:
         combined_addresses = None
     
-    print(f" Total: {len(combined_addresses) if combined_addresses is not None else 0} addresses")
+    print(f"  Total: {len(combined_addresses) if combined_addresses is not None else 0} addresses")
     
     return combined_addresses
 
@@ -190,7 +190,7 @@ def run_block_group_validation(addresses, predictions_dict, data, output_dir):
         joined = joined.drop(columns=['index_right'])
     
     n_assigned = joined['block_group_id'].notna().sum()
-    print(f" Assigned {n_assigned}/{len(addresses)} addresses to block groups")
+    print(f"  Assigned {n_assigned}/{len(addresses)} addresses to block groups")
     
     results = {}
     
@@ -216,7 +216,7 @@ def run_block_group_validation(addresses, predictions_dict, data, output_dir):
         available_cols = [c for c in svi_cols if c in block_groups.columns]
         
         if 'SVI' not in block_groups.columns:
-            print(f" No SVI column in block groups, skipping correlation")
+            print(f"  No SVI column in block groups, skipping correlation")
             results[method_name] = {
                 'correlations': {},
                 'n_block_groups': len(agg),
@@ -242,9 +242,9 @@ def run_block_group_validation(addresses, predictions_dict, data, output_dir):
                 merged.loc[valid, 'SVI']
             )
             
-            print(f" Pearson r = {r:.3f} (p = {p:.4f})")
-            print(f" Spearman rho = {rho:.3f}")
-            print(f" N block groups = {valid.sum()}")
+            print(f"  Pearson r = {r:.3f} (p = {p:.4f})")
+            print(f"  Spearman rho = {rho:.3f}")
+            print(f"  N block groups = {valid.sum()}")
             
             correlations = {
                 'svi_correlation': {
@@ -255,7 +255,7 @@ def run_block_group_validation(addresses, predictions_dict, data, output_dir):
                 }
             }
         else:
-            print(f" Insufficient valid block groups ({valid.sum()})")
+            print(f"  Insufficient valid block groups ({valid.sum()})")
             correlations = {}
         
         results[method_name] = {
@@ -363,7 +363,7 @@ def run_bootstrap_analysis(bg_results, output_dir, n_bootstrap=1000, seed=42):
         pred_valid = predictions[valid]
         
         if len(gt_valid) < 10:
-            print(f" {method}: Insufficient valid samples")
+            print(f"  {method}: Insufficient valid samples")
             continue
         
         # Point estimate
@@ -389,7 +389,7 @@ def run_bootstrap_analysis(bg_results, output_dir, n_bootstrap=1000, seed=42):
             'bootstrap_dist': boot_rs
         }
         
-        print(f" {method}: r = {r_obs:.3f} [{ci_lower:.3f}, {ci_upper:.3f}]")
+        print(f"  {method}: r = {r_obs:.3f} [{ci_lower:.3f}, {ci_upper:.3f}]")
     
     # Test difference between methods (if GRANITE and IDW present)
     if 'GRANITE' in results and 'IDW' in results:
@@ -415,13 +415,13 @@ def run_bootstrap_analysis(bg_results, output_dir, n_bootstrap=1000, seed=42):
             'significant': significant
         }
         
-        print(f" Difference: {diff_obs:.3f} [{diff_ci_lower:.3f}, {diff_ci_upper:.3f}]")
-        print(f" p-value: {p_value:.4f}")
+        print(f"  Difference: {diff_obs:.3f} [{diff_ci_lower:.3f}, {diff_ci_upper:.3f}]")
+        print(f"  p-value: {p_value:.4f}")
         
         if significant:
-            print(" SIGNIFICANT: CI excludes 0")
+            print("  SIGNIFICANT: CI excludes 0")
         else:
-            print(" NOT significant: CI includes 0")
+            print("  NOT significant: CI includes 0")
     
     # Create plot
     _create_bootstrap_plot(results, output_dir)
@@ -552,16 +552,16 @@ def run_morans_i_analysis(addresses, predictions, ground_truth=None, output_dir=
     print("\nPredictions:")
     moran_pred = compute_morans_i(predictions, W, permutations, seed)
     results['predictions'] = moran_pred
-    print(f" Moran's I = {moran_pred['I']:.4f}")
-    print(f" Z-score = {moran_pred['z_score']:.2f}")
-    print(f" p-value = {moran_pred['p_value']:.4f}")
+    print(f"  Moran's I = {moran_pred['I']:.4f}")
+    print(f"  Z-score = {moran_pred['z_score']:.2f}")
+    print(f"  p-value = {moran_pred['p_value']:.4f}")
     
     if moran_pred['p_value'] < 0.05 and moran_pred['I'] > 0:
-        print(" -> SIGNIFICANT positive spatial autocorrelation (good!)")
+        print("  -> SIGNIFICANT positive spatial autocorrelation (good!)")
     elif moran_pred['p_value'] < 0.05:
-        print(" -> SIGNIFICANT but negative (unexpected)")
+        print("  -> SIGNIFICANT but negative (unexpected)")
     else:
-        print(" -> Not significant")
+        print("  -> Not significant")
     
     # Residuals (if ground truth provided)
     if ground_truth is not None:
@@ -569,14 +569,14 @@ def run_morans_i_analysis(addresses, predictions, ground_truth=None, output_dir=
         residuals = predictions - ground_truth
         moran_resid = compute_morans_i(residuals, W, permutations, seed)
         results['residuals'] = moran_resid
-        print(f" Moran's I = {moran_resid['I']:.4f}")
-        print(f" Z-score = {moran_resid['z_score']:.2f}")
-        print(f" p-value = {moran_resid['p_value']:.4f}")
+        print(f"  Moran's I = {moran_resid['I']:.4f}")
+        print(f"  Z-score = {moran_resid['z_score']:.2f}")
+        print(f"  p-value = {moran_resid['p_value']:.4f}")
         
         if moran_resid['p_value'] >= 0.05:
-            print(" -> Not significant (model captures spatial structure well)")
+            print("  -> Not significant (model captures spatial structure well)")
         elif moran_resid['I'] > 0:
-            print(" -> Significant positive autocorrelation in residuals")
+            print("  -> Significant positive autocorrelation in residuals")
             print("     Model may be missing some spatial pattern")
     
     # Create plot
@@ -632,7 +632,7 @@ def run_expert_routing_simplified(tract_results, output_dir):
     
     print("\nTracts per expert:")
     for expert, tracts in sorted(expert_groups.items()):
-        print(f" {expert}: {len(tracts)} tracts")
+        print(f"  {expert}: {len(tracts)} tracts")
     
     results = {
         'expert_groups': dict(expert_groups),
@@ -654,10 +654,10 @@ def run_expert_routing_simplified(tract_results, output_dir):
         }
         
         print(f"\n{expert} Expert:")
-        print(f" Tracts: {len(tracts)}")
-        print(f" SVI range: {min(svis):.3f} - {max(svis):.3f}")
-        print(f" SVI mean: {np.mean(svis):.3f}")
-        print(f" Mean error: {np.mean(errors):.1f}%")
+        print(f"  Tracts: {len(tracts)}")
+        print(f"  SVI range: {min(svis):.3f} - {max(svis):.3f}")
+        print(f"  SVI mean: {np.mean(svis):.3f}")
+        print(f"  Mean error: {np.mean(errors):.1f}%")
     
     # Identify counterintuitive cases
     print("\n" + "-"*70)
@@ -685,10 +685,10 @@ def run_expert_routing_simplified(tract_results, output_dir):
                 'expert': expert,
                 'reason': reason
             })
-            print(f" Tract {fips}: {reason}")
+            print(f"  Tract {fips}: {reason}")
     
     if len(results['counterintuitive_cases']) == 0:
-        print(" No counterintuitive cases found.")
+        print("  No counterintuitive cases found.")
     
     # Save summary
     rows = []
@@ -731,7 +731,7 @@ def run_expert_routing_analysis(tract_results, tract_features, feature_names, ou
     
     print("\nTracts per expert:")
     for expert, tracts in sorted(expert_groups.items()):
-        print(f" {expert}: {len(tracts)} tracts")
+        print(f"  {expert}: {len(tracts)} tracts")
     
     results = {
         'expert_groups': dict(expert_groups),
@@ -763,8 +763,8 @@ def run_expert_routing_analysis(tract_results, tract_features, feature_names, ou
         }
         
         print(f"\n{expert} Expert:")
-        print(f" Tracts: {len(tracts)}")
-        print(f" SVI range: {min(expert_svis):.3f} - {max(expert_svis):.3f}")
+        print(f"  Tracts: {len(tracts)}")
+        print(f"  SVI range: {min(expert_svis):.3f} - {max(expert_svis):.3f}")
     
     # Find distinguishing features
     print("\n" + "-"*70)
@@ -793,10 +793,10 @@ def run_expert_routing_analysis(tract_results, tract_features, feature_names, ou
             diffs.sort(key=lambda x: -x[1])
             
             print(f"\n{exp1} vs {exp2}:")
-            print(f" {'Feature':<40} {'Effect':>8} {exp1:>10} {exp2:>10}")
-            print(f" {'-'*70}")
+            print(f"  {'Feature':<40} {'Effect':>8} {exp1:>10} {exp2:>10}")
+            print(f"  {'-'*70}")
             for fname, eff, m1, m2 in diffs[:5]:
-                print(f" {fname:<40} {eff:>8.2f} {m1:>10.3f} {m2:>10.3f}")
+                print(f"  {fname:<40} {eff:>8.2f} {m1:>10.3f} {m2:>10.3f}")
     
     # Find counterintuitive cases
     print("\n" + "-"*70)
@@ -825,7 +825,7 @@ def run_expert_routing_analysis(tract_results, tract_features, feature_names, ou
                 'reason': reason
             })
             
-            print(f"\n Tract {fips}: {reason}")
+            print(f"\n  Tract {fips}: {reason}")
             
             # Explain via features
             if fips in tract_features and expert in results['feature_profiles']:
@@ -852,7 +852,7 @@ def run_expert_routing_analysis(tract_results, tract_features, feature_names, ou
                     print(f"      {fname}: {val:.3f} (expert mean: {exp_mean:.3f})")
     
     if len(results['counterintuitive_cases']) == 0:
-        print(" No counterintuitive cases found.")
+        print("  No counterintuitive cases found.")
     
     # Save summary
     rows = []
@@ -920,10 +920,10 @@ def compute_baseline_predictions(addresses, tract_gdf, tract_results):
             idw_preds[mask] = tract_preds
         
         predictions['IDW'] = idw_preds
-        print(f" IDW: mean={np.mean(idw_preds):.3f}, std={np.std(idw_preds):.3f}")
+        print(f"  IDW: mean={np.mean(idw_preds):.3f}, std={np.std(idw_preds):.3f}")
         
     except Exception as e:
-        print(f" IDW failed: {e}")
+        print(f"  IDW failed: {e}")
         import traceback
         traceback.print_exc()
     
@@ -949,10 +949,10 @@ def compute_baseline_predictions(addresses, tract_gdf, tract_results):
             kriging_preds[mask] = tract_preds
         
         predictions['Kriging'] = kriging_preds
-        print(f" Kriging: mean={np.mean(kriging_preds):.3f}, std={np.std(kriging_preds):.3f}")
+        print(f"  Kriging: mean={np.mean(kriging_preds):.3f}, std={np.std(kriging_preds):.3f}")
         
     except Exception as e:
-        print(f" Kriging failed: {e}")
+        print(f"  Kriging failed: {e}")
         import traceback
         traceback.print_exc()
     
@@ -964,11 +964,11 @@ def compute_baseline_predictions(addresses, tract_gdf, tract_results):
 # =============================================================================
 
 def generate_validation_report(all_results, output_dir):
-    """Generate text report."""
+    """Generate comprehensive text report."""
     
     lines = [
         "="*75,
-        "GRANITE VALIDATION REPORT",
+        "GRANITE COMPREHENSIVE VALIDATION REPORT",
         "="*75,
         "",
         f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
@@ -1058,7 +1058,7 @@ def generate_validation_report(all_results, output_dir):
         lines.append(f"Counterintuitive cases: {len(routing['counterintuitive_cases'])}")
         
         for case in routing['counterintuitive_cases']:
-            lines.append(f" {case['fips']}: {case['reason']}")
+            lines.append(f"  {case['fips']}: {case['reason']}")
         
         lines.append("")
     

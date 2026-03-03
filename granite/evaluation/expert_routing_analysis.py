@@ -2,7 +2,7 @@
 GRANITE Expert Routing Analysis
 
 Identifies what accessibility features distinguish tracts routed to each expert.
-Explains counterintuitive routing (e.g., why low-SVI tract 11900 -> High expert).
+Explains counterintuitive routing (e.g., why low-SVI tract 11900 → High expert).
 
 Key insight: Expert routing may be based on ACCESSIBILITY PATTERNS, not SVI.
 A low-SVI suburb with poor transit access may route to the same expert as
@@ -48,7 +48,7 @@ def analyze_expert_routing(tract_results, accessibility_features, feature_names,
     if verbose:
         print("\nTracts per expert:")
         for expert, tracts in sorted(expert_groups.items()):
-            print(f" {expert}: {len(tracts)} tracts")
+            print(f"  {expert}: {len(tracts)} tracts")
     
     results = {
         'expert_groups': dict(expert_groups),
@@ -91,9 +91,9 @@ def analyze_expert_routing(tract_results, accessibility_features, feature_names,
         
         if verbose:
             print(f"\n{expert} Expert Profile:")
-            print(f" Tracts: {len(tracts)}")
-            print(f" SVI range: {min(expert_svis):.3f} - {max(expert_svis):.3f}")
-            print(f" SVI mean: {np.mean(expert_svis):.3f}")
+            print(f"  Tracts: {len(tracts)}")
+            print(f"  SVI range: {min(expert_svis):.3f} - {max(expert_svis):.3f}")
+            print(f"  SVI mean: {np.mean(expert_svis):.3f}")
     
     # Find distinguishing features between experts
     if verbose:
@@ -135,10 +135,10 @@ def analyze_expert_routing(tract_results, accessibility_features, feature_names,
                 
                 if verbose:
                     print(f"\n{expert1} vs {expert2}:")
-                    print(f" {'Feature':<45} {'Effect':>8} {expert1:>10} {expert2:>10}")
-                    print(f" {'-'*75}")
+                    print(f"  {'Feature':<45} {'Effect':>8} {expert1:>10} {expert2:>10}")
+                    print(f"  {'-'*75}")
                     for fname, effect, m1, m2 in diff_scores[:5]:
-                        print(f" {fname:<45} {effect:>8.2f} {m1:>10.3f} {m2:>10.3f}")
+                        print(f"  {fname:<45} {effect:>8.2f} {m1:>10.3f} {m2:>10.3f}")
     
     # Identify counterintuitive cases
     if verbose:
@@ -172,7 +172,7 @@ def analyze_expert_routing(tract_results, accessibility_features, feature_names,
             results['counterintuitive_cases'].append(case)
             
             if verbose:
-                print(f"\n Tract {fips}: {reason}")
+                print(f"\n  Tract {fips}: {reason}")
                 
                 # Explain based on features if available
                 if fips in accessibility_features:
@@ -198,7 +198,7 @@ def analyze_expert_routing(tract_results, accessibility_features, feature_names,
                             print(f"      {fname}: {val:.3f} (expert mean: {exp_mean:.3f})")
     
     if len(results['counterintuitive_cases']) == 0 and verbose:
-        print(" No counterintuitive routing cases found.")
+        print("  No counterintuitive routing cases found.")
     
     return results
 
@@ -324,7 +324,7 @@ def demo_with_mock_data():
         '47065010500': {'actual_svi': 0.65, 'dominant_expert': 'High', 'predicted_mean': 0.62},
         '47065010600': {'actual_svi': 0.78, 'dominant_expert': 'High', 'predicted_mean': 0.75},
         # Counterintuitive cases
-        '47065011900': {'actual_svi': 0.28, 'dominant_expert': 'High', 'predicted_mean': 0.35}, # Low SVI -> High
+        '47065011900': {'actual_svi': 0.28, 'dominant_expert': 'High', 'predicted_mean': 0.35},  # Low SVI -> High
         '47065012000': {'actual_svi': 0.72, 'dominant_expert': 'Low', 'predicted_mean': 0.68},   # High SVI -> Low
     }
     
@@ -360,7 +360,7 @@ def demo_with_mock_data():
             features = np.array([12 + np.random.rand()*5, 6 + np.random.rand()*4, 0.35 + np.random.rand()*0.2,
                                 14 + np.random.rand()*4, 3 + np.random.rand()*3, 0.4 + np.random.rand()*0.2,
                                 10 + np.random.rand()*4, 4 + np.random.rand()*3, 0.4 + np.random.rand()*0.2])
-        else: # High expert
+        else:  # High expert
             # Poor accessibility
             features = np.array([22 + np.random.rand()*8, 2 + np.random.rand()*3, 0.65 + np.random.rand()*0.3,
                                 18 + np.random.rand()*6, 1 + np.random.rand()*2, 0.6 + np.random.rand()*0.3,

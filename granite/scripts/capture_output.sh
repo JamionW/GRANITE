@@ -10,8 +10,8 @@ echo ""
 GRANITE_PID=$(ps aux | grep -v grep | grep "run_granite\|run_holdout" | awk '{print $2}' | head -1)
 
 if [ -z "$GRANITE_PID" ]; then
-    echo "ERROR: No GRANITE process found"
-    exit 1
+ echo "ERROR: No GRANITE process found"
+ exit 1
 fi
 
 echo "Found GRANITE process: PID $GRANITE_PID"

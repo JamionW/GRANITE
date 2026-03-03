@@ -217,14 +217,14 @@ class ContextGatedFeatureModulator(nn.Module):
     def __init__(self, accessibility_dim, context_dim, hidden_dim=32):
         super(ContextGatedFeatureModulator, self).__init__()
         
-        # Context encoder: Demographics → embedding
+        # Context encoder: Demographics -> embedding
         self.context_encoder = nn.Sequential(
             nn.Linear(context_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim)
         )
         
-        # Attention mechanism: Context → feature importance weights
+        # Attention mechanism: Context -> feature importance weights
         self.attention = nn.Sequential(
             nn.Linear(hidden_dim, accessibility_dim),
             nn.Softmax(dim=-1)
@@ -451,7 +451,7 @@ class AccessibilityGNNTrainer:
                 2.0 * variation_loss +            # Strong variation encouragement
                 1.0 * bounds_loss +               # Keep valid range
                 0.5 * range_loss +                # Distribution shape
-                1.0 * accessibility_consistency_loss  # Structure learning
+                1.0 * accessibility_consistency_loss # Structure learning
             )
         
         return {
@@ -492,7 +492,7 @@ class AccessibilityGNNTrainer:
         context = getattr(graph_data, 'context', None)
 
         with torch.no_grad():
-            predictions, learned_accessibility, attention_weights = self.model(  # ← RIGHT: unpacking 3
+            predictions, learned_accessibility, attention_weights = self.model( # <- RIGHT: unpacking 3
                 graph_data.x, 
                 graph_data.edge_index, 
                 return_accessibility=True,
@@ -636,9 +636,9 @@ class MultiTractGNNTrainer:
                 if verbose:
                     print("\n=== Multi-Task Learning Enabled ===")
                     print(f"Generated auxiliary labels:")
-                    print(f"  Accessibility quintiles: {np.bincount(labels_dict['accessibility_quintile'])}")
-                    print(f"  Vehicle ownership range: [{labels_dict['vehicle_ownership'].min():.3f}, {labels_dict['vehicle_ownership'].max():.3f}]")
-                    print(f"  Employment categories: {np.bincount(labels_dict['employment_category'])}")
+                    print(f" Accessibility quintiles: {np.bincount(labels_dict['accessibility_quintile'])}")
+                    print(f" Vehicle ownership range: [{labels_dict['vehicle_ownership'].min():.3f}, {labels_dict['vehicle_ownership'].max():.3f}]")
+                    print(f" Employment categories: {np.bincount(labels_dict['employment_category'])}")
                     print("=" * 40 + "\n")
         
         for epoch in range(epochs):
@@ -684,9 +684,9 @@ class MultiTractGNNTrainer:
                 # Enhanced logging every 10 epochs
                 if verbose and epoch % 10 == 0:
                     print(f"\nEpoch {epoch}:")
-                    print(f"  Total Loss: {total_loss:.4f}")
-                    print(f"  Constraint: {losses['constraint']:.4f}")
-                    print(f"  Auxiliary Total: {aux_loss_dict['total']:.4f}")
+                    print(f" Total Loss: {total_loss:.4f}")
+                    print(f" Constraint: {losses['constraint']:.4f}")
+                    print(f" Auxiliary Total: {aux_loss_dict['total']:.4f}")
                     print(f"    - Accessibility cls: {aux_loss_dict['accessibility']:.4f}")
                     print(f"    - Vehicle reg: {aux_loss_dict['vehicle']:.4f}")
                     print(f"    - Employment cls: {aux_loss_dict['employment']:.4f}")
@@ -704,7 +704,7 @@ class MultiTractGNNTrainer:
                             auxiliary_labels['vehicle_ownership'].cpu().numpy()
                         )[0, 1]
                         
-                        print(f"  Auxiliary Performance:")
+                        print(f" Auxiliary Performance:")
                         print(f"    - Accessibility accuracy: {acc_acc:.3f} (target: >0.70)")
                         print(f"    - Employment accuracy: {emp_acc:.3f} (target: >0.70)")
                         print(f"    - Vehicle correlation: {veh_corr:.3f} (target: >0.80)")
@@ -784,8 +784,8 @@ class MultiTractGNNTrainer:
                 
                 # Show per-tract errors
                 for fips, error in list(per_tract_errors.items())[:3]:
-                    tract_id = fips[-6:]  # Last 6 digits
-                    print(f"  Tract {tract_id}: {error:.2f}% error")
+                    tract_id = fips[-6:] # Last 6 digits
+                    print(f" Tract {tract_id}: {error:.2f}% error")
         
         # Final evaluation
         self.model.eval()
@@ -1050,7 +1050,7 @@ def generate_auxiliary_labels(accessibility_features, context_features, feature_
         quintiles = np.random.randint(0, 5, size=n_addresses)
     
     # Task 2: Vehicle ownership from context features
-    vehicle_ownership = context_features[:, 0]  # First context feature
+    vehicle_ownership = context_features[:, 0] # First context feature
     
     # Task 3: Employment category from employment counts
     emp_indices = [i for i, name in enumerate(feature_names) if 'employment_count' in name]

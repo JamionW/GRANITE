@@ -31,7 +31,7 @@ class ContextGatedGateNetwork(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 3)  # 3 experts
+            nn.Linear(hidden_dim, 3) # 3 experts
         )
         
         self.accessibility_dim = accessibility_dim
@@ -58,7 +58,7 @@ class ContextGatedGateNetwork(nn.Module):
             x = torch.cat([accessibility_features, context_features], dim=1)
         
         logits = self.gate(x)
-        gate_probs = F.softmax(logits, dim=1)  # (n_addresses, 3)
+        gate_probs = F.softmax(logits, dim=1) # (n_addresses, 3)
         
         return gate_probs
 
@@ -143,7 +143,7 @@ class MixtureOfExpertsGNN(nn.Module):
             expert_preds: list of 3 predictions - if return_expert_predictions=True
         """
         # Gate routing
-        gate_weights = self.gate_network(x, context_features)  # (n_addresses, 3)
+        gate_weights = self.gate_network(x, context_features) # (n_addresses, 3)
         
         # Expert predictions
         pred_low = self.expert_low(x, edge_index, return_accessibility=False, 
@@ -322,7 +322,7 @@ class MixtureOfExpertsTrainer:
 
                 # Variation loss: encourage spread, penalize constant output
                 pred_std = predictions.std()
-                variation_loss = torch.exp(-pred_std * 10)  # Penalize low variance
+                variation_loss = torch.exp(-pred_std * 10) # Penalize low variance
 
                 # Bounds loss: keep predictions in valid SVI range [0, 1]
                 bounds_loss = (F.relu(-predictions) + F.relu(predictions - 1)).mean()
@@ -347,11 +347,11 @@ class MixtureOfExpertsTrainer:
                 patience_counter += 1
                 if patience_counter >= 10:
                     if verbose:
-                        print(f"  Early stopping at epoch {epoch}")
+                        print(f" Early stopping at epoch {epoch}")
                     break
             
             if verbose and (epoch % 20 == 0 or epoch == self.expert_epochs - 1):
-                print(f"  Epoch {epoch:3d}: loss={epoch_loss:.6f}")
+                print(f" Epoch {epoch:3d}: loss={epoch_loss:.6f}")
         
         return {
             'status': 'completed',
@@ -381,7 +381,7 @@ class MixtureOfExpertsTrainer:
         
         gate_optimizer = torch.optim.Adam(
             self.model.gate_network.parameters(),
-            lr=self.learning_rate * 2,  # Gate learns faster
+            lr=self.learning_rate * 2, # Gate learns faster
             weight_decay=self.weight_decay
         )
         
@@ -437,11 +437,11 @@ class MixtureOfExpertsTrainer:
                 patience_counter += 1
                 if patience_counter >= 10:
                     if verbose:
-                        print(f"  Early stopping at epoch {epoch}")
+                        print(f" Early stopping at epoch {epoch}")
                     break
             
             if verbose and (epoch % 20 == 0 or epoch == self.gate_epochs - 1):
-                print(f"  Epoch {epoch:3d}: gate_loss={epoch_loss:.6f}, entropy={epoch_entropy:.4f}")
+                print(f" Epoch {epoch:3d}: gate_loss={epoch_loss:.6f}, entropy={epoch_entropy:.4f}")
         
         return {
             'status': 'completed',
@@ -452,7 +452,7 @@ class MixtureOfExpertsTrainer:
     
     def train(self, graph_data_list, tract_svi_list, finetune=False, verbose=True):
         """
-        Complete MoE training: experts → gate → optional fine-tuning.
+        Complete MoE training: experts -> gate -> optional fine-tuning.
         
         Args:
             graph_data_list: List of training graphs
@@ -480,7 +480,7 @@ class MixtureOfExpertsTrainer:
         
         for expert_name, data in stratified.items():
             if verbose:
-                print(f"  {expert_name}: {len(data['data'])} tracts, "
+                print(f" {expert_name}: {len(data['data'])} tracts, "
                       f"SVI range {min(data['svi']):.3f}-{max(data['svi']):.3f}")
         
         # Step 2: Train experts independently
@@ -539,7 +539,7 @@ class MixtureOfExpertsTrainer:
         
         optimizer = torch.optim.Adam(
             self.model.parameters(),
-            lr=self.learning_rate * 0.1,  # Smaller learning rate for fine-tuning
+            lr=self.learning_rate * 0.1, # Smaller learning rate for fine-tuning
             weight_decay=self.weight_decay
         )
         
@@ -567,7 +567,7 @@ class MixtureOfExpertsTrainer:
             history['losses'].append(epoch_loss)
             
             if verbose and (epoch % 10 == 0):
-                print(f"  Fine-tune epoch {epoch:3d}: loss={epoch_loss:.6f}")
+                print(f" Fine-tune epoch {epoch:3d}: loss={epoch_loss:.6f}")
         
         self.training_history['finetune'] = history
 

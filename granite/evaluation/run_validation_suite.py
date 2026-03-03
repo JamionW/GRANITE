@@ -1,5 +1,5 @@
 """
-GRANITE Comprehensive Validation Suite
+GRANITE Validation Suite
 
 Runs all four priority validation analyses:
 1. Ablation study (accessibility-only vs full model)
@@ -62,7 +62,7 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
     
     os.makedirs(output_dir, exist_ok=True)
     
-    print_header("GRANITE COMPREHENSIVE VALIDATION SUITE")
+    print_header("GRANITE VALIDATION SUITE")
     print(f"Output directory: {output_dir}")
     print(f"Random seed: {seed}")
     
@@ -88,15 +88,15 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
                        .get('svi_correlation', {}).get('pearson_r', np.nan)
             
             print(f"\nKEY RESULT:")
-            print(f"  Full model:         r = {full_r:.3f}")
-            print(f"  Accessibility-only: r = {access_r:.3f}")
+            print(f" Full model:         r = {full_r:.3f}")
+            print(f" Accessibility-only: r = {access_r:.3f}")
             
             if access_r > 0.85:
-                print("  STATUS: PASS - Accessibility features alone carry strong signal")
+                print(" STATUS: PASS - Accessibility features alone carry strong signal")
             elif access_r > 0.70:
-                print("  STATUS: MARGINAL - Accessibility provides substantial signal")
+                print(" STATUS: MARGINAL - Accessibility provides substantial signal")
             else:
-                print("  STATUS: CONCERN - Model may rely heavily on demographics")
+                print(" STATUS: CONCERN - Model may rely heavily on demographics")
     
     except Exception as e:
         print(f"Ablation study failed: {e}")
@@ -147,12 +147,12 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
         pred_p = morans_results['predictions']['p_value']
         
         print(f"\nKEY RESULT:")
-        print(f"  Predictions Moran's I: {pred_I:.4f} (p={pred_p:.4f})")
+        print(f" Predictions Moran's I: {pred_I:.4f} (p={pred_p:.4f})")
         
         if pred_p < 0.05 and pred_I > 0:
-            print("  STATUS: PASS - Predictions show significant positive spatial autocorrelation")
+            print(" STATUS: PASS - Predictions show significant positive spatial autocorrelation")
         else:
-            print("  STATUS: CONCERN - Predictions may lack meaningful spatial structure")
+            print(" STATUS: CONCERN - Predictions may lack meaningful spatial structure")
     
     except Exception as e:
         print(f"Moran's I analysis failed: {e}")
@@ -172,10 +172,10 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
         # Summary
         n_counterintuitive = len(routing_results.get('counterintuitive_cases', []))
         print(f"\nKEY RESULT:")
-        print(f"  Counterintuitive cases identified: {n_counterintuitive}")
+        print(f" Counterintuitive cases identified: {n_counterintuitive}")
         
         if n_counterintuitive > 0:
-            print("  These cases can be explained by accessibility patterns")
+            print(" These cases can be explained by accessibility patterns")
     
     except Exception as e:
         print(f"Expert routing analysis failed: {e}")
@@ -239,7 +239,7 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
     # Print checklist
     for check, passed, note in checks:
         status = "[PASS]" if passed else "[FAIL]"
-        print(f"  {status} {check}: {note}")
+        print(f" {status} {check}: {note}")
     
     n_passed = sum(1 for _, passed, _ in checks if passed)
     print(f"\nOverall: {n_passed}/{len(checks)} checks passed")
@@ -256,7 +256,7 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
 
 def main():
     parser = argparse.ArgumentParser(
-        description='GRANITE Comprehensive Validation Suite',
+        description='GRANITE Validation Suite',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

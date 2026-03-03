@@ -219,7 +219,7 @@ class WorkloadAnalyzer:
         ).size().to_dict()
     
     def generate_report(self) -> str:
-        """Generate comprehensive workload analysis report."""
+        """Generate workload analysis report."""
         report = []
         report.append("=" * 60)
         report.append("GRANITE Cache Workload Analysis Report")
@@ -231,10 +231,10 @@ class WorkloadAnalyzer:
         usage = self.differential_vs_absolute_usage()
         report.append(f"\nCache type usage:")
         for cache_type, count in usage.items():
-            report.append(f"  {cache_type}: {count} accesses")
+            report.append(f" {cache_type}: {count} accesses")
         
         report.append(f"\nMost common mode comparisons:")
         for mode_pair, count in self.mode_comparison_patterns().head(5).items():
-            report.append(f"  {mode_pair}: {count} times")
+            report.append(f" {mode_pair}: {count} times")
         
         return "\n".join(report)

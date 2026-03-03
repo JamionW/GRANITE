@@ -15,254 +15,254 @@ warnings.filterwarnings('ignore')
 
 
 class GRANITEResearchVisualizer:
- """Clean, professional visualizations for GRANITE research"""
- 
- def __init__(self):
- plt.style.use('default')
- self.figsize = (15, 10)
- self.dpi = 300
- 
- # Feature names mapping - clear and descriptive
- self.feature_names = {
- 'F1': 'Employment_Travel_Time',
- 'F2': 'Healthcare_Travel_Time', 
- 'F3': 'Grocery_Travel_Time',
- 'F4': 'Employment_Count',
- 'F5': 'Healthcare_Count',
- 'F6': 'Grocery_Count',
- 'F7': 'Employment_Gravity',
- 'F8': 'Healthcare_Gravity',
- 'F9': 'Grocery_Gravity'
- }
- 
- # Quality thresholds
- self.excellent_r2 = 0.64
- self.good_r2 = 0.36
- self.moderate_r2 = 0.16
+    """Clean, professional visualizations for GRANITE research"""
+    
+    def __init__(self):
+        plt.style.use('default')
+        self.figsize = (15, 10)
+        self.dpi = 300
+        
+        # Feature names mapping - clear and descriptive
+        self.feature_names = {
+            'F1': 'Employment_Travel_Time',
+            'F2': 'Healthcare_Travel_Time', 
+            'F3': 'Grocery_Travel_Time',
+            'F4': 'Employment_Count',
+            'F5': 'Healthcare_Count',
+            'F6': 'Grocery_Count',
+            'F7': 'Employment_Gravity',
+            'F8': 'Healthcare_Gravity',
+            'F9': 'Grocery_Gravity'
+        }
+        
+        # Quality thresholds
+        self.excellent_r2 = 0.64
+        self.good_r2 = 0.36
+        self.moderate_r2 = 0.16
 
- def create_comprehensive_research_analysis(self, results: Dict, output_dir: str):
- """Create clean research analysis without editorial content"""
- import os
- os.makedirs(output_dir, exist_ok=True)
- 
- # 1. Stage 1 Validation - Core question: Does GNN learn accessibility?
- stage1_path = os.path.join(output_dir, 'stage1_validation.png')
- self.plot_accessibility_learning_validation(
- learned_accessibility=results.get('learned_accessibility'),
- traditional_accessibility=results.get('traditional_accessibility'),
- output_path=stage1_path
- )
- 
- # 2. Stage 2 Validation - Core question: Does model predict SVI?
- stage2_path = os.path.join(output_dir, 'stage2_validation.png')
- self.plot_svi_prediction_validation(
- gnn_predictions=results.get('gnn_predictions'),
- stage2_metrics=results.get('stage2_metrics', {}),
- tract_svi=results.get('tract_svi', None),
- output_path=stage2_path
- )
- 
- # 3. Statistical Summary - Core metrics only
- stats_path = os.path.join(output_dir, 'statistical_summary.png')
- self.plot_statistical_summary(
- results=results,
- output_path=stats_path
- )
- 
- # 4. Spatial Analysis - Geographic patterns
- spatial_path = os.path.join(output_dir, 'spatial_analysis.png')
- self.plot_spatial_analysis(
- gnn_predictions=results.get('gnn_predictions'),
- learned_accessibility=results.get('learned_accessibility'),
- output_path=spatial_path
- )
+    def create_comprehensive_research_analysis(self, results: Dict, output_dir: str):
+        """Create clean research analysis without editorial content"""
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 1. Stage 1 Validation - Core question: Does GNN learn accessibility?
+        stage1_path = os.path.join(output_dir, 'stage1_validation.png')
+        self.plot_accessibility_learning_validation(
+            learned_accessibility=results.get('learned_accessibility'),
+            traditional_accessibility=results.get('traditional_accessibility'),
+            output_path=stage1_path
+        )
+        
+        # 2. Stage 2 Validation - Core question: Does model predict SVI?
+        stage2_path = os.path.join(output_dir, 'stage2_validation.png')
+        self.plot_svi_prediction_validation(
+            gnn_predictions=results.get('gnn_predictions'),
+            stage2_metrics=results.get('stage2_metrics', {}),
+            tract_svi=results.get('tract_svi', None),
+            output_path=stage2_path
+        )
+        
+        # 3. Statistical Summary - Core metrics only
+        stats_path = os.path.join(output_dir, 'statistical_summary.png')
+        self.plot_statistical_summary(
+            results=results,
+            output_path=stats_path
+        )
+        
+        # 4. Spatial Analysis - Geographic patterns
+        spatial_path = os.path.join(output_dir, 'spatial_analysis.png')
+        self.plot_spatial_analysis(
+            gnn_predictions=results.get('gnn_predictions'),
+            learned_accessibility=results.get('learned_accessibility'),
+            output_path=spatial_path
+        )
 
- def plot_accessibility_learning_validation(self, learned_accessibility: np.ndarray, 
- traditional_accessibility: Optional[np.ndarray],
- output_path: str):
- """Stage 1: Does GNN learn meaningful accessibility patterns?"""
- 
- fig, axes = plt.subplots(2, 3, figsize=(15, 10))
- fig.suptitle('Stage 1: Accessibility Learning Validation', fontsize=14, fontweight='bold')
- 
- if learned_accessibility is None:
- fig.text(0.5, 0.5, 'No learned accessibility data available', 
- ha='center', va='center', fontsize=16)
- plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
- plt.close()
- return
- 
- # Ensure 2D array
- if learned_accessibility.ndim == 1:
- learned_accessibility = learned_accessibility.reshape(-1, 1)
- 
- n_addresses, n_features = learned_accessibility.shape
- 
- # 1. Learning Validation: Learned vs Traditional
- ax1 = axes[0, 0]
- if traditional_accessibility is not None and traditional_accessibility.shape[0] == n_addresses:
- # Calculate correlation
- if traditional_accessibility.ndim > 1:
- traditional_mean = np.mean(traditional_accessibility, axis=1)
- else:
- traditional_mean = traditional_accessibility
- learned_mean = np.mean(learned_accessibility, axis=1)
- 
- correlation, p_value = pearsonr(learned_mean, traditional_mean)
- r_squared = max(0, correlation**2)
- 
- # Scatter plot
- ax1.scatter(traditional_mean, learned_mean, alpha=0.6, s=20, color='steelblue')
- 
- # Regression line
- z = np.polyfit(traditional_mean, learned_mean, 1)
- p = np.poly1d(z)
- ax1.plot(sorted(traditional_mean), p(sorted(traditional_mean)), "r--", alpha=0.8)
- 
- ax1.set_xlabel('Traditional Accessibility')
- ax1.set_ylabel('GNN Learned Accessibility')
- ax1.set_title(f'Learning Validation\nR² = {r_squared:.3f}, p = {p_value:.4f}')
- ax1.grid(True, alpha=0.3)
- 
- # Quality assessment
- quality = self._interpret_r2(r_squared)
- color = self._get_r2_color(r_squared)
- ax1.text(0.05, 0.95, f'{quality}\nLearning', transform=ax1.transAxes,
- bbox=dict(boxstyle='round', facecolor=color, alpha=0.7),
- verticalalignment='top', fontweight='bold')
- else:
- ax1.text(0.5, 0.5, 'No traditional\nbaseline available', 
- ha='center', va='center', transform=ax1.transAxes)
- ax1.set_title('Learning Validation\n(No Baseline)')
- r_squared = 0
- 
- # 2. Feature Correlation Matrix with meaningful names
- ax2 = axes[0, 1]
- if n_features > 1:
- corr_matrix = np.corrcoef(learned_accessibility.T)
- im = ax2.imshow(corr_matrix, cmap='RdBu_r', vmin=-1, vmax=1)
- ax2.set_title('Feature Independence Matrix')
- 
- # Use meaningful feature names
- feature_labels = []
- for i in range(min(n_features, 9)): # Limit to 9 features
- feature_name = self.feature_names.get(f'F{i+1}', f'F{i+1}')
- # Shorten for display
- short_name = feature_name.split('_')[0][:4] + '_' + feature_name.split('_')[-1][:2]
- feature_labels.append(short_name)
- 
- ax2.set_xticks(range(len(feature_labels)))
- ax2.set_yticks(range(len(feature_labels)))
- ax2.set_xticklabels(feature_labels, rotation=45, ha='right', fontsize=8)
- ax2.set_yticklabels(feature_labels, fontsize=8)
- 
- # Add correlation values
- for i in range(len(feature_labels)):
- for j in range(len(feature_labels)):
- if i != j: # Skip diagonal
- color = 'white' if abs(corr_matrix[i, j]) > 0.5 else 'black'
- ax2.text(j, i, f'{corr_matrix[i, j]:.2f}',
- ha="center", va="center", color=color, fontsize=7)
- 
- plt.colorbar(im, ax=ax2, fraction=0.046, pad=0.04)
- else:
- ax2.text(0.5, 0.5, 'Single Feature\nNo Correlation\nAnalysis', 
- ha='center', va='center', transform=ax2.transAxes)
- ax2.set_title('Feature Independence')
- 
- # 3. Feature Diversity Analysis
- ax3 = axes[0, 2]
- feature_stds = np.std(learned_accessibility, axis=0)
- n_display = min(len(feature_stds), 9)
- 
- x_positions = range(n_display)
- bars = ax3.bar(x_positions, feature_stds[:n_display], color='steelblue', alpha=0.7)
- 
- # Use meaningful names for x-axis
- x_labels = []
- for i in range(n_display):
- feature_name = self.feature_names.get(f'F{i+1}', f'F{i+1}')
- x_labels.append(feature_name.split('_')[-1][:4]) # Use last part of name
- 
- ax3.set_xticks(x_positions)
- ax3.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=8)
- ax3.set_ylabel('Standard Deviation')
- ax3.set_title('Feature Diversity\n(Spatial Variation)')
- ax3.grid(True, alpha=0.3)
- 
- # Color bars by diversity
- diversity_threshold = np.median(feature_stds) if len(feature_stds) > 1 else 0
- for i, bar in enumerate(bars):
- if i < len(feature_stds) and feature_stds[i] > diversity_threshold:
- bar.set_color('darkgreen')
- else:
- bar.set_color('orange')
- 
- # 4. Residual Analysis
- ax4 = axes[1, 0]
- if traditional_accessibility is not None and len(traditional_mean) == len(learned_mean):
- residuals = learned_mean - traditional_mean
- ax4.scatter(traditional_mean, residuals, alpha=0.6, s=15, color='purple')
- ax4.axhline(0, color='red', linestyle='--')
- ax4.set_xlabel('Traditional Accessibility')
- ax4.set_ylabel('Residuals')
- ax4.set_title('Residual Analysis')
- ax4.grid(True, alpha=0.3)
- 
- # Add residual stats
- rmse = np.sqrt(np.mean(residuals**2))
- ax4.text(0.05, 0.95, f'RMSE: {rmse:.4f}', transform=ax4.transAxes,
- bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8),
- verticalalignment='top')
- else:
- ax4.text(0.5, 0.5, 'No baseline for\nresidual analysis', 
- ha='center', va='center', transform=ax4.transAxes)
- ax4.set_title('Residual Analysis')
- 
- # 5. Multi-Modal Summary
- ax5 = axes[1, 1]
- if n_features >= 9:
- # Group by destination type (employment, healthcare, grocery)
- dest_means = []
- dest_stds = []
- dest_names = ['Employment', 'Healthcare', 'Grocery']
- 
- for i in range(3):
- start_idx = i * 3
- end_idx = (i + 1) * 3
- if end_idx <= n_features:
- dest_data = learned_accessibility[:, start_idx:end_idx]
- dest_means.append(np.mean(dest_data))
- dest_stds.append(np.std(dest_data))
- 
- if len(dest_means) == 3:
- x_pos = np.arange(3)
- bars = ax5.bar(x_pos, dest_means, yerr=dest_stds, capsize=5, 
- alpha=0.7, color=['#1f77b4', '#ff7f0e', '#2ca02c'])
- ax5.set_xticks(x_pos)
- ax5.set_xticklabels(dest_names)
- ax5.set_ylabel('Learned Accessibility')
- ax5.set_title('Multi-Modal Accessibility\n(Mean ± Std)')
- ax5.grid(True, alpha=0.3)
- else:
- ax5.text(0.5, 0.5, f'Features: {n_features}\n(Expected: 9)', 
- ha='center', va='center', transform=ax5.transAxes)
- ax5.set_title('Multi-Modal Analysis')
- else:
- ax5.text(0.5, 0.5, f'Features: {n_features}\n(Need 9 for analysis)', 
- ha='center', va='center', transform=ax5.transAxes)
- ax5.set_title('Multi-Modal Analysis')
- 
- # 6. Summary Statistics
- ax6 = axes[1, 2]
- ax6.axis('off')
- 
- # Calculate summary metrics
- diversity_score = np.mean(feature_stds)
- independence_score = 1 - np.max(np.abs(np.corrcoef(learned_accessibility.T) - 
- np.eye(n_features))) if n_features > 1 else 1
- 
- summary_text = f"""Stage 1 Assessment:
+    def plot_accessibility_learning_validation(self, learned_accessibility: np.ndarray, 
+                                            traditional_accessibility: Optional[np.ndarray],
+                                            output_path: str):
+        """Stage 1: Does GNN learn meaningful accessibility patterns?"""
+        
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        fig.suptitle('Stage 1: Accessibility Learning Validation', fontsize=14, fontweight='bold')
+        
+        if learned_accessibility is None:
+            fig.text(0.5, 0.5, 'No learned accessibility data available', 
+                    ha='center', va='center', fontsize=16)
+            plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+            plt.close()
+            return
+        
+        # Ensure 2D array
+        if learned_accessibility.ndim == 1:
+            learned_accessibility = learned_accessibility.reshape(-1, 1)
+        
+        n_addresses, n_features = learned_accessibility.shape
+        
+        # 1. Learning Validation: Learned vs Traditional
+        ax1 = axes[0, 0]
+        if traditional_accessibility is not None and traditional_accessibility.shape[0] == n_addresses:
+            # Calculate correlation
+            if traditional_accessibility.ndim > 1:
+                traditional_mean = np.mean(traditional_accessibility, axis=1)
+            else:
+                traditional_mean = traditional_accessibility
+            learned_mean = np.mean(learned_accessibility, axis=1)
+            
+            correlation, p_value = pearsonr(learned_mean, traditional_mean)
+            r_squared = max(0, correlation**2)
+            
+            # Scatter plot
+            ax1.scatter(traditional_mean, learned_mean, alpha=0.6, s=20, color='steelblue')
+            
+            # Regression line
+            z = np.polyfit(traditional_mean, learned_mean, 1)
+            p = np.poly1d(z)
+            ax1.plot(sorted(traditional_mean), p(sorted(traditional_mean)), "r--", alpha=0.8)
+            
+            ax1.set_xlabel('Traditional Accessibility')
+            ax1.set_ylabel('GNN Learned Accessibility')
+            ax1.set_title(f'Learning Validation\nR² = {r_squared:.3f}, p = {p_value:.4f}')
+            ax1.grid(True, alpha=0.3)
+            
+            # Quality assessment
+            quality = self._interpret_r2(r_squared)
+            color = self._get_r2_color(r_squared)
+            ax1.text(0.05, 0.95, f'{quality}\nLearning', transform=ax1.transAxes,
+                    bbox=dict(boxstyle='round', facecolor=color, alpha=0.7),
+                    verticalalignment='top', fontweight='bold')
+        else:
+            ax1.text(0.5, 0.5, 'No traditional\nbaseline available', 
+                    ha='center', va='center', transform=ax1.transAxes)
+            ax1.set_title('Learning Validation\n(No Baseline)')
+            r_squared = 0
+        
+        # 2. Feature Correlation Matrix with meaningful names
+        ax2 = axes[0, 1]
+        if n_features > 1:
+            corr_matrix = np.corrcoef(learned_accessibility.T)
+            im = ax2.imshow(corr_matrix, cmap='RdBu_r', vmin=-1, vmax=1)
+            ax2.set_title('Feature Independence Matrix')
+            
+            # Use meaningful feature names
+            feature_labels = []
+            for i in range(min(n_features, 9)):  # Limit to 9 features
+                feature_name = self.feature_names.get(f'F{i+1}', f'F{i+1}')
+                # Shorten for display
+                short_name = feature_name.split('_')[0][:4] + '_' + feature_name.split('_')[-1][:2]
+                feature_labels.append(short_name)
+            
+            ax2.set_xticks(range(len(feature_labels)))
+            ax2.set_yticks(range(len(feature_labels)))
+            ax2.set_xticklabels(feature_labels, rotation=45, ha='right', fontsize=8)
+            ax2.set_yticklabels(feature_labels, fontsize=8)
+            
+            # Add correlation values
+            for i in range(len(feature_labels)):
+                for j in range(len(feature_labels)):
+                    if i != j:  # Skip diagonal
+                        color = 'white' if abs(corr_matrix[i, j]) > 0.5 else 'black'
+                        ax2.text(j, i, f'{corr_matrix[i, j]:.2f}',
+                               ha="center", va="center", color=color, fontsize=7)
+            
+            plt.colorbar(im, ax=ax2, fraction=0.046, pad=0.04)
+        else:
+            ax2.text(0.5, 0.5, 'Single Feature\nNo Correlation\nAnalysis', 
+                    ha='center', va='center', transform=ax2.transAxes)
+            ax2.set_title('Feature Independence')
+        
+        # 3. Feature Diversity Analysis
+        ax3 = axes[0, 2]
+        feature_stds = np.std(learned_accessibility, axis=0)
+        n_display = min(len(feature_stds), 9)
+        
+        x_positions = range(n_display)
+        bars = ax3.bar(x_positions, feature_stds[:n_display], color='steelblue', alpha=0.7)
+        
+        # Use meaningful names for x-axis
+        x_labels = []
+        for i in range(n_display):
+            feature_name = self.feature_names.get(f'F{i+1}', f'F{i+1}')
+            x_labels.append(feature_name.split('_')[-1][:4])  # Use last part of name
+        
+        ax3.set_xticks(x_positions)
+        ax3.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=8)
+        ax3.set_ylabel('Standard Deviation')
+        ax3.set_title('Feature Diversity\n(Spatial Variation)')
+        ax3.grid(True, alpha=0.3)
+        
+        # Color bars by diversity
+        diversity_threshold = np.median(feature_stds) if len(feature_stds) > 1 else 0
+        for i, bar in enumerate(bars):
+            if i < len(feature_stds) and feature_stds[i] > diversity_threshold:
+                bar.set_color('darkgreen')
+            else:
+                bar.set_color('orange')
+        
+        # 4. Residual Analysis
+        ax4 = axes[1, 0]
+        if traditional_accessibility is not None and len(traditional_mean) == len(learned_mean):
+            residuals = learned_mean - traditional_mean
+            ax4.scatter(traditional_mean, residuals, alpha=0.6, s=15, color='purple')
+            ax4.axhline(0, color='red', linestyle='--')
+            ax4.set_xlabel('Traditional Accessibility')
+            ax4.set_ylabel('Residuals')
+            ax4.set_title('Residual Analysis')
+            ax4.grid(True, alpha=0.3)
+            
+            # Add residual stats
+            rmse = np.sqrt(np.mean(residuals**2))
+            ax4.text(0.05, 0.95, f'RMSE: {rmse:.4f}', transform=ax4.transAxes,
+                    bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8),
+                    verticalalignment='top')
+        else:
+            ax4.text(0.5, 0.5, 'No baseline for\nresidual analysis', 
+                    ha='center', va='center', transform=ax4.transAxes)
+            ax4.set_title('Residual Analysis')
+        
+        # 5. Multi-Modal Summary
+        ax5 = axes[1, 1]
+        if n_features >= 9:
+            # Group by destination type (employment, healthcare, grocery)
+            dest_means = []
+            dest_stds = []
+            dest_names = ['Employment', 'Healthcare', 'Grocery']
+            
+            for i in range(3):
+                start_idx = i * 3
+                end_idx = (i + 1) * 3
+                if end_idx <= n_features:
+                    dest_data = learned_accessibility[:, start_idx:end_idx]
+                    dest_means.append(np.mean(dest_data))
+                    dest_stds.append(np.std(dest_data))
+            
+            if len(dest_means) == 3:
+                x_pos = np.arange(3)
+                bars = ax5.bar(x_pos, dest_means, yerr=dest_stds, capsize=5, 
+                              alpha=0.7, color=['#1f77b4', '#ff7f0e', '#2ca02c'])
+                ax5.set_xticks(x_pos)
+                ax5.set_xticklabels(dest_names)
+                ax5.set_ylabel('Learned Accessibility')
+                ax5.set_title('Multi-Modal Accessibility\n(Mean ± Std)')
+                ax5.grid(True, alpha=0.3)
+            else:
+                ax5.text(0.5, 0.5, f'Features: {n_features}\n(Expected: 9)', 
+                        ha='center', va='center', transform=ax5.transAxes)
+                ax5.set_title('Multi-Modal Analysis')
+        else:
+            ax5.text(0.5, 0.5, f'Features: {n_features}\n(Need 9 for analysis)', 
+                    ha='center', va='center', transform=ax5.transAxes)
+            ax5.set_title('Multi-Modal Analysis')
+        
+        # 6. Summary Statistics
+        ax6 = axes[1, 2]
+        ax6.axis('off')
+        
+        # Calculate summary metrics
+        diversity_score = np.mean(feature_stds)
+        independence_score = 1 - np.max(np.abs(np.corrcoef(learned_accessibility.T) - 
+                                               np.eye(n_features))) if n_features > 1 else 1
+        
+        summary_text = f"""Stage 1 Assessment:
 • Samples: {n_addresses:,}
 • Features: {n_features}
 • R²: {r_squared:.3f} ({self._interpret_r2(r_squared)})
@@ -273,137 +273,137 @@ Status: {self._assess_stage1_status(r_squared, diversity_score)}
 
 Next Steps:
 {self._suggest_stage1_improvements(r_squared)}"""
- 
- ax6.text(0.05, 0.95, summary_text.strip(), transform=ax6.transAxes,
- fontsize=10, verticalalignment='top', fontfamily='monospace',
- bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
- 
- plt.tight_layout()
- plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
- plt.close()
+        
+        ax6.text(0.05, 0.95, summary_text.strip(), transform=ax6.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+        plt.close()
 
- def plot_svi_prediction_validation(self, gnn_predictions: pd.DataFrame,
- stage2_metrics: Dict, tract_svi: float,
- output_path: str):
- """Stage 2: Does model predict SVI accurately?"""
- 
- fig, axes = plt.subplots(2, 3, figsize=(15, 10))
- fig.suptitle('Stage 2: SVI Prediction Validation', fontsize=14, fontweight='bold')
- 
- if gnn_predictions is None or gnn_predictions.empty:
- fig.text(0.5, 0.5, 'No GNN predictions available', 
- ha='center', va='center', fontsize=16)
- plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
- plt.close()
- return
- 
- # Extract data
- predictions = gnn_predictions['mean'].values
- uncertainty = gnn_predictions.get('sd', np.full(len(predictions), 0.05)).values
- x_coords = gnn_predictions.get('x', np.arange(len(predictions))).values
- y_coords = gnn_predictions.get('y', np.arange(len(predictions))).values
- 
- # 1. Spatial Distribution
- ax1 = axes[0, 0]
- if 'x' in gnn_predictions.columns and 'y' in gnn_predictions.columns:
- scatter = ax1.scatter(x_coords, y_coords, c=predictions, 
- s=15, alpha=0.7, cmap='viridis')
- ax1.set_xlabel('Longitude')
- ax1.set_ylabel('Latitude')
- ax1.set_title('SVI Predictions (Spatial)')
- ax1.set_aspect('equal')
- plt.colorbar(scatter, ax=ax1, label='Predicted SVI')
- else:
- ax1.text(0.5, 0.5, 'No spatial\ncoordinates', 
- ha='center', va='center', transform=ax1.transAxes)
- ax1.set_title('Spatial Distribution')
- 
- # 2. Distribution vs Target
- ax2 = axes[0, 1]
- ax2.hist(predictions, bins=30, alpha=0.7, density=True, color='steelblue', edgecolor='black')
- ax2.axvline(tract_svi, color='red', linestyle='--', linewidth=2, 
- label=f'Target: {tract_svi:.3f}')
- ax2.axvline(np.mean(predictions), color='green', linestyle='--', linewidth=2,
- label=f'Mean: {np.mean(predictions):.3f}')
- ax2.set_xlabel('SVI Value')
- ax2.set_ylabel('Density')
- ax2.set_title('Prediction Distribution')
- ax2.legend()
- ax2.grid(True, alpha=0.3)
- 
- # 3. Constraint Satisfaction
- ax3 = axes[0, 2]
- predicted_mean = np.mean(predictions)
- constraint_error = abs(predicted_mean - tract_svi) / tract_svi * 100 if tract_svi > 0 else 100
- 
- # Simple gauge visualization
- categories = ['Error', 'Satisfied']
- error_pct = min(100, constraint_error)
- satisfied_pct = max(0, 100 - error_pct)
- values = [error_pct, satisfied_pct]
- colors = ['lightcoral', 'lightgreen']
- 
- wedges = ax3.pie(values, labels=categories, colors=colors, 
- autopct='%1.1f%%', startangle=90)
- ax3.set_title(f'Constraint Satisfaction\nTarget: {tract_svi:.3f}')
- 
- # 4. Uncertainty Analysis
- ax4 = axes[1, 0]
- ax4.scatter(predictions, uncertainty, alpha=0.6, s=15, color='orange')
- ax4.set_xlabel('Predicted SVI')
- ax4.set_ylabel('Uncertainty')
- ax4.set_title('Prediction Confidence')
- ax4.grid(True, alpha=0.3)
- 
- # Add trend line if enough points
- if len(predictions) > 5:
- z = np.polyfit(predictions, uncertainty, 1)
- p = np.poly1d(z)
- ax4.plot(sorted(predictions), p(sorted(predictions)), "r--", alpha=0.8)
- 
- # 5. Spatial Variation
- ax5 = axes[1, 1]
- if len(predictions) > 10:
- # Simple spatial autocorrelation
- distances = []
- pred_diffs = []
- 
- # Sample for efficiency
- sample_indices = np.random.choice(len(predictions), min(100, len(predictions)), replace=False)
- 
- for i, idx1 in enumerate(sample_indices[:-1]):
- for idx2 in sample_indices[i+1:i+6]: # Limit comparisons
- geo_dist = np.sqrt((x_coords[idx1] - x_coords[idx2])**2 + 
- (y_coords[idx1] - y_coords[idx2])**2)
- pred_diff = abs(predictions[idx1] - predictions[idx2])
- distances.append(geo_dist)
- pred_diffs.append(pred_diff)
- 
- if len(distances) > 0:
- ax5.scatter(distances, pred_diffs, alpha=0.5, s=10, color='purple')
- ax5.set_xlabel('Geographic Distance')
- ax5.set_ylabel('Prediction Difference')
- ax5.set_title('Spatial Autocorrelation')
- ax5.grid(True, alpha=0.3)
- else:
- ax5.text(0.5, 0.5, 'Insufficient data\nfor analysis', 
- ha='center', va='center', transform=ax5.transAxes)
- ax5.set_title('Spatial Autocorrelation')
- else:
- ax5.text(0.5, 0.5, 'Too few predictions\nfor analysis', 
- ha='center', va='center', transform=ax5.transAxes)
- ax5.set_title('Spatial Autocorrelation')
- 
- # 6. Summary Statistics
- ax6 = axes[1, 2]
- ax6.axis('off')
- 
- # Calculate key metrics
- mae = np.mean(np.abs(predictions - tract_svi))
- rmse = np.sqrt(np.mean((predictions - tract_svi)**2))
- spatial_std = np.std(predictions)
- 
- summary_text = f"""Stage 2 Assessment:
+    def plot_svi_prediction_validation(self, gnn_predictions: pd.DataFrame,
+                                     stage2_metrics: Dict, tract_svi: float,
+                                     output_path: str):
+        """Stage 2: Does model predict SVI accurately?"""
+        
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        fig.suptitle('Stage 2: SVI Prediction Validation', fontsize=14, fontweight='bold')
+        
+        if gnn_predictions is None or gnn_predictions.empty:
+            fig.text(0.5, 0.5, 'No GNN predictions available', 
+                    ha='center', va='center', fontsize=16)
+            plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+            plt.close()
+            return
+        
+        # Extract data
+        predictions = gnn_predictions['mean'].values
+        uncertainty = gnn_predictions.get('sd', np.full(len(predictions), 0.05)).values
+        x_coords = gnn_predictions.get('x', np.arange(len(predictions))).values
+        y_coords = gnn_predictions.get('y', np.arange(len(predictions))).values
+        
+        # 1. Spatial Distribution
+        ax1 = axes[0, 0]
+        if 'x' in gnn_predictions.columns and 'y' in gnn_predictions.columns:
+            scatter = ax1.scatter(x_coords, y_coords, c=predictions, 
+                                s=15, alpha=0.7, cmap='viridis')
+            ax1.set_xlabel('Longitude')
+            ax1.set_ylabel('Latitude')
+            ax1.set_title('SVI Predictions (Spatial)')
+            ax1.set_aspect('equal')
+            plt.colorbar(scatter, ax=ax1, label='Predicted SVI')
+        else:
+            ax1.text(0.5, 0.5, 'No spatial\ncoordinates', 
+                    ha='center', va='center', transform=ax1.transAxes)
+            ax1.set_title('Spatial Distribution')
+        
+        # 2. Distribution vs Target
+        ax2 = axes[0, 1]
+        ax2.hist(predictions, bins=30, alpha=0.7, density=True, color='steelblue', edgecolor='black')
+        ax2.axvline(tract_svi, color='red', linestyle='--', linewidth=2, 
+                   label=f'Target: {tract_svi:.3f}')
+        ax2.axvline(np.mean(predictions), color='green', linestyle='--', linewidth=2,
+                   label=f'Mean: {np.mean(predictions):.3f}')
+        ax2.set_xlabel('SVI Value')
+        ax2.set_ylabel('Density')
+        ax2.set_title('Prediction Distribution')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Constraint Satisfaction
+        ax3 = axes[0, 2]
+        predicted_mean = np.mean(predictions)
+        constraint_error = abs(predicted_mean - tract_svi) / tract_svi * 100 if tract_svi > 0 else 100
+        
+        # Simple gauge visualization
+        categories = ['Error', 'Satisfied']
+        error_pct = min(100, constraint_error)
+        satisfied_pct = max(0, 100 - error_pct)
+        values = [error_pct, satisfied_pct]
+        colors = ['lightcoral', 'lightgreen']
+        
+        wedges = ax3.pie(values, labels=categories, colors=colors, 
+                        autopct='%1.1f%%', startangle=90)
+        ax3.set_title(f'Constraint Satisfaction\nTarget: {tract_svi:.3f}')
+        
+        # 4. Uncertainty Analysis
+        ax4 = axes[1, 0]
+        ax4.scatter(predictions, uncertainty, alpha=0.6, s=15, color='orange')
+        ax4.set_xlabel('Predicted SVI')
+        ax4.set_ylabel('Uncertainty')
+        ax4.set_title('Prediction Confidence')
+        ax4.grid(True, alpha=0.3)
+        
+        # Add trend line if enough points
+        if len(predictions) > 5:
+            z = np.polyfit(predictions, uncertainty, 1)
+            p = np.poly1d(z)
+            ax4.plot(sorted(predictions), p(sorted(predictions)), "r--", alpha=0.8)
+        
+        # 5. Spatial Variation
+        ax5 = axes[1, 1]
+        if len(predictions) > 10:
+            # Simple spatial autocorrelation
+            distances = []
+            pred_diffs = []
+            
+            # Sample for efficiency
+            sample_indices = np.random.choice(len(predictions), min(100, len(predictions)), replace=False)
+            
+            for i, idx1 in enumerate(sample_indices[:-1]):
+                for idx2 in sample_indices[i+1:i+6]:  # Limit comparisons
+                    geo_dist = np.sqrt((x_coords[idx1] - x_coords[idx2])**2 + 
+                                     (y_coords[idx1] - y_coords[idx2])**2)
+                    pred_diff = abs(predictions[idx1] - predictions[idx2])
+                    distances.append(geo_dist)
+                    pred_diffs.append(pred_diff)
+            
+            if len(distances) > 0:
+                ax5.scatter(distances, pred_diffs, alpha=0.5, s=10, color='purple')
+                ax5.set_xlabel('Geographic Distance')
+                ax5.set_ylabel('Prediction Difference')
+                ax5.set_title('Spatial Autocorrelation')
+                ax5.grid(True, alpha=0.3)
+            else:
+                ax5.text(0.5, 0.5, 'Insufficient data\nfor analysis', 
+                        ha='center', va='center', transform=ax5.transAxes)
+                ax5.set_title('Spatial Autocorrelation')
+        else:
+            ax5.text(0.5, 0.5, 'Too few predictions\nfor analysis', 
+                    ha='center', va='center', transform=ax5.transAxes)
+            ax5.set_title('Spatial Autocorrelation')
+        
+        # 6. Summary Statistics
+        ax6 = axes[1, 2]
+        ax6.axis('off')
+        
+        # Calculate key metrics
+        mae = np.mean(np.abs(predictions - tract_svi))
+        rmse = np.sqrt(np.mean((predictions - tract_svi)**2))
+        spatial_std = np.std(predictions)
+        
+        summary_text = f"""Stage 2 Assessment:
 • Target SVI: {tract_svi:.3f}
 • Predicted Mean: {predicted_mean:.3f}
 • Constraint Error: {constraint_error:.1f}%
@@ -414,73 +414,73 @@ Next Steps:
 Quality: {self._interpret_constraint_satisfaction(constraint_error)}
 
 Status: {self._assess_stage2_status(constraint_error, spatial_std)}"""
- 
- quality_color = self._get_constraint_color(constraint_error)
- ax6.text(0.05, 0.95, summary_text.strip(), transform=ax6.transAxes,
- fontsize=10, verticalalignment='top', fontfamily='monospace',
- bbox=dict(boxstyle='round,pad=0.5', facecolor=quality_color, alpha=0.8))
- 
- plt.tight_layout()
- plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
- plt.close()
+        
+        quality_color = self._get_constraint_color(constraint_error)
+        ax6.text(0.05, 0.95, summary_text.strip(), transform=ax6.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor=quality_color, alpha=0.8))
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+        plt.close()
 
- def plot_statistical_summary(self, results: Dict, output_path: str):
- """Clean statistical summary without editorial content"""
- 
- fig, axes = plt.subplots(2, 2, figsize=(12, 10))
- fig.suptitle('Statistical Summary', fontsize=14, fontweight='bold')
- 
- # Extract key data
- learned_accessibility = results.get('learned_accessibility')
- traditional_accessibility = results.get('traditional_accessibility') 
- gnn_predictions = results.get('gnn_predictions')
- tract_svi = results.get('tract_svi', 0)
- 
- # Calculate key metrics
- stage1_r2 = 0
- stage2_error = 100
- n_addresses = 0
- 
- if learned_accessibility is not None and traditional_accessibility is not None:
- min_len = min(len(learned_accessibility), len(traditional_accessibility))
- learned_mean = np.mean(learned_accessibility[:min_len], axis=1) if learned_accessibility.ndim > 1 else learned_accessibility[:min_len]
- traditional_mean = np.mean(traditional_accessibility[:min_len], axis=1) if traditional_accessibility.ndim > 1 else traditional_accessibility[:min_len]
- 
- correlation, _ = pearsonr(learned_mean, traditional_mean)
- stage1_r2 = max(0, correlation**2)
- 
- if gnn_predictions is not None and not gnn_predictions.empty:
- predictions = gnn_predictions['mean'].values
- stage2_error = abs(np.mean(predictions) - tract_svi) / tract_svi * 100 if tract_svi > 0 else 100
- n_addresses = len(predictions)
- 
- # 1. Method Performance Summary
- ax1 = axes[0, 0]
- components = ['Stage 1\n(Learning)', 'Stage 2\n(Prediction)', 'Overall\n(Combined)']
- stage1_score = min(100, stage1_r2 * 100)
- stage2_score = max(0, 100 - stage2_error)
- overall_score = (stage1_score + stage2_score) / 2
- 
- scores = [stage1_score, stage2_score, overall_score]
- colors = [self._get_score_color(s) for s in scores]
- 
- bars = ax1.bar(components, scores, color=colors, alpha=0.7)
- ax1.set_ylabel('Performance Score')
- ax1.set_title('Method Performance Summary')
- ax1.set_ylim(0, 100)
- ax1.grid(True, alpha=0.3)
- 
- # Add score labels
- for bar, score in zip(bars, scores):
- height = bar.get_height()
- ax1.text(bar.get_x() + bar.get_width()/2., height + 1,
- f'{score:.1f}%', ha='center', va='bottom', fontweight='bold')
- 
- # 2. Data Quality Summary
- ax2 = axes[0, 1]
- ax2.axis('off')
- 
- quality_text = f"""Data Quality Assessment:
+    def plot_statistical_summary(self, results: Dict, output_path: str):
+        """Clean statistical summary without editorial content"""
+        
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle('Statistical Summary', fontsize=14, fontweight='bold')
+        
+        # Extract key data
+        learned_accessibility = results.get('learned_accessibility')
+        traditional_accessibility = results.get('traditional_accessibility') 
+        gnn_predictions = results.get('gnn_predictions')
+        tract_svi = results.get('tract_svi', 0)
+        
+        # Calculate key metrics
+        stage1_r2 = 0
+        stage2_error = 100
+        n_addresses = 0
+        
+        if learned_accessibility is not None and traditional_accessibility is not None:
+            min_len = min(len(learned_accessibility), len(traditional_accessibility))
+            learned_mean = np.mean(learned_accessibility[:min_len], axis=1) if learned_accessibility.ndim > 1 else learned_accessibility[:min_len]
+            traditional_mean = np.mean(traditional_accessibility[:min_len], axis=1) if traditional_accessibility.ndim > 1 else traditional_accessibility[:min_len]
+            
+            correlation, _ = pearsonr(learned_mean, traditional_mean)
+            stage1_r2 = max(0, correlation**2)
+        
+        if gnn_predictions is not None and not gnn_predictions.empty:
+            predictions = gnn_predictions['mean'].values
+            stage2_error = abs(np.mean(predictions) - tract_svi) / tract_svi * 100 if tract_svi > 0 else 100
+            n_addresses = len(predictions)
+        
+        # 1. Method Performance Summary
+        ax1 = axes[0, 0]
+        components = ['Stage 1\n(Learning)', 'Stage 2\n(Prediction)', 'Overall\n(Combined)']
+        stage1_score = min(100, stage1_r2 * 100)
+        stage2_score = max(0, 100 - stage2_error)
+        overall_score = (stage1_score + stage2_score) / 2
+        
+        scores = [stage1_score, stage2_score, overall_score]
+        colors = [self._get_score_color(s) for s in scores]
+        
+        bars = ax1.bar(components, scores, color=colors, alpha=0.7)
+        ax1.set_ylabel('Performance Score')
+        ax1.set_title('Method Performance Summary')
+        ax1.set_ylim(0, 100)
+        ax1.grid(True, alpha=0.3)
+        
+        # Add score labels
+        for bar, score in zip(bars, scores):
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height + 1,
+                    f'{score:.1f}%', ha='center', va='bottom', fontweight='bold')
+        
+        # 2. Data Quality Summary
+        ax2 = axes[0, 1]
+        ax2.axis('off')
+        
+        quality_text = f"""Data Quality Assessment:
 
 Addresses Processed: {n_addresses:,}
 Features Generated: {learned_accessibility.shape[1] if learned_accessibility is not None else 0}
@@ -494,28 +494,28 @@ Stage 2 (SVI Prediction):
 • Prediction Quality: {self._interpret_constraint_satisfaction(stage2_error)}
 
 Overall Assessment: {self._assess_overall_quality(stage1_r2, stage2_error)}"""
- 
- ax2.text(0.05, 0.95, quality_text.strip(), transform=ax2.transAxes,
- fontsize=10, verticalalignment='top', fontfamily='monospace',
- bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
- 
- # 3. Diagnostic Information
- ax3 = axes[1, 0]
- ax3.axis('off')
- 
- # Diagnose issues
- issues = []
- if stage1_r2 < 0.1:
- issues.append("Stage 1: Very low R² - check data alignment")
- if stage2_error > 50:
- issues.append("Stage 2: High constraint error - check model")
- if n_addresses < 100:
- issues.append("Data: Low sample size may affect reliability")
- 
- if not issues:
- issues = ["No critical issues detected"]
- 
- diagnostic_text = f"""Diagnostic Summary:
+        
+        ax2.text(0.05, 0.95, quality_text.strip(), transform=ax2.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
+        
+        # 3. Diagnostic Information
+        ax3 = axes[1, 0]
+        ax3.axis('off')
+        
+        # Diagnose issues
+        issues = []
+        if stage1_r2 < 0.1:
+            issues.append("Stage 1: Very low R² - check data alignment")
+        if stage2_error > 50:
+            issues.append("Stage 2: High constraint error - check model")
+        if n_addresses < 100:
+            issues.append("Data: Low sample size may affect reliability")
+        
+        if not issues:
+            issues = ["No critical issues detected"]
+        
+        diagnostic_text = f"""Diagnostic Summary:
 
 Critical Issues:
 {chr(10).join(['• ' + issue for issue in issues])}
@@ -527,128 +527,128 @@ Recommendations:
 
 Next Steps:
 {self._suggest_next_steps(stage1_r2, stage2_error)}"""
- 
- ax3.text(0.05, 0.95, diagnostic_text.strip(), transform=ax3.transAxes,
- fontsize=10, verticalalignment='top', fontfamily='monospace',
- bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.8))
- 
- # 4. Method Comparison Table
- ax4 = axes[1, 1]
- ax4.axis('off')
- 
- # Create simple comparison table
- table_data = [
- ['Metric', 'Value', 'Assessment'],
- ['Stage 1 R²', f'{stage1_r2:.3f}', self._interpret_r2(stage1_r2)],
- ['Stage 2 Error', f'{stage2_error:.1f}%', self._interpret_constraint_satisfaction(stage2_error)],
- ['Sample Size', f'{n_addresses:,}', 'High' if n_addresses > 1000 else 'Medium' if n_addresses > 100 else 'Low'],
- ['Resolution', 'Address-level', 'High']
- ]
- 
- # Simple text table
- table_text = "\n".join([" | ".join(row) for row in table_data])
- ax4.text(0.05, 0.95, f"Performance Summary:\n\n{table_text}", 
- transform=ax4.transAxes, fontsize=9, verticalalignment='top', 
- fontfamily='monospace',
- bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.8))
- 
- plt.tight_layout()
- plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
- plt.close()
+        
+        ax3.text(0.05, 0.95, diagnostic_text.strip(), transform=ax3.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.8))
+        
+        # 4. Method Comparison Table
+        ax4 = axes[1, 1]
+        ax4.axis('off')
+        
+        # Create simple comparison table
+        table_data = [
+            ['Metric', 'Value', 'Assessment'],
+            ['Stage 1 R²', f'{stage1_r2:.3f}', self._interpret_r2(stage1_r2)],
+            ['Stage 2 Error', f'{stage2_error:.1f}%', self._interpret_constraint_satisfaction(stage2_error)],
+            ['Sample Size', f'{n_addresses:,}', 'High' if n_addresses > 1000 else 'Medium' if n_addresses > 100 else 'Low'],
+            ['Resolution', 'Address-level', 'High']
+        ]
+        
+        # Simple text table
+        table_text = "\n".join([" | ".join(row) for row in table_data])
+        ax4.text(0.05, 0.95, f"Performance Summary:\n\n{table_text}", 
+                transform=ax4.transAxes, fontsize=9, verticalalignment='top', 
+                fontfamily='monospace',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.8))
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+        plt.close()
 
- def plot_spatial_analysis(self, gnn_predictions: pd.DataFrame,
- learned_accessibility: np.ndarray,
- output_path: str):
- """Clean spatial analysis without editorial content"""
- 
- fig, axes = plt.subplots(2, 2, figsize=(12, 10))
- fig.suptitle('Spatial Analysis', fontsize=14, fontweight='bold')
- 
- if gnn_predictions is None or gnn_predictions.empty:
- fig.text(0.5, 0.5, 'No spatial data available', 
- ha='center', va='center', fontsize=16)
- plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
- plt.close()
- return
- 
- predictions = gnn_predictions['mean'].values
- x_coords = gnn_predictions.get('x', np.arange(len(predictions))).values
- y_coords = gnn_predictions.get('y', np.arange(len(predictions))).values
- 
- # 1. SVI Prediction Map
- ax1 = axes[0, 0]
- if 'x' in gnn_predictions.columns:
- scatter1 = ax1.scatter(x_coords, y_coords, c=predictions, 
- s=15, alpha=0.7, cmap='viridis')
- ax1.set_title('SVI Predictions')
- ax1.set_xlabel('Longitude')
- ax1.set_ylabel('Latitude')
- ax1.set_aspect('equal')
- plt.colorbar(scatter1, ax=ax1, label='Predicted SVI')
- else:
- ax1.text(0.5, 0.5, 'No coordinates\navailable', 
- ha='center', va='center', transform=ax1.transAxes)
- ax1.set_title('SVI Predictions')
- 
- # 2. Accessibility Map
- ax2 = axes[0, 1]
- if learned_accessibility is not None and 'x' in gnn_predictions.columns:
- accessibility_mean = np.mean(learned_accessibility, axis=1)
- scatter2 = ax2.scatter(x_coords, y_coords, c=accessibility_mean,
- s=15, alpha=0.7, cmap='plasma_r')
- ax2.set_title('Learned Accessibility')
- ax2.set_xlabel('Longitude')
- ax2.set_ylabel('Latitude')
- ax2.set_aspect('equal')
- plt.colorbar(scatter2, ax=ax2, label='Accessibility')
- else:
- ax2.text(0.5, 0.5, 'No accessibility\ndata available', 
- ha='center', va='center', transform=ax2.transAxes)
- ax2.set_title('Learned Accessibility')
- 
- # 3. Accessibility-Vulnerability Relationship
- ax3 = axes[1, 0]
- if learned_accessibility is not None:
- accessibility_mean = np.mean(learned_accessibility, axis=1)
- correlation, p_value = pearsonr(accessibility_mean, predictions)
- 
- ax3.scatter(accessibility_mean, predictions, alpha=0.6, s=20, color='purple')
- 
- # Regression line
- z = np.polyfit(accessibility_mean, predictions, 1)
- p = np.poly1d(z)
- ax3.plot(sorted(accessibility_mean), p(sorted(accessibility_mean)), "r--", alpha=0.8)
- 
- ax3.set_xlabel('Learned Accessibility')
- ax3.set_ylabel('Predicted SVI')
- ax3.set_title(f'Access-Vulnerability Link\nr = {correlation:.3f}')
- ax3.grid(True, alpha=0.3)
- 
- # Equity assessment
- if correlation < -0.3:
- equity_text = "Strong Equity\nPattern"
- equity_color = 'lightgreen'
- elif correlation < -0.1:
- equity_text = "Moderate Equity\nPattern"
- equity_color = 'lightyellow'
- else:
- equity_text = "Weak/No Equity\nPattern"
- equity_color = 'lightcoral'
- 
- ax3.text(0.05, 0.95, equity_text, transform=ax3.transAxes,
- bbox=dict(boxstyle='round', facecolor=equity_color, alpha=0.8),
- verticalalignment='top', fontweight='bold')
- else:
- ax3.text(0.5, 0.5, 'No accessibility\ndata for analysis', 
- ha='center', va='center', transform=ax3.transAxes)
- ax3.set_title('Access-Vulnerability Link')
- 
- # 4. Summary Statistics
- ax4 = axes[1, 1]
- ax4.axis('off')
- 
- # Calculate spatial statistics
- spatial_stats = f"""Spatial Summary:
+    def plot_spatial_analysis(self, gnn_predictions: pd.DataFrame,
+                            learned_accessibility: np.ndarray,
+                            output_path: str):
+        """Clean spatial analysis without editorial content"""
+        
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle('Spatial Analysis', fontsize=14, fontweight='bold')
+        
+        if gnn_predictions is None or gnn_predictions.empty:
+            fig.text(0.5, 0.5, 'No spatial data available', 
+                    ha='center', va='center', fontsize=16)
+            plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+            plt.close()
+            return
+        
+        predictions = gnn_predictions['mean'].values
+        x_coords = gnn_predictions.get('x', np.arange(len(predictions))).values
+        y_coords = gnn_predictions.get('y', np.arange(len(predictions))).values
+        
+        # 1. SVI Prediction Map
+        ax1 = axes[0, 0]
+        if 'x' in gnn_predictions.columns:
+            scatter1 = ax1.scatter(x_coords, y_coords, c=predictions, 
+                                 s=15, alpha=0.7, cmap='viridis')
+            ax1.set_title('SVI Predictions')
+            ax1.set_xlabel('Longitude')
+            ax1.set_ylabel('Latitude')
+            ax1.set_aspect('equal')
+            plt.colorbar(scatter1, ax=ax1, label='Predicted SVI')
+        else:
+            ax1.text(0.5, 0.5, 'No coordinates\navailable', 
+                    ha='center', va='center', transform=ax1.transAxes)
+            ax1.set_title('SVI Predictions')
+        
+        # 2. Accessibility Map
+        ax2 = axes[0, 1]
+        if learned_accessibility is not None and 'x' in gnn_predictions.columns:
+            accessibility_mean = np.mean(learned_accessibility, axis=1)
+            scatter2 = ax2.scatter(x_coords, y_coords, c=accessibility_mean,
+                                 s=15, alpha=0.7, cmap='plasma_r')
+            ax2.set_title('Learned Accessibility')
+            ax2.set_xlabel('Longitude')
+            ax2.set_ylabel('Latitude')
+            ax2.set_aspect('equal')
+            plt.colorbar(scatter2, ax=ax2, label='Accessibility')
+        else:
+            ax2.text(0.5, 0.5, 'No accessibility\ndata available', 
+                    ha='center', va='center', transform=ax2.transAxes)
+            ax2.set_title('Learned Accessibility')
+        
+        # 3. Accessibility-Vulnerability Relationship
+        ax3 = axes[1, 0]
+        if learned_accessibility is not None:
+            accessibility_mean = np.mean(learned_accessibility, axis=1)
+            correlation, p_value = pearsonr(accessibility_mean, predictions)
+            
+            ax3.scatter(accessibility_mean, predictions, alpha=0.6, s=20, color='purple')
+            
+            # Regression line
+            z = np.polyfit(accessibility_mean, predictions, 1)
+            p = np.poly1d(z)
+            ax3.plot(sorted(accessibility_mean), p(sorted(accessibility_mean)), "r--", alpha=0.8)
+            
+            ax3.set_xlabel('Learned Accessibility')
+            ax3.set_ylabel('Predicted SVI')
+            ax3.set_title(f'Access-Vulnerability Link\nr = {correlation:.3f}')
+            ax3.grid(True, alpha=0.3)
+            
+            # Equity assessment
+            if correlation < -0.3:
+                equity_text = "Strong Equity\nPattern"
+                equity_color = 'lightgreen'
+            elif correlation < -0.1:
+                equity_text = "Moderate Equity\nPattern"
+                equity_color = 'lightyellow'
+            else:
+                equity_text = "Weak/No Equity\nPattern"
+                equity_color = 'lightcoral'
+            
+            ax3.text(0.05, 0.95, equity_text, transform=ax3.transAxes,
+                    bbox=dict(boxstyle='round', facecolor=equity_color, alpha=0.8),
+                    verticalalignment='top', fontweight='bold')
+        else:
+            ax3.text(0.5, 0.5, 'No accessibility\ndata for analysis', 
+                    ha='center', va='center', transform=ax3.transAxes)
+            ax3.set_title('Access-Vulnerability Link')
+        
+        # 4. Summary Statistics
+        ax4 = axes[1, 1]
+        ax4.axis('off')
+        
+        # Calculate spatial statistics
+        spatial_stats = f"""Spatial Summary:
 
 Sample Size: {len(predictions):,} addresses
 Mean SVI: {np.mean(predictions):.4f}
@@ -666,562 +666,562 @@ Pattern Assessment:
 Equity Analysis:
 {f"• Access-Vulnerability: r = {correlation:.3f}" if learned_accessibility is not None else "• No accessibility data"}
 {f"• Equity Pattern: {self._assess_equity_pattern(correlation)}" if learned_accessibility is not None else ""}"""
- 
- ax4.text(0.05, 0.95, spatial_stats.strip(), transform=ax4.transAxes,
- fontsize=10, verticalalignment='top', fontfamily='monospace',
- bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcyan', alpha=0.8))
- 
- plt.tight_layout()
- plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
- plt.close()
+        
+        ax4.text(0.05, 0.95, spatial_stats.strip(), transform=ax4.transAxes,
+                fontsize=10, verticalalignment='top', fontfamily='monospace',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcyan', alpha=0.8))
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+        plt.close()
 
- # Helper methods for interpretation
- def _interpret_r2(self, r2: float) -> str:
- if r2 > self.excellent_r2:
- return "Excellent"
- elif r2 > self.good_r2:
- return "Good"
- elif r2 > self.moderate_r2:
- return "Fair"
- else:
- return "Poor"
+    # Helper methods for interpretation
+    def _interpret_r2(self, r2: float) -> str:
+        if r2 > self.excellent_r2:
+            return "Excellent"
+        elif r2 > self.good_r2:
+            return "Good"
+        elif r2 > self.moderate_r2:
+            return "Fair"
+        else:
+            return "Poor"
 
- def _get_r2_color(self, r2: float) -> str:
- if r2 > self.excellent_r2:
- return 'lightgreen'
- elif r2 > self.good_r2:
- return 'lightyellow'
- elif r2 > self.moderate_r2:
- return 'orange'
- else:
- return 'lightcoral'
+    def _get_r2_color(self, r2: float) -> str:
+        if r2 > self.excellent_r2:
+            return 'lightgreen'
+        elif r2 > self.good_r2:
+            return 'lightyellow'
+        elif r2 > self.moderate_r2:
+            return 'orange'
+        else:
+            return 'lightcoral'
 
- def _interpret_constraint_satisfaction(self, error_pct: float) -> str:
- if error_pct < 5:
- return "Excellent"
- elif error_pct < 15:
- return "Good"
- elif error_pct < 30:
- return "Fair"
- else:
- return "Poor"
+    def _interpret_constraint_satisfaction(self, error_pct: float) -> str:
+        if error_pct < 5:
+            return "Excellent"
+        elif error_pct < 15:
+            return "Good"
+        elif error_pct < 30:
+            return "Fair"
+        else:
+            return "Poor"
 
- def _get_constraint_color(self, error_pct: float) -> str:
- if error_pct < 5:
- return 'lightgreen'
- elif error_pct < 15:
- return 'lightyellow'
- elif error_pct < 30:
- return 'orange'
- else:
- return 'lightcoral'
+    def _get_constraint_color(self, error_pct: float) -> str:
+        if error_pct < 5:
+            return 'lightgreen'
+        elif error_pct < 15:
+            return 'lightyellow'
+        elif error_pct < 30:
+            return 'orange'
+        else:
+            return 'lightcoral'
 
- def _get_score_color(self, score: float) -> str:
- if score > 75:
- return 'lightgreen'
- elif score > 50:
- return 'lightyellow'
- elif score > 25:
- return 'orange'
- else:
- return 'lightcoral'
+    def _get_score_color(self, score: float) -> str:
+        if score > 75:
+            return 'lightgreen'
+        elif score > 50:
+            return 'lightyellow'
+        elif score > 25:
+            return 'orange'
+        else:
+            return 'lightcoral'
 
- def _assess_stage1_status(self, r2: float, diversity: float) -> str:
- if r2 > self.good_r2 and diversity > 0.05:
- return "Learning successful"
- elif r2 > self.moderate_r2:
- return "Partial learning achieved"
- else:
- return "Learning needs improvement"
+    def _assess_stage1_status(self, r2: float, diversity: float) -> str:
+        if r2 > self.good_r2 and diversity > 0.05:
+            return "Learning successful"
+        elif r2 > self.moderate_r2:
+            return "Partial learning achieved"
+        else:
+            return "Learning needs improvement"
 
- def _suggest_stage1_improvements(self, r2: float) -> str:
- if r2 < 0.1:
- return "Debug data alignment and model architecture"
- elif r2 < 0.3:
- return "Tune hyperparameters and check feature scaling"
- else:
- return "Consider expanding feature set"
+    def _suggest_stage1_improvements(self, r2: float) -> str:
+        if r2 < 0.1:
+            return "Debug data alignment and model architecture"
+        elif r2 < 0.3:
+            return "Tune hyperparameters and check feature scaling"
+        else:
+            return "Consider expanding feature set"
 
- def _assess_stage2_status(self, error_pct: float, spatial_std: float) -> str:
- if error_pct < 10 and spatial_std > 0.01:
- return "Good prediction quality"
- elif error_pct < 30:
- return "Acceptable with improvements needed"
- else:
- return "Requires methodology refinement"
+    def _assess_stage2_status(self, error_pct: float, spatial_std: float) -> str:
+        if error_pct < 10 and spatial_std > 0.01:
+            return "Good prediction quality"
+        elif error_pct < 30:
+            return "Acceptable with improvements needed"
+        else:
+            return "Requires methodology refinement"
 
- def _assess_overall_quality(self, r2: float, error_pct: float) -> str:
- if r2 > self.good_r2 and error_pct < 15:
- return "High quality results"
- elif r2 > self.moderate_r2 and error_pct < 30:
- return "Moderate quality results"
- else:
- return "Quality needs improvement"
+    def _assess_overall_quality(self, r2: float, error_pct: float) -> str:
+        if r2 > self.good_r2 and error_pct < 15:
+            return "High quality results"
+        elif r2 > self.moderate_r2 and error_pct < 30:
+            return "Moderate quality results"
+        else:
+            return "Quality needs improvement"
 
- def _suggest_next_steps(self, r2: float, error_pct: float) -> str:
- steps = []
- if r2 < 0.3:
- steps.append("Debug Stage 1 learning")
- if error_pct > 20:
- steps.append("Improve constraint satisfaction")
- if not steps:
- steps.append("Validate on additional data")
- return "; ".join(steps)
+    def _suggest_next_steps(self, r2: float, error_pct: float) -> str:
+        steps = []
+        if r2 < 0.3:
+            steps.append("Debug Stage 1 learning")
+        if error_pct > 20:
+            steps.append("Improve constraint satisfaction")
+        if not steps:
+            steps.append("Validate on additional data")
+        return "; ".join(steps)
 
- def _assess_spatial_variation(self, predictions: np.ndarray) -> str:
- std = np.std(predictions)
- if std > 0.1:
- return "High"
- elif std > 0.05:
- return "Moderate"
- else:
- return "Low"
+    def _assess_spatial_variation(self, predictions: np.ndarray) -> str:
+        std = np.std(predictions)
+        if std > 0.1:
+            return "High"
+        elif std > 0.05:
+            return "Moderate"
+        else:
+            return "Low"
 
- def _assess_spatial_coverage(self, n_addresses: int) -> str:
- if n_addresses > 1000:
- return "High"
- elif n_addresses > 100:
- return "Medium"
- else:
- return "Low"
+    def _assess_spatial_coverage(self, n_addresses: int) -> str:
+        if n_addresses > 1000:
+            return "High"
+        elif n_addresses > 100:
+            return "Medium"
+        else:
+            return "Low"
 
- def _assess_equity_pattern(self, correlation: float) -> str:
- if correlation < -0.3:
- return "Strong equity pattern detected"
- elif correlation < -0.1:
- return "Moderate equity pattern"
- else:
- return "Weak/no equity pattern"
+    def _assess_equity_pattern(self, correlation: float) -> str:
+        if correlation < -0.3:
+            return "Strong equity pattern detected"
+        elif correlation < -0.1:
+            return "Moderate equity pattern"
+        else:
+            return "Weak/no equity pattern"
 
 
 # Main function to create all visualizations
 def create_granite_research_visualizations(results_dict: Dict, output_directory: str = "./output/"):
- """
- Create clean GRANITE research visualizations
- 
- Args:
- results_dict: Dictionary with research results
- output_directory: Where to save visualizations
- 
- Returns:
- dict: Summary metrics
- """
- import os
- os.makedirs(output_directory, exist_ok=True)
- 
- visualizer = GRANITEResearchVisualizer()
- visualizer.create_comprehensive_research_analysis(results_dict, output_directory)
- 
- print(f"Clean GRANITE visualizations saved to {output_directory}")
- return visualizer
+    """
+    Create clean GRANITE research visualizations
+    
+    Args:
+        results_dict: Dictionary with research results
+        output_directory: Where to save visualizations
+    
+    Returns:
+        dict: Summary metrics
+    """
+    import os
+    os.makedirs(output_directory, exist_ok=True)
+    
+    visualizer = GRANITEResearchVisualizer()
+    visualizer.create_comprehensive_research_analysis(results_dict, output_directory)
+    
+    print(f"Clean GRANITE visualizations saved to {output_directory}")
+    return visualizer
 
 class DisaggregationVisualizer:
- """Visualization tools for GRANITE disaggregation results."""
- 
- def __init__(self, style: str = 'default'):
- plt.style.use(style)
- self.figsize = (14, 10)
- self.dpi = 300
- 
- # Color scheme
- self.colors = {
- 'gnn': '#2E7D32', # Dark green
- 'idw': '#1565C0', # Blue
- 'kriging': '#7B1FA2', # Purple
- 'naive': '#757575', # Gray
- 'highlight': '#FF6F00' # Orange
- }
- 
- def plot_disaggregation_dashboard(self, 
- comparison_results: Dict,
- accessibility_features: np.ndarray = None,
- output_path: str = None) -> plt.Figure:
- """
- Create disaggregation comparison dashboard.
- 
- Args:
- comparison_results: Output from DisaggregationComparison.run_comparison()
- accessibility_features: Optional accessibility feature matrix
- output_path: Path to save figure
- 
- Returns:
- matplotlib Figure object
- """
- fig = plt.figure(figsize=(16, 12))
- gs = gridspec.GridSpec(3, 3, figure=fig, hspace=0.35, wspace=0.3)
- 
- methods = comparison_results['methods']
- tract_svi = comparison_results['tract_svi']
- 
- # 1. Constraint Satisfaction Bar Chart
- ax1 = fig.add_subplot(gs[0, 0])
- self._plot_constraint_satisfaction(ax1, methods, tract_svi)
- 
- # 2. Spatial Variation Comparison
- ax2 = fig.add_subplot(gs[0, 1])
- self._plot_variation_comparison(ax2, methods)
- 
- # 3. Method Predictions Distribution
- ax3 = fig.add_subplot(gs[0, 2])
- self._plot_prediction_distributions(ax3, methods, tract_svi)
- 
- # 4. Accessibility Correlation Comparison
- ax4 = fig.add_subplot(gs[1, 0])
- self._plot_accessibility_correlations(ax4, methods)
- 
- # 5. GNN vs IDW Scatter
- ax5 = fig.add_subplot(gs[1, 1])
- self._plot_gnn_vs_baseline(ax5, methods, baseline='IDW_p2.0')
- 
- # 6. Spatial Pattern (if coordinates available)
- ax6 = fig.add_subplot(gs[1, 2])
- self._plot_prediction_summary(ax6, methods, comparison_results)
- 
- # 7. Summary Metrics Table
- ax7 = fig.add_subplot(gs[2, :])
- self._plot_metrics_table(ax7, comparison_results)
- 
- # Title
- fig.suptitle(
- f"GRANITE Disaggregation Comparison\n"
- f"Tract {comparison_results['tract_fips']} | "
- f"Known SVI: {tract_svi:.4f} | "
- f"n={comparison_results['n_addresses']} addresses",
- fontsize=14, fontweight='bold', y=0.98
- )
- 
- if output_path:
- plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight',
- facecolor='white', edgecolor='none')
- print(f"Saved: {output_path}")
- 
- return fig
- 
- def _plot_constraint_satisfaction(self, ax, methods: Dict, tract_svi: float):
- """Bar chart of constraint satisfaction (mean error %)."""
- 
- method_names = []
- errors = []
- colors = []
- 
- for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
- if name in methods:
- method_names.append(name.replace('_', '\n'))
- errors.append(methods[name]['constraint_error_pct'])
- colors.append(self._get_method_color(name))
- 
- bars = ax.bar(method_names, errors, color=colors, alpha=0.8, edgecolor='black')
- 
- # Add value labels
- for bar, err in zip(bars, errors):
- ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
- f'{err:.1f}%', ha='center', va='bottom', fontsize=9)
- 
- ax.set_ylabel('Constraint Error (%)', fontsize=10)
- ax.set_title('Constraint Satisfaction\n(Lower = Better)', fontsize=11, fontweight='bold')
- ax.axhline(5, color='green', linestyle='--', alpha=0.5, label='5% threshold')
- ax.set_ylim(0, max(errors) * 1.2 if errors else 10)
- ax.grid(True, alpha=0.3, axis='y')
- 
- def _plot_variation_comparison(self, ax, methods: Dict):
- """Bar chart comparing spatial variation (std)."""
- 
- method_names = []
- stds = []
- colors = []
- 
- for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
- if name in methods:
- method_names.append(name.replace('_', '\n'))
- stds.append(methods[name]['std'])
- colors.append(self._get_method_color(name))
- 
- bars = ax.bar(method_names, stds, color=colors, alpha=0.8, edgecolor='black')
- 
- # Add value labels
- for bar, std in zip(bars, stds):
- ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.002,
- f'{std:.4f}', ha='center', va='bottom', fontsize=9)
- 
- ax.set_ylabel('Standard Deviation', fontsize=10)
- ax.set_title('Spatial Variation\n(Higher = More Disaggregation)', fontsize=11, fontweight='bold')
- ax.grid(True, alpha=0.3, axis='y')
- 
- def _plot_prediction_distributions(self, ax, methods: Dict, tract_svi: float):
- """KDE plots of prediction distributions."""
- 
- for name in ['GNN', 'IDW_p2.0', 'Kriging', 'Naive_Uniform']:
- if name in methods:
- preds = methods[name]['predictions']
- color = self._get_method_color(name)
- label = name.replace('_', ' ')
- 
- if np.std(preds) > 1e-6:
- sns.kdeplot(preds, ax=ax, color=color, label=label, linewidth=2)
- else:
- # Uniform distribution - show as vertical line
- ax.axvline(np.mean(preds), color=color, linestyle='--', 
- label=f'{label} (uniform)', linewidth=2)
- 
- ax.axvline(tract_svi, color='red', linestyle='-', linewidth=2, 
- label=f'Tract SVI ({tract_svi:.3f})')
- 
- ax.set_xlabel('Predicted SVI', fontsize=10)
- ax.set_ylabel('Density', fontsize=10)
- ax.set_title('Prediction Distributions', fontsize=11, fontweight='bold')
- ax.legend(fontsize=8, loc='upper right')
- ax.grid(True, alpha=0.3)
- 
- def _plot_accessibility_correlations(self, ax, methods: Dict):
- """Bar chart of accessibility-SVI correlations."""
- 
- method_names = []
- correlations = []
- colors = []
- 
- for name in ['GNN', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
- if name in methods:
- corr = methods[name].get('accessibility_correlation')
- if corr is not None:
- method_names.append(name.replace('_', '\n'))
- correlations.append(corr)
- colors.append(self._get_method_color(name))
- 
- if not correlations:
- ax.text(0.5, 0.5, 'No accessibility\ndata available', 
- ha='center', va='center', transform=ax.transAxes, fontsize=12)
- ax.set_title('Accessibility Correlation', fontsize=11, fontweight='bold')
- return
- 
- bars = ax.bar(method_names, correlations, color=colors, alpha=0.8, edgecolor='black')
- 
- # Color bars by direction (negative = expected equity pattern)
- for bar, corr in zip(bars, correlations):
- if corr < -0.3:
- bar.set_edgecolor('green')
- bar.set_linewidth(2)
- 
- ax.set_ylabel('Correlation (r)', fontsize=10)
- ax.set_title('Accessibility-SVI Correlation\n(Negative = Equity Pattern)', 
- fontsize=11, fontweight='bold')
- ax.axhline(0, color='black', linewidth=0.5)
- ax.axhline(-0.3, color='green', linestyle='--', alpha=0.5, label='Strong equity threshold')
- ax.grid(True, alpha=0.3, axis='y')
- 
- def _plot_gnn_vs_baseline(self, ax, methods: Dict, baseline: str = 'IDW_p2.0'):
- """Scatter plot comparing GNN vs baseline predictions."""
- 
- if 'GNN' not in methods or baseline not in methods:
- ax.text(0.5, 0.5, f'Missing GNN or {baseline}', 
- ha='center', va='center', transform=ax.transAxes)
- return
- 
- gnn_preds = methods['GNN']['predictions']
- baseline_preds = methods[baseline]['predictions']
- 
- ax.scatter(baseline_preds, gnn_preds, alpha=0.5, s=20, 
- color=self.colors['gnn'], edgecolors='none')
- 
- # Diagonal line
- lims = [
- min(min(baseline_preds), min(gnn_preds)),
- max(max(baseline_preds), max(gnn_preds))
- ]
- ax.plot(lims, lims, 'k--', alpha=0.5, label='1:1 line')
- 
- # Correlation
- if len(gnn_preds) > 2:
- corr = np.corrcoef(baseline_preds, gnn_preds)[0, 1]
- ax.text(0.05, 0.95, f'r = {corr:.3f}', transform=ax.transAxes,
- fontsize=10, verticalalignment='top',
- bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
- 
- ax.set_xlabel(f'{baseline} Predictions', fontsize=10)
- ax.set_ylabel('GNN Predictions', fontsize=10)
- ax.set_title(f'GNN vs {baseline}', fontsize=11, fontweight='bold')
- ax.grid(True, alpha=0.3)
- 
- def _plot_prediction_summary(self, ax, methods: Dict, results: Dict):
- """Summary statistics panel."""
- 
- tract_svi = results['tract_svi']
- gnn = methods.get('GNN', {})
- 
- summary_text = f"""Disaggregation Summary
+    """Visualization tools for GRANITE disaggregation results."""
+    
+    def __init__(self, style: str = 'default'):
+        plt.style.use(style)
+        self.figsize = (14, 10)
+        self.dpi = 300
+        
+        # Color scheme
+        self.colors = {
+            'gnn': '#2E7D32',       # Dark green
+            'idw': '#1565C0',       # Blue
+            'kriging': '#7B1FA2',   # Purple
+            'naive': '#757575',     # Gray
+            'highlight': '#FF6F00'  # Orange
+        }
+    
+    def plot_disaggregation_dashboard(self, 
+                                      comparison_results: Dict,
+                                      accessibility_features: np.ndarray = None,
+                                      output_path: str = None) -> plt.Figure:
+        """
+        Create comprehensive disaggregation comparison dashboard.
+        
+        Args:
+            comparison_results: Output from DisaggregationComparison.run_comparison()
+            accessibility_features: Optional accessibility feature matrix
+            output_path: Path to save figure
+            
+        Returns:
+            matplotlib Figure object
+        """
+        fig = plt.figure(figsize=(16, 12))
+        gs = gridspec.GridSpec(3, 3, figure=fig, hspace=0.35, wspace=0.3)
+        
+        methods = comparison_results['methods']
+        tract_svi = comparison_results['tract_svi']
+        
+        # 1. Constraint Satisfaction Bar Chart
+        ax1 = fig.add_subplot(gs[0, 0])
+        self._plot_constraint_satisfaction(ax1, methods, tract_svi)
+        
+        # 2. Spatial Variation Comparison
+        ax2 = fig.add_subplot(gs[0, 1])
+        self._plot_variation_comparison(ax2, methods)
+        
+        # 3. Method Predictions Distribution
+        ax3 = fig.add_subplot(gs[0, 2])
+        self._plot_prediction_distributions(ax3, methods, tract_svi)
+        
+        # 4. Accessibility Correlation Comparison
+        ax4 = fig.add_subplot(gs[1, 0])
+        self._plot_accessibility_correlations(ax4, methods)
+        
+        # 5. GNN vs IDW Scatter
+        ax5 = fig.add_subplot(gs[1, 1])
+        self._plot_gnn_vs_baseline(ax5, methods, baseline='IDW_p2.0')
+        
+        # 6. Spatial Pattern (if coordinates available)
+        ax6 = fig.add_subplot(gs[1, 2])
+        self._plot_prediction_summary(ax6, methods, comparison_results)
+        
+        # 7. Summary Metrics Table
+        ax7 = fig.add_subplot(gs[2, :])
+        self._plot_metrics_table(ax7, comparison_results)
+        
+        # Title
+        fig.suptitle(
+            f"GRANITE Disaggregation Comparison\n"
+            f"Tract {comparison_results['tract_fips']} | "
+            f"Known SVI: {tract_svi:.4f} | "
+            f"n={comparison_results['n_addresses']} addresses",
+            fontsize=14, fontweight='bold', y=0.98
+        )
+        
+        if output_path:
+            plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight',
+                       facecolor='white', edgecolor='none')
+            print(f"Saved: {output_path}")
+        
+        return fig
+    
+    def _plot_constraint_satisfaction(self, ax, methods: Dict, tract_svi: float):
+        """Bar chart of constraint satisfaction (mean error %)."""
+        
+        method_names = []
+        errors = []
+        colors = []
+        
+        for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
+            if name in methods:
+                method_names.append(name.replace('_', '\n'))
+                errors.append(methods[name]['constraint_error_pct'])
+                colors.append(self._get_method_color(name))
+        
+        bars = ax.bar(method_names, errors, color=colors, alpha=0.8, edgecolor='black')
+        
+        # Add value labels
+        for bar, err in zip(bars, errors):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
+                   f'{err:.1f}%', ha='center', va='bottom', fontsize=9)
+        
+        ax.set_ylabel('Constraint Error (%)', fontsize=10)
+        ax.set_title('Constraint Satisfaction\n(Lower = Better)', fontsize=11, fontweight='bold')
+        ax.axhline(5, color='green', linestyle='--', alpha=0.5, label='5% threshold')
+        ax.set_ylim(0, max(errors) * 1.2 if errors else 10)
+        ax.grid(True, alpha=0.3, axis='y')
+    
+    def _plot_variation_comparison(self, ax, methods: Dict):
+        """Bar chart comparing spatial variation (std)."""
+        
+        method_names = []
+        stds = []
+        colors = []
+        
+        for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
+            if name in methods:
+                method_names.append(name.replace('_', '\n'))
+                stds.append(methods[name]['std'])
+                colors.append(self._get_method_color(name))
+        
+        bars = ax.bar(method_names, stds, color=colors, alpha=0.8, edgecolor='black')
+        
+        # Add value labels
+        for bar, std in zip(bars, stds):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.002,
+                   f'{std:.4f}', ha='center', va='bottom', fontsize=9)
+        
+        ax.set_ylabel('Standard Deviation', fontsize=10)
+        ax.set_title('Spatial Variation\n(Higher = More Disaggregation)', fontsize=11, fontweight='bold')
+        ax.grid(True, alpha=0.3, axis='y')
+    
+    def _plot_prediction_distributions(self, ax, methods: Dict, tract_svi: float):
+        """KDE plots of prediction distributions."""
+        
+        for name in ['GNN', 'IDW_p2.0', 'Kriging', 'Naive_Uniform']:
+            if name in methods:
+                preds = methods[name]['predictions']
+                color = self._get_method_color(name)
+                label = name.replace('_', ' ')
+                
+                if np.std(preds) > 1e-6:
+                    sns.kdeplot(preds, ax=ax, color=color, label=label, linewidth=2)
+                else:
+                    # Uniform distribution - show as vertical line
+                    ax.axvline(np.mean(preds), color=color, linestyle='--', 
+                              label=f'{label} (uniform)', linewidth=2)
+        
+        ax.axvline(tract_svi, color='red', linestyle='-', linewidth=2, 
+                  label=f'Tract SVI ({tract_svi:.3f})')
+        
+        ax.set_xlabel('Predicted SVI', fontsize=10)
+        ax.set_ylabel('Density', fontsize=10)
+        ax.set_title('Prediction Distributions', fontsize=11, fontweight='bold')
+        ax.legend(fontsize=8, loc='upper right')
+        ax.grid(True, alpha=0.3)
+    
+    def _plot_accessibility_correlations(self, ax, methods: Dict):
+        """Bar chart of accessibility-SVI correlations."""
+        
+        method_names = []
+        correlations = []
+        colors = []
+        
+        for name in ['GNN', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
+            if name in methods:
+                corr = methods[name].get('accessibility_correlation')
+                if corr is not None:
+                    method_names.append(name.replace('_', '\n'))
+                    correlations.append(corr)
+                    colors.append(self._get_method_color(name))
+        
+        if not correlations:
+            ax.text(0.5, 0.5, 'No accessibility\ndata available', 
+                   ha='center', va='center', transform=ax.transAxes, fontsize=12)
+            ax.set_title('Accessibility Correlation', fontsize=11, fontweight='bold')
+            return
+        
+        bars = ax.bar(method_names, correlations, color=colors, alpha=0.8, edgecolor='black')
+        
+        # Color bars by direction (negative = expected equity pattern)
+        for bar, corr in zip(bars, correlations):
+            if corr < -0.3:
+                bar.set_edgecolor('green')
+                bar.set_linewidth(2)
+        
+        ax.set_ylabel('Correlation (r)', fontsize=10)
+        ax.set_title('Accessibility-SVI Correlation\n(Negative = Equity Pattern)', 
+                    fontsize=11, fontweight='bold')
+        ax.axhline(0, color='black', linewidth=0.5)
+        ax.axhline(-0.3, color='green', linestyle='--', alpha=0.5, label='Strong equity threshold')
+        ax.grid(True, alpha=0.3, axis='y')
+    
+    def _plot_gnn_vs_baseline(self, ax, methods: Dict, baseline: str = 'IDW_p2.0'):
+        """Scatter plot comparing GNN vs baseline predictions."""
+        
+        if 'GNN' not in methods or baseline not in methods:
+            ax.text(0.5, 0.5, f'Missing GNN or {baseline}', 
+                   ha='center', va='center', transform=ax.transAxes)
+            return
+        
+        gnn_preds = methods['GNN']['predictions']
+        baseline_preds = methods[baseline]['predictions']
+        
+        ax.scatter(baseline_preds, gnn_preds, alpha=0.5, s=20, 
+                  color=self.colors['gnn'], edgecolors='none')
+        
+        # Diagonal line
+        lims = [
+            min(min(baseline_preds), min(gnn_preds)),
+            max(max(baseline_preds), max(gnn_preds))
+        ]
+        ax.plot(lims, lims, 'k--', alpha=0.5, label='1:1 line')
+        
+        # Correlation
+        if len(gnn_preds) > 2:
+            corr = np.corrcoef(baseline_preds, gnn_preds)[0, 1]
+            ax.text(0.05, 0.95, f'r = {corr:.3f}', transform=ax.transAxes,
+                   fontsize=10, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        ax.set_xlabel(f'{baseline} Predictions', fontsize=10)
+        ax.set_ylabel('GNN Predictions', fontsize=10)
+        ax.set_title(f'GNN vs {baseline}', fontsize=11, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+    
+    def _plot_prediction_summary(self, ax, methods: Dict, results: Dict):
+        """Summary statistics panel."""
+        
+        tract_svi = results['tract_svi']
+        gnn = methods.get('GNN', {})
+        
+        summary_text = f"""Disaggregation Summary
 {'='*30}
 
 Target Tract SVI: {tract_svi:.4f}
 Addresses: {results['n_addresses']:,}
 
 GNN Disaggregation:
- Mean: {gnn.get('mean', 0):.4f}
- Std: {gnn.get('std', 0):.4f}
- Range: {gnn.get('range', 0):.4f}
- Constraint Error: {gnn.get('constraint_error_pct', 0):.2f}%
+  Mean: {gnn.get('mean', 0):.4f}
+  Std:  {gnn.get('std', 0):.4f}
+  Range: {gnn.get('range', 0):.4f}
+  Constraint Error: {gnn.get('constraint_error_pct', 0):.2f}%
 
 Comparison:
- Variation vs Naive: {gnn.get('std', 0) - methods.get('Naive_Uniform', {}).get('std', 0):+.4f}
- Variation vs IDW: {gnn.get('std', 0) - methods.get('IDW_p2.0', methods.get('IDW_p2', {})).get('std', 0):+.4f}
+  Variation vs Naive: {gnn.get('std', 0) - methods.get('Naive_Uniform', {}).get('std', 0):+.4f}
+  Variation vs IDW: {gnn.get('std', 0) - methods.get('IDW_p2.0', methods.get('IDW_p2', {})).get('std', 0):+.4f}
 """
- 
- ax.text(0.05, 0.95, summary_text, transform=ax.transAxes,
- fontsize=10, verticalalignment='top', fontfamily='monospace',
- bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9))
- ax.axis('off')
- ax.set_title('Summary Statistics', fontsize=11, fontweight='bold')
- 
- def _plot_metrics_table(self, ax, results: Dict):
- """Create metrics comparison table."""
- 
- methods = results['methods']
- 
- # Build table data
- columns = ['Method', 'Mean', 'Std', 'Range', 'Err %', 'Access r']
- data = []
- 
- for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
- if name in methods:
- m = methods[name]
- acc_r = f"{m['accessibility_correlation']:.3f}" if m['accessibility_correlation'] else "N/A"
- data.append([
- name,
- f"{m['mean']:.4f}",
- f"{m['std']:.4f}",
- f"{m['range']:.4f}",
- f"{m['constraint_error_pct']:.2f}",
- acc_r
- ])
- 
- ax.axis('off')
- 
- # Create table
- table = ax.table(
- cellText=data,
- colLabels=columns,
- loc='center',
- cellLoc='center',
- colColours=['lightgray'] * len(columns)
- )
- 
- table.auto_set_font_size(False)
- table.set_fontsize(10)
- table.scale(1.2, 1.5)
- 
- # Highlight GNN row
- for i, cell in enumerate(table.get_celld().values()):
- if i < len(columns): # Header row
- cell.set_text_props(fontweight='bold')
- 
- ax.set_title('Complete Metrics Comparison', fontsize=12, fontweight='bold', pad=20)
- 
- def _get_method_color(self, method_name: str) -> str:
- """Get color for method."""
- if 'GNN' in method_name:
- return self.colors['gnn']
- elif 'IDW' in method_name:
- return self.colors['idw']
- elif 'Kriging' in method_name:
- return self.colors['kriging']
- elif 'Naive' in method_name:
- return self.colors['naive']
- return 'gray'
- 
- def plot_spatial_disaggregation(self, 
- address_gdf,
- predictions: np.ndarray,
- tract_svi: float,
- title: str = "GNN Disaggregation",
- output_path: str = None) -> plt.Figure:
- """
- Create spatial map of disaggregated predictions.
- 
- Args:
- address_gdf: GeoDataFrame with address points
- predictions: Array of predicted SVI values
- tract_svi: Known tract SVI
- title: Plot title
- output_path: Path to save figure
- """
- fig, axes = plt.subplots(1, 2, figsize=(14, 6))
- 
- # Extract coordinates
- x = address_gdf.geometry.x.values
- y = address_gdf.geometry.y.values
- 
- # Left: Predictions
- ax1 = axes[0]
- scatter = ax1.scatter(x, y, c=predictions, cmap='RdYlGn_r', 
- s=30, alpha=0.7, edgecolors='none')
- plt.colorbar(scatter, ax=ax1, label='Predicted SVI')
- ax1.set_xlabel('Longitude')
- ax1.set_ylabel('Latitude')
- ax1.set_title(f'{title}\n(Tract SVI: {tract_svi:.4f})', fontweight='bold')
- 
- # Right: Deviation from tract mean
- ax2 = axes[1]
- deviations = predictions - tract_svi
- max_dev = max(abs(deviations.min()), abs(deviations.max()))
- scatter2 = ax2.scatter(x, y, c=deviations, cmap='coolwarm',
- vmin=-max_dev, vmax=max_dev,
- s=30, alpha=0.7, edgecolors='none')
- plt.colorbar(scatter2, ax=ax2, label='Deviation from Tract SVI')
- ax2.set_xlabel('Longitude')
- ax2.set_ylabel('Latitude')
- ax2.set_title('Spatial Variation Pattern\n(Blue=Lower, Red=Higher)', fontweight='bold')
- 
- plt.tight_layout()
- 
- if output_path:
- plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
- print(f"Saved: {output_path}")
- 
- return fig
+        
+        ax.text(0.05, 0.95, summary_text, transform=ax.transAxes,
+               fontsize=10, verticalalignment='top', fontfamily='monospace',
+               bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9))
+        ax.axis('off')
+        ax.set_title('Summary Statistics', fontsize=11, fontweight='bold')
+    
+    def _plot_metrics_table(self, ax, results: Dict):
+        """Create metrics comparison table."""
+        
+        methods = results['methods']
+        
+        # Build table data
+        columns = ['Method', 'Mean', 'Std', 'Range', 'Err %', 'Access r']
+        data = []
+        
+        for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
+            if name in methods:
+                m = methods[name]
+                acc_r = f"{m['accessibility_correlation']:.3f}" if m['accessibility_correlation'] else "N/A"
+                data.append([
+                    name,
+                    f"{m['mean']:.4f}",
+                    f"{m['std']:.4f}",
+                    f"{m['range']:.4f}",
+                    f"{m['constraint_error_pct']:.2f}",
+                    acc_r
+                ])
+        
+        ax.axis('off')
+        
+        # Create table
+        table = ax.table(
+            cellText=data,
+            colLabels=columns,
+            loc='center',
+            cellLoc='center',
+            colColours=['lightgray'] * len(columns)
+        )
+        
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1.2, 1.5)
+        
+        # Highlight GNN row
+        for i, cell in enumerate(table.get_celld().values()):
+            if i < len(columns):  # Header row
+                cell.set_text_props(fontweight='bold')
+        
+        ax.set_title('Complete Metrics Comparison', fontsize=12, fontweight='bold', pad=20)
+    
+    def _get_method_color(self, method_name: str) -> str:
+        """Get color for method."""
+        if 'GNN' in method_name:
+            return self.colors['gnn']
+        elif 'IDW' in method_name:
+            return self.colors['idw']
+        elif 'Kriging' in method_name:
+            return self.colors['kriging']
+        elif 'Naive' in method_name:
+            return self.colors['naive']
+        return 'gray'
+    
+    def plot_spatial_disaggregation(self, 
+                                    address_gdf,
+                                    predictions: np.ndarray,
+                                    tract_svi: float,
+                                    title: str = "GNN Disaggregation",
+                                    output_path: str = None) -> plt.Figure:
+        """
+        Create spatial map of disaggregated predictions.
+        
+        Args:
+            address_gdf: GeoDataFrame with address points
+            predictions: Array of predicted SVI values
+            tract_svi: Known tract SVI
+            title: Plot title
+            output_path: Path to save figure
+        """
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        
+        # Extract coordinates
+        x = address_gdf.geometry.x.values
+        y = address_gdf.geometry.y.values
+        
+        # Left: Predictions
+        ax1 = axes[0]
+        scatter = ax1.scatter(x, y, c=predictions, cmap='RdYlGn_r', 
+                             s=30, alpha=0.7, edgecolors='none')
+        plt.colorbar(scatter, ax=ax1, label='Predicted SVI')
+        ax1.set_xlabel('Longitude')
+        ax1.set_ylabel('Latitude')
+        ax1.set_title(f'{title}\n(Tract SVI: {tract_svi:.4f})', fontweight='bold')
+        
+        # Right: Deviation from tract mean
+        ax2 = axes[1]
+        deviations = predictions - tract_svi
+        max_dev = max(abs(deviations.min()), abs(deviations.max()))
+        scatter2 = ax2.scatter(x, y, c=deviations, cmap='coolwarm',
+                              vmin=-max_dev, vmax=max_dev,
+                              s=30, alpha=0.7, edgecolors='none')
+        plt.colorbar(scatter2, ax=ax2, label='Deviation from Tract SVI')
+        ax2.set_xlabel('Longitude')
+        ax2.set_ylabel('Latitude')
+        ax2.set_title('Spatial Variation Pattern\n(Blue=Lower, Red=Higher)', fontweight='bold')
+        
+        plt.tight_layout()
+        
+        if output_path:
+            plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+            print(f"Saved: {output_path}")
+        
+        return fig
 
 
 def create_disaggregation_visualizations(comparison_results: Dict,
- address_gdf = None,
- accessibility_features: np.ndarray = None,
- output_dir: str = './output') -> Dict:
- """
- Create all disaggregation visualizations.
- 
- Args:
- comparison_results: Output from DisaggregationComparison
- address_gdf: Optional address GeoDataFrame for spatial plots
- accessibility_features: Optional accessibility features
- output_dir: Output directory for plots
- 
- Returns:
- Dict of figure paths
- """
- import os
- os.makedirs(output_dir, exist_ok=True)
- 
- viz = DisaggregationVisualizer()
- outputs = {}
- 
- # Main dashboard
- dashboard_path = os.path.join(output_dir, 'disaggregation_comparison.png')
- viz.plot_disaggregation_dashboard(
- comparison_results,
- accessibility_features=accessibility_features,
- output_path=dashboard_path
- )
- outputs['dashboard'] = dashboard_path
- 
- # Spatial map (if address data available)
- if address_gdf is not None and 'GNN' in comparison_results['methods']:
- spatial_path = os.path.join(output_dir, 'spatial_disaggregation.png')
- gnn_preds = comparison_results['methods']['GNN']['predictions']
- tract_svi = comparison_results['tract_svi']
- 
- viz.plot_spatial_disaggregation(
- address_gdf=address_gdf,
- predictions=gnn_preds,
- tract_svi=tract_svi,
- output_path=spatial_path
- )
- outputs['spatial'] = spatial_path
- 
- print(f"\nVisualizations saved to {output_dir}")
- return outputs
+                                         address_gdf = None,
+                                         accessibility_features: np.ndarray = None,
+                                         output_dir: str = './output') -> Dict:
+    """
+    Create all disaggregation visualizations.
+    
+    Args:
+        comparison_results: Output from DisaggregationComparison
+        address_gdf: Optional address GeoDataFrame for spatial plots
+        accessibility_features: Optional accessibility features
+        output_dir: Output directory for plots
+        
+    Returns:
+        Dict of figure paths
+    """
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+    
+    viz = DisaggregationVisualizer()
+    outputs = {}
+    
+    # Main dashboard
+    dashboard_path = os.path.join(output_dir, 'disaggregation_comparison.png')
+    viz.plot_disaggregation_dashboard(
+        comparison_results,
+        accessibility_features=accessibility_features,
+        output_path=dashboard_path
+    )
+    outputs['dashboard'] = dashboard_path
+    
+    # Spatial map (if address data available)
+    if address_gdf is not None and 'GNN' in comparison_results['methods']:
+        spatial_path = os.path.join(output_dir, 'spatial_disaggregation.png')
+        gnn_preds = comparison_results['methods']['GNN']['predictions']
+        tract_svi = comparison_results['tract_svi']
+        
+        viz.plot_spatial_disaggregation(
+            address_gdf=address_gdf,
+            predictions=gnn_preds,
+            tract_svi=tract_svi,
+            output_path=spatial_path
+        )
+        outputs['spatial'] = spatial_path
+    
+    print(f"\nVisualizations saved to {output_dir}")
+    return outputs

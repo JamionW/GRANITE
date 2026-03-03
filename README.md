@@ -82,17 +82,17 @@ granite --fips 47065010100 --skip-baselines
 
 ```
 granite/
- data/ # data loading, graph construction
- disaggregation/ # main pipeline orchestration
- evaluation/ # ablation, baselines, spatial diagnostics
- features/ # modal accessibility computation
- models/ # GNN architecture, mixture of experts
- routing/ # OSRM interface
- scripts/ # CLI entry points
- validation/ # block group validation
- visualization/ # research plots
-config.yaml # system configuration
-docs/ # feature reference, architecture notes
+    data/                   # data loading, graph construction
+    disaggregation/         # main pipeline orchestration
+    evaluation/             # ablation, baselines, spatial diagnostics
+    features/               # modal accessibility computation
+    models/                 # GNN architecture, mixture of experts
+    routing/                # OSRM interface
+    scripts/                # CLI entry points
+    validation/             # block group validation
+    visualization/          # research plots
+config.yaml                 # system configuration
+docs/                       # feature reference, architecture notes
 ```
 
 ## Configuration

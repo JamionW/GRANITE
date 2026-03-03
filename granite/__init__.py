@@ -1,34 +1,27 @@
 """
-GRANITE: Graph-Refined Accessibility Network for Integrated Transit Equity
-==========================================================================
+GRANITE: Graph-Refined Accessibility Network for Transportation Equity
+=====================================================================
 
-A framework for accessibility pattern learning using Graph Neural Networks
-for transportation equity and social vulnerability analysis.
+GNN-based spatial disaggregation of Social Vulnerability Index from
+census tract level to address-level resolution using multi-modal
+transportation accessibility features.
 
 Author: Jamion Williams
-Date: September 2025
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Jamion Williams"
 
-# Import main components
 from .data import loaders
 from .models import gnn
 from .disaggregation import pipeline
-from .visualization import plots
-
-# New disaggregation modules
 from .evaluation import baselines
 from .visualization import plots
 
-# Package metadata
 __all__ = [
     "loaders",
-    "gnn", 
-    "interface",
+    "gnn",
     "pipeline",
+    "baselines",
     "plots",
-    "disaggregation_baselines",
-    "disaggregation_plots"
 ]

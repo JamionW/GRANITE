@@ -1,48 +1,34 @@
-# GRANITE Framework Requirements
+# GRANITE: core dependencies
 
-# Core dependencies
+# scientific computing
 numpy>=1.21.0
 pandas>=1.3.0
-geopandas>=0.10.0
+scipy>=1.9.0
 scikit-learn>=1.0.0
-scipy>=1.9.0        
-geopy>=2.3.
 
-# Requirements for Baseline Comparisons
-numpy>=1.20.0
-pandas>=1.3.0
+# geospatial
 geopandas>=0.10.0
-scipy>=1.7.0
-scikit-learn>=1.0.0
-matplotlib>=3.5.0
-shapely>=1.8.0
-
-# For spatial statistics (Moran's I)
-libpysal>=4.6.0
-esda>=2.4.0
-
-# Geospatial
 fiona>=1.8.0
 shapely>=1.8.0
 pyproj>=3.0.0
+geopy>=2.3.0
 
-# Visualization
-matplotlib>=3.5.0
-seaborn>=0.11.0
+# spatial statistics
+libpysal>=4.6.0
+esda>=2.4.0
 
-# Deep Learning
+# deep learning
 torch>=1.10.0
 torch-geometric>=2.0.0
 
-# R interface
-rpy2>=3.4.0
+# visualization
+matplotlib>=3.5.0
+seaborn>=0.11.0
 
-# Network analysis
+# network analysis
 networkx>=2.6.0
 
-# Progress bars
+# utilities
 tqdm>=4.62.0
-
-# Optional but recommended
-jupyter>=1.0.0
-ipykernel>=6.0.0
+requests>=2.25.0
+PyYAML>=5.4.0

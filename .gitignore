@@ -123,6 +123,16 @@ validation_results.csv
 granite_visualization.png
 granite_model.pth
 
+# Cache directory
+granite_cache/
+
+# Large raster data
+*.tif
+*.tiff
+
+# Inline diagnostics and one-off scripts
+granite_inline_diagnostics.py
+
 # But keep example data
 !data/example/
 !data/README.md

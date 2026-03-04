@@ -1,6 +1,6 @@
 # GRANITE: Graph-Refined Accessibility Network for Transportation Equity
 
-GNN-based spatial disaggregation of tract-level Social Vulnerability Index (SVI) to address-level resolution using multi-modal transportation accessibility features.
+This project attempts the GNN-driven spatial disaggregation of the CDC's tract-level Social Vulnerability Index (SVI) to an address-level resolution using multi-modal transportation accessibility features.
 
 ## Research Question
 
@@ -10,9 +10,9 @@ Can Graph Neural Networks leverage transportation network topology and multi-mod
 
 GRANITE accepts known tract-level SVI values as hard constraints and learns how vulnerability distributes spatially within each tract based on accessibility patterns. The system computes real travel times via OSRM routing to employment, healthcare, and grocery destinations, then uses graph convolution over a road-network-derived spatial graph to produce address-level SVI estimates.
 
-The architecture treats disaggregation as an allocation problem: the tract mean is fixed, and the GNN learns the within-tract distribution.
+Here, we treat disaggregation as an allocation problem: the tract mean is fixed, and the GNN learns the within-tract distribution.
 
-## Study Area
+## Current Study Area
 
 Hamilton County, Tennessee (FIPS 47065): 87 census tracts, approximately 100,000 addresses.
 
@@ -32,7 +32,7 @@ Hamilton County, Tennessee (FIPS 47065): 87 census tracts, approximately 100,000
 - **15 modal features** (5 per destination type). Cross-mode comparisons including average time, time standard deviation, access density, equity gap, and car advantage.
 - **9 socioeconomic controls.** Tract-level ACS variables: no vehicle, poverty, unemployment, no high school diploma, age 65+, age 17 and under, disability, single parent, minority.
 
-See `docs/FEATURES.md` for the complete feature reference.
+See `docs/FEATURES.md` for the complete feature reference... there are important limitations!
 
 ## Architecture
 
@@ -56,6 +56,8 @@ pip install -e .
 
 # OSRM setup (required for accessibility computation)
 # driving profile on port 5000, walking profile on port 5001
+#
+# Alternatively, you can run setup_osrm.sh and then start_osrm.sh to setup and start the server.
 docker run -t -i -p 5000:5000 osrm/osrm-backend osrm-routed --algorithm mld /data/tennessee-latest.osrm
 docker run -t -i -p 5001:5001 osrm/osrm-backend osrm-routed --algorithm mld /data/tennessee-latest-foot.osrm
 ```

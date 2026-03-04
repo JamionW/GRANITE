@@ -3,7 +3,7 @@ set -e
 
 echo "=== OSRM Driving Profile Processing ==="
 echo ""
-echo "This script will create tennessee-latest.osrm (driving profile)"
+echo "This script will create tennessee-car.osrm (driving profile)"
 echo "with all required auxiliary files for car routes."
 echo ""
 
@@ -55,10 +55,19 @@ docker run -t -v "$OSRM_DATA_DIR:/data" \
 echo " Customize complete"
 echo ""
 
+echo " Renaming to tennessee-car.osrm..."
+cd "$OSRM_DATA_DIR"
+for file in tennessee-latest.osrm*; do
+    if [ -f "$file" ]; then
+        new_name=$(echo "$file" | sed 's/tennessee-latest/tennessee-car/')
+        mv "$file" "$new_name"
+    fi
+done
+
 echo " All processing complete!"
 echo ""
 echo "Created files:"
-ls -lh "$OSRM_DATA_DIR"/tennessee-latest.osrm* | head -10
+ls -lh "$OSRM_DATA_DIR"/tennessee-car.osrm* | head -10
 echo "..."
 echo ""
 echo "You can now start OSRM with:"

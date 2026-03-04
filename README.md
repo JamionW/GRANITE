@@ -56,10 +56,17 @@ pip install -e .
 
 # OSRM setup (required for accessibility computation)
 # driving profile on port 5000, walking profile on port 5001
-#
-# Alternatively, you can run setup_osrm.sh and then start_osrm.sh to setup and start the server.
+bash granite/scripts/setup_osrm.sh
+bash granite/scripts/process_driving_profile.sh
+bash granite/scripts/process_foot_profile.sh
+
+# Alternatively:
 docker run -t -i -p 5000:5000 osrm/osrm-backend osrm-routed --algorithm mld /data/tennessee-latest.osrm
 docker run -t -i -p 5001:5001 osrm/osrm-backend osrm-routed --algorithm mld /data/tennessee-latest-foot.osrm
+
+# Finally, run start_osrm.sh to setup and start the server.
+# Be sure to add this to your devcontainer.json so that it runs at startup!
+bash granite/scripts/start_osrm.sh
 ```
 
 **Requirements:** Python 3.8+, PyTorch, PyTorch Geometric, GeoPandas. See `requirements.txt` for full dependencies.

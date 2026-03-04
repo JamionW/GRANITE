@@ -38,7 +38,7 @@ check_osrm_file() {
 
 echo ""
 echo "Checking OSRM data files..."
-check_osrm_file "$OSRM_DATA_DIR/tennessee-latest.osrm" "Driving" || exit 1
+check_osrm_file "$OSRM_DATA_DIR/tennessee-car.osrm" "Driving" || exit 1
 check_osrm_file "$OSRM_DATA_DIR/tennessee-foot.osrm" "Walking" || exit 1
 
 echo ""
@@ -100,14 +100,14 @@ wait_for_osrm() {
     return 1
 }
 
-# Start driving server with driving profile (tennessee-latest.osrm)
+# Start driving server with driving profile (tennessee-car.osrm)
 echo "Starting OSRM driving server on port 5000..."
 DRIVING_ID=$(docker run -d \
     --name osrm-driving \
     -p 5000:5000 \
     -v "$OSRM_DATA_DIR:/data:ro" \
     osrm/osrm-backend \
-    osrm-routed --algorithm mld /data/tennessee-latest.osrm)
+    osrm-routed --algorithm mld /data/tennessee-car.osrm)
 
 echo "  Container ID: ${DRIVING_ID:0:12}"
 
@@ -136,7 +136,7 @@ echo ""
 echo " Both OSRM servers started successfully!"
 echo ""
 echo "Servers:"
-echo "  - Driving: http://localhost:5000 (using tennessee-latest.osrm)"
+echo "  - Driving: http://localhost:5000 (using tennessee-car.osrm)"
 echo "  - Walking: http://localhost:5001 (using tennessee-foot.osrm)"
 echo ""
 echo "Test with:"

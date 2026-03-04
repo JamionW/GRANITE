@@ -26,6 +26,15 @@ docker run -t -v $(pwd):/data osrm/osrm-backend \
 docker run -t -v $(pwd):/data osrm/osrm-backend \
     osrm-customize /data/tennessee-latest.osrm
 
-echo " OSRM setup complete!"
+# Rename to tennessee-car.osrm so foot profile can't overwrite
+for file in tennessee-latest.osrm*; do
+    if [ -f "$file" ]; then
+        new_name=$(echo "$file" | sed 's/tennessee-latest/tennessee-car/')
+        mv "$file" "$new_name"
+    fi
+done
+
+echo " OSRM driving setup complete!"
 echo ""
-echo "To start servers, run: bash scripts/start_osrm.sh"
+echo "Next: bash granite/scripts/process_foot_profile.sh"
+echo "Then: bash granite/scripts/start_osrm.sh"

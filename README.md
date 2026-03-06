@@ -60,9 +60,8 @@ bash granite/scripts/setup_osrm.sh
 bash granite/scripts/process_driving_profile.sh
 bash granite/scripts/process_foot_profile.sh
 
-# Alternatively:
-docker run -t -i -p 5000:5000 osrm/osrm-backend osrm-routed --algorithm mld /data/tennessee-latest.osrm
-docker run -t -i -p 5001:5001 osrm/osrm-backend osrm-routed --algorithm mld /data/tennessee-latest-foot.osrm
+# Fetch LEHD, Healthcare, and Grocery data
+bash granite/scripts/setup_data.sh
 
 # Finally, run start_osrm.sh to setup and start the server.
 # Be sure to add this to your devcontainer.json so that it runs at startup!
@@ -75,16 +74,16 @@ bash granite/scripts/start_osrm.sh
 
 ```bash
 # single-tract analysis
-granite --fips 47065010100 --verbose
+granite --fips 47065000600 --verbose
 
 # multi-tract (target + neighbors for training diversity)
-granite --fips 47065010100 --neighbor-tracts 3 --verbose
+granite --fips 47065000600 --neighbor-tracts 3 --verbose
 
 # custom epochs and output
-granite --fips 47065010100 --epochs 200 --output ./results
+granite --fips 47065000600 --epochs 200 --output ./results
 
 # skip baseline comparisons for faster iteration
-granite --fips 47065010100 --skip-baselines
+granite --fips 47065000600 --skip-baselines
 ```
 
 ## Project Structure
@@ -102,7 +101,10 @@ granite/
     visualization/          # research plots
 config.yaml                 # system configuration
 docs/                       # feature reference, architecture notes
+output/                     # all visualizations and raw data output by the model
 ```
+
+Note: the tract inventory is stored in docs/
 
 ## Configuration
 

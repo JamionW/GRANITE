@@ -3558,7 +3558,7 @@ ACCESSIBILITY-VULNERABILITY
         tract_svi = results['tract_info']['RPL_THEMES']
 
         # Use full training data if multi-tract, otherwise use target tract data
-        if 'full_accessibility_features' in results:
+        if results.get('full_accessibility_features') is not None:
             # Multi-tract mode: use all addresses from training
             accessibility_features = results['full_accessibility_features']
         else:

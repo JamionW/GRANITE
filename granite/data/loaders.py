@@ -564,6 +564,9 @@ class DataLoader:
                             except Exception as e:
                                 self._log(f"WARNING: Could not join building features from {csv_path}: {e}")
 
+                        if 'bldg_footprint_m2' not in addresses_gdf.columns and 'log_appvalue' not in addresses_gdf.columns:
+                            self._log("WARN: no address-level features were joined; check the 'hash' column and CSV path")
+
                         addresses_gdf = addresses_gdf[keep_cols]
                         self._log(f"Loaded {len(addresses_gdf)} real addresses from {address_file}")
                         break

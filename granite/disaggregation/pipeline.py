@@ -30,7 +30,8 @@ from ..evaluation.baselines import (
 )
 from granite.models.mixture_of_experts import create_moe_model, MixtureOfExpertsTrainer
 
-PROPTYPE_VOCAB = ['SINGLE FAM', 'VACANT LOT', 'RESIDENTIAL', 'CONDO', 'DUPLEX']
+PROPTYPE_VOCAB = [22.0, 40.0, 8.0, 32.0, 11.0]
+PROPTYPE_LABELS = {22.0: 'residential', 40.0: 'apartment_10plus', 8.0: 'commercial', 32.0: 'rental_40pct', 11.0: 'cha_housing'}
 
 
 class GRANITEPipeline:
@@ -709,12 +710,12 @@ class GRANITEPipeline:
 
         if 'PROPTYPE' in available:
             # one-hot encode hardcoded property type vocabulary; remainder = all zeros
-            proptype = addresses['PROPTYPE'].astype(str).str.strip()
-            top5 = [pt for pt in PROPTYPE_VOCAB if pt in proptype.values]
+            proptype_num = pd.to_numeric(addresses['PROPTYPE'], errors='coerce')
+            top5 = [pt for pt in PROPTYPE_VOCAB if pt in proptype_num.values]
             for pt in top5:
-                col_vals = (proptype == pt).astype(float).values
+                col_vals = (proptype_num == pt).astype(float).values
                 features.append(col_vals.reshape(-1, 1))
-                names.append(f'proptype_{pt.lower().replace(" ", "_")}')
+                names.append(f'proptype_{PROPTYPE_LABELS[pt]}')
 
         arr = np.hstack(features) if features else np.zeros((len(addresses), 0))
         self._building_feature_names = names

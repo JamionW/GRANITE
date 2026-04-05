@@ -31,6 +31,8 @@ def main():
         sys.exit(1)
 
     addresses = gpd.read_file(addr_path).to_crs(epsg=4326)
+    if "hash" not in addresses.columns:
+        print("WARNING: no 'hash' column in address data")
     print(f"Loaded {len(addresses)} addresses")
 
     # 1. Join MS Building Footprints (nearest building to each address)
@@ -100,15 +102,60 @@ def main():
                 addresses[key] = nlcd[key]
         print(f"  Added NLCD columns")
 
+    # 5. Join Hamilton County parcel data (spatial: address point in parcel polygon)
+    parcel_path = os.path.join(REPO_ROOT, "data", "raw", "parcels", "parcels.shp")
+    if os.path.exists(parcel_path):
+        print("Joining Hamilton County parcel data...")
+        parcels = gpd.read_file(parcel_path)
+        parcels = parcels[parcels["APPVALUE"] > 0].copy()
+        parcels = parcels.to_crs(epsg=4326)
+
+        keep_parcel = [
+            "geometry", "APPVALUE", "ASSVALUE", "LANDVALUE", "BUILDVALUE",
+            "CALCACRES", "LUCODE", "PROPTYPE", "SALE1DATE", "SALE1CONSD",
+        ]
+        available_pcols = [c for c in keep_parcel if c in parcels.columns]
+        parcels = parcels[available_pcols]
+
+        joined = gpd.sjoin(
+            addresses[["geometry"]],
+            parcels,
+            how="left",
+            predicate="within",
+        )
+        joined = joined[~joined.index.duplicated(keep="first")]
+
+        for col in available_pcols:
+            if col == "geometry":
+                continue
+            addresses[col] = joined[col].reindex(addresses.index).values
+
+        matched = addresses["APPVALUE"].notna().sum()
+        print(f"  Matched: {matched}/{len(addresses)}")
+
+        # derived features
+        addresses["log_appvalue"] = np.log1p(
+            pd.to_numeric(addresses["APPVALUE"], errors="coerce").fillna(0)
+        )
+        addresses["build_to_land_ratio"] = (
+            pd.to_numeric(addresses["BUILDVALUE"], errors="coerce").fillna(0)
+            / pd.to_numeric(addresses["LANDVALUE"], errors="coerce").replace(0, np.nan)
+        )
+        addresses["log_acres"] = np.log1p(
+            pd.to_numeric(addresses["CALCACRES"], errors="coerce").fillna(0)
+        )
+    else:
+        print(f"Parcel shapefile not found at {parcel_path}, skipping")
+
     # Save combined features
     out_path = os.path.join(FEATURES_DIR, "combined_address_features.csv")
-    # Drop geometry for CSV output, keep lat/lon
     addresses["lon"] = addresses.geometry.x
     addresses["lat"] = addresses.geometry.y
-    addresses.drop(columns=["geometry"]).to_csv(out_path, index=False)
+    out_df = addresses.drop(columns=["geometry"])
+    out_df.to_csv(out_path, index=False)
     print(f"\nSaved combined features: {out_path}")
-    print(f"Columns: {list(addresses.columns)}")
-    print(f"Shape: {addresses.shape}")
+    print(f"Columns: {list(out_df.columns)}")
+    print(f"Shape: {out_df.shape}")
 
 
 if __name__ == "__main__":

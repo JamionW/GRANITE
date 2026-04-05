@@ -628,14 +628,104 @@ class GRANITEPipeline:
                 'raw_predictions': None
             }
     
+    def _extract_building_features(self, addresses):
+        """Extract building and flood features from address GeoDataFrame columns.
+
+        Returns (array of shape (n, k), list of k feature names).
+        Returns empty array if building columns are absent.
+        """
+        expected = [
+            'bldg_footprint_m2', 'bldg_vertex_count', 'in_sfha', 'osm_building_type',
+            'log_appvalue', 'build_to_land_ratio', 'log_acres', 'LUCODE', 'PROPTYPE',
+        ]
+        available = [c for c in expected if c in addresses.columns]
+
+        if not available:
+            self._building_feature_names = []
+            return np.zeros((len(addresses), 0)), []
+
+        features = []
+        names = []
+
+        if 'bldg_footprint_m2' in available:
+            vals = pd.to_numeric(addresses['bldg_footprint_m2'], errors='coerce').fillna(0.0)
+            features.append(np.log1p(vals.values).reshape(-1, 1))
+            names.append('log_bldg_footprint_m2')
+
+        if 'bldg_vertex_count' in available:
+            vals = pd.to_numeric(addresses['bldg_vertex_count'], errors='coerce')
+            median_val = float(vals.median()) if vals.notna().any() else 6.0
+            vals = vals.fillna(median_val)
+            features.append(vals.values.reshape(-1, 1))
+            names.append('bldg_vertex_count')
+
+        if 'in_sfha' in available:
+            vals = pd.to_numeric(addresses['in_sfha'], errors='coerce').fillna(0.0)
+            features.append(vals.values.reshape(-1, 1))
+            names.append('in_sfha')
+
+        if 'osm_building_type' in available:
+            residential_types = {
+                'house', 'residential', 'apartments', 'detached',
+                'semidetached_house', 'terrace', 'dormitory'
+            }
+            is_res = addresses['osm_building_type'].isin(residential_types).astype(float).values
+            features.append(is_res.reshape(-1, 1))
+            names.append('is_residential')
+
+        # parcel features
+        if 'log_appvalue' in available:
+            vals = pd.to_numeric(addresses['log_appvalue'], errors='coerce').fillna(0.0)
+            features.append(vals.values.reshape(-1, 1))
+            names.append('log_appvalue')
+
+        if 'build_to_land_ratio' in available:
+            vals = pd.to_numeric(addresses['build_to_land_ratio'], errors='coerce')
+            median_val = float(vals.median()) if vals.notna().any() else 1.0
+            vals = vals.fillna(median_val)
+            features.append(vals.values.reshape(-1, 1))
+            names.append('build_to_land_ratio')
+
+        if 'log_acres' in available:
+            vals = pd.to_numeric(addresses['log_acres'], errors='coerce').fillna(0.0)
+            features.append(vals.values.reshape(-1, 1))
+            names.append('log_acres')
+
+        if 'LUCODE' in available:
+            # bin numeric land use codes into 4 categories and one-hot encode
+            # hamilton county: ~100-199 residential, 200-299 commercial, 300-399 industrial, other
+            lucode_num = pd.to_numeric(addresses['LUCODE'], errors='coerce')
+            bins = {
+                'lucode_residential': ((lucode_num >= 100) & (lucode_num < 200)).astype(float),
+                'lucode_commercial':  ((lucode_num >= 200) & (lucode_num < 300)).astype(float),
+                'lucode_industrial':  ((lucode_num >= 300) & (lucode_num < 400)).astype(float),
+                'lucode_other':       (~((lucode_num >= 100) & (lucode_num < 400)) | lucode_num.isna()).astype(float),
+            }
+            for col_name, col_vals in bins.items():
+                features.append(col_vals.values.reshape(-1, 1))
+                names.append(col_name)
+
+        if 'PROPTYPE' in available:
+            # one-hot encode top 5 property types by frequency; remainder = all zeros
+            proptype = addresses['PROPTYPE'].astype(str).str.strip()
+            top5 = proptype.value_counts().head(5).index.tolist()
+            for pt in top5:
+                col_vals = (proptype == pt).astype(float).values
+                features.append(col_vals.reshape(-1, 1))
+                names.append(f'proptype_{pt.lower().replace(" ", "_")}')
+
+        arr = np.hstack(features) if features else np.zeros((len(addresses), 0))
+        self._building_feature_names = names
+        return arr, names
+
     def _generate_feature_names(self, n_features):
-        """Generate feature names for all features including base, modal, and socioeconomic"""
-        
+        """Generate feature names for all features including base, modal, socioeconomic, and building"""
+
         feature_names = []
-        
+
         # Base accessibility features: 3 destination types × 10 features = 30
         dest_types = ['employment', 'healthcare', 'grocery']
-        
+
         for dest_type in dest_types:
             feature_names.extend([
                 f'{dest_type}_min_time',
@@ -649,11 +739,11 @@ class GRANITEPipeline:
                 f'{dest_type}_time_range',
                 f'{dest_type}_percentile',
             ])
-        
+
         # Modal features: 15 features
         modal_names = [
             'transit_mode_share',
-            'walk_mode_share', 
+            'walk_mode_share',
             'drive_mode_share',
             'modal_flexibility',
             'transit_employment_access',
@@ -669,12 +759,12 @@ class GRANITEPipeline:
             'modal_equity_index'
         ]
         feature_names.extend(modal_names)
-        
+
         # Socioeconomic features: 9 features
         socioeco_names = [
             'pct_no_vehicle',
             'pct_poverty',
-            'pct_unemployment', 
+            'pct_unemployment',
             'pct_no_diploma',
             'pct_elderly',
             'pct_disabled',
@@ -683,9 +773,12 @@ class GRANITEPipeline:
             'pct_limited_english'
         ]
         feature_names.extend(socioeco_names)
-        
-        # Total should be 30 + 15 + 9 = 54
-        
+
+        # Building and flood features: up to 4 address-level features
+        # (appended by _extract_building_features; count depends on CSV availability)
+        building_names = getattr(self, '_building_feature_names', [])
+        feature_names.extend(building_names)
+
         # Handle edge case where actual features don't match expected
         if len(feature_names) != n_features:
             self._log(f"Generated {len(feature_names)} names but have {n_features} features", level='WARN')
@@ -694,7 +787,7 @@ class GRANITEPipeline:
                 feature_names.append(f'feature_{len(feature_names)}')
             # Or truncate if too many
             feature_names = feature_names[:n_features]
-        
+
         return feature_names
 
     def _compute_accessibility_features(self, addresses, data):
@@ -796,6 +889,10 @@ class GRANITEPipeline:
                 
                 if cached_complete is not None:
                     self._log(f"Retrieved COMPLETE accessibility features from cache ({cached_complete.shape[0]} addresses)")
+                    building_feats, _ = self._extract_building_features(addresses)
+                    if building_feats.shape[1] > 0:
+                        cached_complete = np.column_stack([cached_complete, building_feats])
+                        self._log(f" Appended {building_feats.shape[1]} building features (not cached)")
                     return cached_complete
             
             # CHANGE 2: Calculate features for all destination types with error handling
@@ -1181,14 +1278,22 @@ class GRANITEPipeline:
 
             # Combine
             combined_features = np.column_stack([enhanced_features, socioeco_array])
-            
+
+            # append address-level building and flood features (not cached, fast to recompute)
+            # side-effect: sets self._building_feature_names for _generate_feature_names
+            building_feats, _ = self._extract_building_features(addresses)
+            if building_feats.shape[1] > 0:
+                combined_features = np.column_stack([combined_features, building_feats])
+
             self._log(f"Final feature matrix: {combined_features.shape}")
             self._log(f" Accessibility features: {enhanced_features.shape[1]}")
             self._log(f" Socioeconomic controls: {socioeco_array.shape[1]}")
+            self._log(f" Building/flood features: {building_feats.shape[1]}")
             self._log(f" Breakdown:")
             self._log(f"   Base accessibility: 30")
             self._log(f"   Modal features: 15")
             self._log(f"   Socioeconomic: 9")
+            self._log(f"   Building/flood: {building_feats.shape[1]}")
             self._log(f"   Total: {combined_features.shape[1]}")
 
             if accessibility_computer.cache is not None:

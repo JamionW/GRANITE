@@ -525,7 +525,45 @@ class DataLoader:
                         else:
                             addresses_gdf['full_address'] = 'Address ' + addresses_gdf['address_id'].astype(str)
                             keep_cols.append('full_address')
-                        
+
+                        # join building and flood features from combined_address_features.csv
+                        csv_candidates = [
+                            os.path.join(self.data_dir, 'raw', 'address_features', 'combined_address_features.csv'),
+                            os.path.join(os.path.dirname(__file__), 'raw', 'address_features', 'combined_address_features.csv'),
+                        ]
+                        for csv_path in csv_candidates:
+                            if not os.path.exists(csv_path):
+                                continue
+                            if 'hash' not in addresses_gdf.columns:
+                                self._log(f"WARNING: 'hash' column missing from address data; skipping feature join from {csv_path}")
+                                continue
+                            try:
+                                wanted = ['hash', 'bldg_footprint_m2', 'bldg_vertex_count', 'in_sfha',
+                                    'osm_building_type', 'log_appvalue', 'build_to_land_ratio',
+                                    'log_acres', 'LUCODE', 'PROPTYPE', 'flood_zone',
+                                    'nlcd_land_cover', 'nlcd_impervious_pct', 'nlcd_tree_canopy_pct']
+                                available = pd.read_csv(csv_path, nrows=0).columns.tolist()
+                                usecols = [c for c in wanted if c in available]
+                                missing = [c for c in wanted if c not in available]
+                                if missing:
+                                    self._log(f"NOTE: columns not in CSV (will be skipped): {missing}")
+                                feat_df = pd.read_csv(
+                                    csv_path, dtype={'hash': str},
+                                    usecols=usecols
+                                )
+                                feat_df = feat_df.drop_duplicates('hash').set_index('hash')
+                                addresses_gdf = addresses_gdf.join(feat_df, on='hash')
+                                building_cols = ['bldg_footprint_m2', 'bldg_vertex_count', 'in_sfha',
+                                        'osm_building_type', 'log_appvalue', 'build_to_land_ratio',
+                                        'log_acres', 'LUCODE', 'PROPTYPE', 'flood_zone',
+                                        'nlcd_land_cover', 'nlcd_impervious_pct', 'nlcd_tree_canopy_pct']
+                                keep_cols += building_cols
+                                matched = addresses_gdf['bldg_footprint_m2'].notna().sum()
+                                self._log(f"Joined building features: {matched}/{len(addresses_gdf)} addresses matched")
+                                break
+                            except Exception as e:
+                                self._log(f"WARNING: Could not join building features from {csv_path}: {e}")
+
                         addresses_gdf = addresses_gdf[keep_cols]
                         self._log(f"Loaded {len(addresses_gdf)} real addresses from {address_file}")
                         break

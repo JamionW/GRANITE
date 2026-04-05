@@ -9,6 +9,7 @@ data:
   county_fips: "065"
   census_year: 2020
   address_file: "chattanooga.geojson"
+  address_features_file: "data/raw/address_features/combined_address_features.csv"
   svi_file: "data/raw/SVI_2020_US.csv"
   roads_file: "data/raw/tl_2023_47065_roads.shp"
   census_tracts_file: "data/raw/tl_2020_47_tract.shp"

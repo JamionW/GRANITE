@@ -62,6 +62,7 @@ training:
   constraint_weight: 2.0
   variation_weight: 1.5
   early_stopping_patience: 15
+  apply_post_correction: false
 
 # =============================================================================
 # Mixture of Experts

@@ -30,6 +30,8 @@ from ..evaluation.baselines import (
 )
 from granite.models.mixture_of_experts import create_moe_model, MixtureOfExpertsTrainer
 
+PROPTYPE_VOCAB = ['SINGLE FAM', 'VACANT LOT', 'RESIDENTIAL', 'CONDO', 'DUPLEX']
+
 
 class GRANITEPipeline:
     """
@@ -706,9 +708,9 @@ class GRANITEPipeline:
                 names.append(col_name)
 
         if 'PROPTYPE' in available:
-            # one-hot encode top 5 property types by frequency; remainder = all zeros
+            # one-hot encode hardcoded property type vocabulary; remainder = all zeros
             proptype = addresses['PROPTYPE'].astype(str).str.strip()
-            top5 = proptype.value_counts().head(5).index.tolist()
+            top5 = [pt for pt in PROPTYPE_VOCAB if pt in proptype.values]
             for pt in top5:
                 col_vals = (proptype == pt).astype(float).values
                 features.append(col_vals.reshape(-1, 1))
@@ -740,37 +742,25 @@ class GRANITEPipeline:
                 f'{dest_type}_percentile',
             ])
 
-        # Modal features: 15 features
-        modal_names = [
-            'transit_mode_share',
-            'walk_mode_share',
-            'drive_mode_share',
-            'modal_flexibility',
-            'transit_employment_access',
-            'transit_healthcare_access',
-            'transit_grocery_access',
-            'walk_employment_access',
-            'walk_healthcare_access',
-            'walk_grocery_access',
-            'car_dependency_employment',
-            'car_dependency_healthcare',
-            'car_dependency_grocery',
-            'no_vehicle_accessibility_penalty',
-            'modal_equity_index'
-        ]
+        # Modal features: 15 features (5 per destination, matching compute_modal_features output)
+        modal_names = []
+        for dest_type in ['employment', 'healthcare', 'grocery']:
+            for suffix in ['transit_dependence', 'car_effective_access', 'walk_effective_access',
+                           'modal_access_gap', 'forced_walk_burden']:
+                modal_names.append(f'{dest_type}_{suffix}')
         feature_names.extend(modal_names)
 
-        # Socioeconomic features: 9 features
+        # Socioeconomic features: 9 features (matching get_tract_socioeconomic_features key order)
         socioeco_names = [
             'pct_no_vehicle',
             'pct_poverty',
-            'pct_unemployment',
-            'pct_no_diploma',
-            'pct_elderly',
-            'pct_disabled',
-            'pct_single_parent',
-            'pct_minority',
-            'pct_limited_english'
+            'pct_unemployed',
+            'pct_no_hs_diploma',
+            'pct_uninsured',
+            'pct_mobile_homes',
+            'pct_crowded',
+            'population',
+            'housing_units',
         ]
         feature_names.extend(socioeco_names)
 
@@ -1747,21 +1737,20 @@ class GRANITEPipeline:
         self._log(f" Target: {tract_svi:.4f}")  
         self._log(f" Pre-correction constraint error: {pre_correction_error:.2f}%")
         
-        # # Apply constraint correction
-        adjustment = tract_svi - current_mean
-        adjusted_predictions = predictions + adjustment
-        adjusted_predictions = np.clip(adjusted_predictions, 0.0, 1.0)
-        
-        # Use raw predictions without correction
-        adjusted_predictions = predictions
-        adjustment = 0.0
-        
-        # Verify raw prediction quality
+        apply_correction = self.config.get('training', {}).get('apply_post_correction', False)
+        if apply_correction:
+            adjustment = tract_svi - current_mean
+            adjusted_predictions = predictions + adjustment
+            adjusted_predictions = np.clip(adjusted_predictions, 0.0, 1.0)
+        else:
+            adjusted_predictions = predictions
+            adjustment = 0.0
+
         final_mean = np.mean(adjusted_predictions)
         final_error = abs(final_mean - tract_svi) / tract_svi * 100
-        
-        self._log(f"Raw prediction analysis (NO post-correction):")
-        self._log(f" Raw mean: {final_mean:.4f}")
+
+        self._log(f"Post-correction analysis (apply_post_correction={apply_correction}):")
+        self._log(f" Final mean: {final_mean:.4f}")
         self._log(f" Target: {tract_svi:.4f}")
         self._log(f" Constraint error: {final_error:.2f}%")
         

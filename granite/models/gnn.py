@@ -7,7 +7,7 @@ social vulnerability prediction with constraint enforcement.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, GATConv, BatchNorm
+from torch_geometric.nn import GCNConv, GATConv, SAGEConv, BatchNorm
 from torch_geometric.data import Data
 import numpy as np
 import random
@@ -209,6 +209,155 @@ class AccessibilitySVIGNN(nn.Module):
             'attention_weights': attention_weights,
             'embeddings': x
         }
+
+
+class GraphSAGEAccessibilitySVIGNN(nn.Module):
+    """
+    GraphSAGE variant of AccessibilitySVIGNN.
+
+    Identical to AccessibilitySVIGNN except the GCN+GAT+GCN convolution stack
+    is replaced with three SAGEConv layers.  All other components (context
+    gating, feature encoder, auxiliary heads, constraint logic) are unchanged.
+    """
+    def __init__(self, accessibility_features_dim, context_features_dim=5,
+                 hidden_dim=64, dropout=0.3, seed=42, use_context_gating=True,
+                 use_multitask=True):
+
+        super(GraphSAGEAccessibilitySVIGNN, self).__init__()
+
+        set_random_seed(seed)
+
+        self.accessibility_features_dim = accessibility_features_dim
+        self.context_features_dim = context_features_dim
+        self.hidden_dim = hidden_dim
+        self.dropout_rate = dropout
+        self.use_context_gating = use_context_gating
+
+        if use_context_gating:
+            self.context_gate = ContextGatedFeatureModulator(
+                accessibility_dim=accessibility_features_dim,
+                context_dim=context_features_dim,
+                hidden_dim=32
+            )
+
+        self.use_multitask = use_multitask
+
+        self.input_norm = nn.LayerNorm(accessibility_features_dim)
+
+        self.feature_encoder = nn.Sequential(
+            nn.Linear(accessibility_features_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+        )
+
+        # three SAGEConv layers replacing GCN+GAT+GCN
+        self.spatial_conv1 = SAGEConv(hidden_dim, hidden_dim)
+        self.spatial_norm1 = BatchNorm(hidden_dim)
+
+        self.spatial_conv2 = SAGEConv(hidden_dim, hidden_dim)
+        self.spatial_norm2 = BatchNorm(hidden_dim)
+
+        self.spatial_conv3 = SAGEConv(hidden_dim, hidden_dim // 2)
+        self.spatial_norm3 = BatchNorm(hidden_dim // 2)
+
+        self.accessibility_learner = nn.Sequential(
+            nn.Linear(hidden_dim // 2, hidden_dim // 4),
+            nn.ReLU(),
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(hidden_dim // 4, accessibility_features_dim),
+            nn.ReLU()
+        )
+
+        self.svi_predictor = nn.Sequential(
+            nn.Linear(hidden_dim // 2, hidden_dim // 4),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 4, 1)
+        )
+
+        if use_multitask:
+            self.accessibility_classifier = nn.Sequential(
+                nn.Linear(hidden_dim // 2, hidden_dim // 4),
+                nn.ReLU(),
+                nn.Dropout(dropout * 0.5),
+                nn.Linear(hidden_dim // 4, 5)
+            )
+
+            self.vehicle_predictor = nn.Sequential(
+                nn.Linear(hidden_dim // 2, hidden_dim // 4),
+                nn.ReLU(),
+                nn.Dropout(dropout * 0.5),
+                nn.Linear(hidden_dim // 4, 1)
+            )
+
+            self.employment_classifier = nn.Sequential(
+                nn.Linear(hidden_dim // 2, hidden_dim // 4),
+                nn.ReLU(),
+                nn.Dropout(dropout * 0.5),
+                nn.Linear(hidden_dim // 4, 3)
+            )
+
+        self._initialize_weights(seed)
+        self.dropout = nn.Dropout(dropout)
+
+    def _initialize_weights(self, seed):
+        torch.manual_seed(seed)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_normal_(module.weight, gain=1.0)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+
+    def forward(self, accessibility_features, edge_index, context_features=None,
+                return_accessibility=False, return_all_tasks=False):
+        attention_weights = None
+        if self.use_context_gating and context_features is not None:
+            modulated_features, attention_weights = self.context_gate(
+                accessibility_features, context_features
+            )
+            x = self.input_norm(modulated_features)
+        else:
+            x = self.input_norm(accessibility_features)
+
+        x = self.feature_encoder(x)
+
+        x = self.spatial_conv1(x, edge_index)
+        x = self.spatial_norm1(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+
+        x = self.spatial_conv2(x, edge_index)
+        x = self.spatial_norm2(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+
+        x = self.spatial_conv3(x, edge_index)
+        x = self.spatial_norm3(x)
+        x = F.relu(x)
+
+        learned_accessibility = self.accessibility_learner(x)
+
+        svi_predictions = self.svi_predictor(x)
+        svi_predictions = torch.sigmoid(svi_predictions.squeeze())
+
+        if not self.use_multitask or not return_all_tasks:
+            if return_accessibility:
+                return svi_predictions, learned_accessibility, attention_weights
+            else:
+                return svi_predictions
+
+        return {
+            'svi': svi_predictions,
+            'accessibility_quintile_logits': self.accessibility_classifier(x),
+            'vehicle_ownership': torch.sigmoid(self.vehicle_predictor(x).squeeze()),
+            'employment_category_logits': self.employment_classifier(x),
+            'learned_accessibility': learned_accessibility,
+            'attention_weights': attention_weights,
+            'embeddings': x
+        }
+
 
 class ContextGatedFeatureModulator(nn.Module):
     """

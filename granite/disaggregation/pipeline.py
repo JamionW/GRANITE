@@ -514,15 +514,15 @@ class GRANITEPipeline:
         self._log("Training Multi-Tract Accessibility SVI GNN...")
         
         try:
-            from ..models.gnn import AccessibilitySVIGNN, MultiTractGNNTrainer, normalize_accessibility_features
+            from ..models.gnn import AccessibilitySVIGNN, GraphSAGEAccessibilitySVIGNN, MultiTractGNNTrainer, normalize_accessibility_features
             import torch
             import pandas as pd
-            import numpy as np 
-            
+            import numpy as np
+
             # Normalize features (same as single-tract)
             normalized_features, feature_scaler = normalize_accessibility_features(graph_data.x.numpy())
             graph_data.x = torch.FloatTensor(normalized_features)
-            
+
             # Create model (same architecture as single-tract)
             seed = self.config.get('processing', {}).get('random_seed', 42)
 
@@ -533,7 +533,9 @@ class GRANITEPipeline:
             # Enable context-gating if context features present
             use_gating = self.config.get('model', {}).get('use_context_gating', True)
 
-            model = AccessibilitySVIGNN(
+            arch = self.config.get('model', {}).get('architecture', 'gcn_gat')
+            ModelClass = GraphSAGEAccessibilitySVIGNN if arch == 'sage' else AccessibilitySVIGNN
+            model = ModelClass(
                 accessibility_features_dim=graph_data.x.shape[1],
                 context_features_dim=context_dim,
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
@@ -1637,16 +1639,18 @@ class GRANITEPipeline:
         
         try:
             # Import GNN classes
-            from ..models.gnn import AccessibilitySVIGNN, AccessibilityGNNTrainer, normalize_accessibility_features
+            from ..models.gnn import AccessibilitySVIGNN, GraphSAGEAccessibilitySVIGNN, AccessibilityGNNTrainer, normalize_accessibility_features
             import torch
-            
+
             # Apply normalization
             normalized_features, feature_scaler = normalize_accessibility_features(graph_data.x.numpy())
             graph_data.x = torch.FloatTensor(normalized_features)
-            
+
             # Create model with proper architecture
             seed = self.config.get('processing', {}).get('random_seed', 42)
-            model = AccessibilitySVIGNN(
+            arch = self.config.get('model', {}).get('architecture', 'gcn_gat')
+            ModelClass = GraphSAGEAccessibilitySVIGNN if arch == 'sage' else AccessibilitySVIGNN
+            model = ModelClass(
                 accessibility_features_dim=graph_data.x.shape[1],
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
                 dropout=self.config.get('model', {}).get('dropout', 0.3),
@@ -1960,19 +1964,21 @@ class GRANITEPipeline:
             train_tract_masks[fips] = (train_addresses_df['tract_fips'] == fips).values
         
         # 8. Train model WITHOUT constraints
-        from ..models.gnn import AccessibilitySVIGNN, MultiTractGNNTrainer
+        from ..models.gnn import AccessibilitySVIGNN, GraphSAGEAccessibilitySVIGNN, MultiTractGNNTrainer
         import torch
-        
+
         seed = self.config.get('processing', {}).get('random_seed', 42)
         set_random_seed(seed)
-        
-        model = AccessibilitySVIGNN(
+
+        arch = self.config.get('model', {}).get('architecture', 'gcn_gat')
+        ModelClass = GraphSAGEAccessibilitySVIGNN if arch == 'sage' else AccessibilitySVIGNN
+        model = ModelClass(
             accessibility_features_dim=train_graph.x.shape[1],
             hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
             dropout=self.config.get('model', {}).get('dropout', 0.3),
             seed=seed
         )
-        
+
         # CRITICAL: Configure for unconstrained training
         unconstrained_config = self.config.get('training', {}).copy()
         unconstrained_config['enforce_constraints'] = False
@@ -3983,12 +3989,14 @@ ACCESSIBILITY-VULNERABILITY
             train_tract_masks[fips] = (train_addresses_df['tract_fips'] == fips).values
         
         # 8. Train GLOBAL model
-        from ..models.gnn import AccessibilitySVIGNN, MultiTractGNNTrainer
-        
+        from ..models.gnn import AccessibilitySVIGNN, GraphSAGEAccessibilitySVIGNN, MultiTractGNNTrainer
+
         seed = self.config.get('processing', {}).get('random_seed', 42)
         set_random_seed(seed)
-        
-        model = AccessibilitySVIGNN(
+
+        arch = self.config.get('model', {}).get('architecture', 'gcn_gat')
+        ModelClass = GraphSAGEAccessibilitySVIGNN if arch == 'sage' else AccessibilitySVIGNN
+        model = ModelClass(
             accessibility_features_dim=train_graph.x.shape[1],
             hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
             dropout=self.config.get('model', {}).get('dropout', 0.3),

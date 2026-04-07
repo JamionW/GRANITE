@@ -93,7 +93,11 @@ Examples:
         '--skip-importance', action='store_true',
         help='Skip feature importance analysis'
     )
-    
+    parser.add_argument(
+        '--architecture', choices=['gcn_gat', 'sage'], default='gcn_gat',
+        help='GNN architecture: gcn_gat (default) or sage'
+    )
+
     return parser.parse_args()
 
 
@@ -137,7 +141,8 @@ def load_config(args):
     
     config['training']['enforce_constraints'] = not args.no_constraints
     config['validation']['compare_baselines'] = not args.skip_baselines
-    
+    config['model']['architecture'] = args.architecture
+
     return config
 
 

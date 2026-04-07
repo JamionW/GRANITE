@@ -97,6 +97,10 @@ Examples:
         '--architecture', choices=['gcn_gat', 'sage'], default='gcn_gat',
         help='GNN architecture: gcn_gat (default) or sage'
     )
+    parser.add_argument(
+        '--prune-features', type=str, default=None, metavar='REPORT_PATH',
+        help='Path to importance_report.txt; drops features with negative importance before training'
+    )
 
     return parser.parse_args()
 
@@ -142,6 +146,8 @@ def load_config(args):
     config['training']['enforce_constraints'] = not args.no_constraints
     config['validation']['compare_baselines'] = not args.skip_baselines
     config['model']['architecture'] = args.architecture
+    if args.prune_features:
+        config['processing']['prune_features_path'] = args.prune_features
 
     return config
 

@@ -256,7 +256,24 @@ class GRANITEPipeline:
 
         # Generate feature names
         feature_names = self._generate_feature_names(accessibility_features.shape[1])
-                
+
+        # optional feature pruning: drop features with negative importance
+        prune_path = self.config.get('processing', {}).get('prune_features_path')
+        if prune_path:
+            pruned_names = self._parse_negative_importance_features(prune_path)
+            keep_mask = [i for i, n in enumerate(feature_names) if n not in pruned_names]
+            dropped = [n for n in feature_names if n in pruned_names]
+            accessibility_features = accessibility_features[:, keep_mask]
+            feature_names = [feature_names[i] for i in keep_mask]
+            self._log(f"Feature pruning: dropped {len(dropped)} negative-importance features")
+            for d in dropped:
+                self._log(f"  pruned: {d}")
+            self._log(f"  feature count: {len(feature_names) + len(dropped)} -> {len(feature_names)}")
+            pruned_out = os.path.join(self.output_dir, 'pruned_features.txt')
+            with open(pruned_out, 'w') as f:
+                f.write('\n'.join(dropped) + '\n')
+            self._log(f"Pruned feature list saved to {pruned_out}")
+
         # Build graph with context features
         from ..models.gnn import normalize_accessibility_features
         normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
@@ -799,6 +816,18 @@ class GRANITEPipeline:
             feature_names = feature_names[:n_features]
 
         return feature_names
+
+    def _parse_negative_importance_features(self, report_path):
+        """Parse an importance_report.txt and return list of feature names with negative importance."""
+        import re
+        negative = []
+        with open(report_path) as f:
+            for line in f:
+                # matches lines like: "64     feature_name   -0.0005%    -0.0031"
+                m = re.match(r'^\s*\d+\s+(\S+)\s+(-[\d.]+)%', line)
+                if m:
+                    negative.append(m.group(1))
+        return negative
 
     def _compute_accessibility_features(self, addresses, data):
         """

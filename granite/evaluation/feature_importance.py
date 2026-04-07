@@ -63,7 +63,25 @@ class FeatureImportanceAnalyzer:
         
         if self.verbose:
             print(f"Baseline: constraint error = {baseline_constraint_error:.2f}%, spatial std = {baseline_spatial_std:.4f}")
-        
+
+        # diagnostic: permute all features simultaneously to see model behavior under total scramble
+        all_permuted = features_tensor.clone()
+        for fi in range(n_features):
+            all_permuted[:, fi] = all_permuted[torch.randperm(n_addresses), fi]
+        with torch.no_grad():
+            scrambled_preds = self.model(all_permuted, edge_index).cpu().numpy()
+        scrambled_mean = float(np.mean(scrambled_preds))
+        scrambled_std = float(np.std(scrambled_preds))
+        is_constant = scrambled_std < 1e-4
+        if self.verbose:
+            print(f"All-features-permuted diagnostic:")
+            print(f"  permuted mean={scrambled_mean:.4f}, std={scrambled_std:.6f}")
+            print(f"  tract SVI target: {true_svi:.4f}")
+            print(f"  model collapses to constant: {is_constant}")
+            if is_constant:
+                print(f"  NOTE: constant collapse explains high baseline constraint error "
+                      f"({abs(scrambled_mean - true_svi) / true_svi * 100:.1f}% error from SVI={true_svi:.4f})")
+
         # Compute importance for each feature
         importance_scores = np.zeros(n_features)
         importance_std = np.zeros(n_features)

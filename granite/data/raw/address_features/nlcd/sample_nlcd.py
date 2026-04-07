@@ -37,11 +37,14 @@ NLCD_CLASSES = {
 
 def sample_raster_at_points(raster_path, points_lon, points_lat):
     """Sample a raster at given lon/lat coordinates. Returns array of values."""
+    from pyproj import Transformer
     with rasterio.open(raster_path) as src:
+        transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
         values = []
         for lon, lat in zip(points_lon, points_lat):
             try:
-                row, col = rowcol(src.transform, lon, lat)
+                x, y = transformer.transform(lon, lat)
+                row, col = rowcol(src.transform, x, y)
                 if 0 <= row < src.height and 0 <= col < src.width:
                     val = src.read(1, window=((row, row+1), (col, col+1)))[0, 0]
                     values.append(int(val))

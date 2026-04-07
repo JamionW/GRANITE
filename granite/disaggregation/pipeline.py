@@ -640,6 +640,7 @@ class GRANITEPipeline:
         expected = [
             'bldg_footprint_m2', 'bldg_vertex_count', 'in_sfha', 'osm_building_type',
             'log_appvalue', 'build_to_land_ratio', 'log_acres', 'LUCODE', 'PROPTYPE',
+            'nlcd_land_cover', 'nlcd_impervious_pct', 'nlcd_tree_canopy_pct',
         ]
         available = [c for c in expected if c in addresses.columns]
 
@@ -716,6 +717,22 @@ class GRANITEPipeline:
                 col_vals = (proptype_num == pt).astype(float).values
                 features.append(col_vals.reshape(-1, 1))
                 names.append(f'proptype_{PROPTYPE_LABELS[pt]}')
+
+        # nlcd features
+        if 'nlcd_land_cover' in available:
+            vals = pd.to_numeric(addresses['nlcd_land_cover'], errors='coerce').fillna(-1.0)
+            features.append(vals.values.reshape(-1, 1))
+            names.append('nlcd_land_cover')
+
+        if 'nlcd_impervious_pct' in available:
+            vals = pd.to_numeric(addresses['nlcd_impervious_pct'], errors='coerce').fillna(0.0)
+            features.append(vals.values.reshape(-1, 1))
+            names.append('nlcd_impervious_pct')
+
+        if 'nlcd_tree_canopy_pct' in available:
+            vals = pd.to_numeric(addresses['nlcd_tree_canopy_pct'], errors='coerce').fillna(0.0)
+            features.append(vals.values.reshape(-1, 1))
+            names.append('nlcd_tree_canopy_pct')
 
         arr = np.hstack(features) if features else np.zeros((len(addresses), 0))
         self._building_feature_names = names
@@ -1279,12 +1296,12 @@ class GRANITEPipeline:
             self._log(f"Final feature matrix: {combined_features.shape}")
             self._log(f" Accessibility features: {enhanced_features.shape[1]}")
             self._log(f" Socioeconomic controls: {socioeco_array.shape[1]}")
-            self._log(f" Building/flood features: {building_feats.shape[1]}")
+            self._log(f" Building/flood/nlcd features: {building_feats.shape[1]}")
             self._log(f" Breakdown:")
             self._log(f"   Base accessibility: 30")
             self._log(f"   Modal features: 15")
             self._log(f"   Socioeconomic: 9")
-            self._log(f"   Building/flood: {building_feats.shape[1]}")
+            self._log(f"   Building/flood/nlcd: {building_feats.shape[1]}")
             self._log(f"   Total: {combined_features.shape[1]}")
 
             if accessibility_computer.cache is not None:

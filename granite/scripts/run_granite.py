@@ -378,11 +378,170 @@ def run_global_training(args, config):
     return 0
 
 
+def run_multi_fips_experiment(args):
+    """Run pipeline sequentially over a comma-separated list of FIPS codes.
+
+    Saves per-tract metrics to output/tract_results_<arch>.csv and prints
+    a summary table.  Returns 0 on success (partial failures are logged but
+    do not affect the exit code).
+    """
+    import csv
+    import copy
+    import yaml
+    from granite.models.gnn import set_random_seed
+    from granite.disaggregation.pipeline import GRANITEPipeline
+
+    fips_list = [f.strip() for f in args.fips.split(',') if f.strip()]
+    arch = args.architecture
+    output_dir = args.output or './output'
+    os.makedirs(output_dir, exist_ok=True)
+
+    # load base config once
+    base_config = {}
+    if os.path.exists(args.config):
+        with open(args.config, 'r') as f:
+            base_config = yaml.safe_load(f) or {}
+    base_config.setdefault('data', {})
+    base_config.setdefault('model', {})
+    base_config.setdefault('training', {})
+    base_config.setdefault('processing', {})
+    base_config.setdefault('validation', {})
+    base_config.setdefault('mixture', {})
+
+    # apply shared CLI overrides
+    if args.epochs is not None:
+        base_config['model']['epochs'] = args.epochs
+        base_config['training']['epochs'] = args.epochs
+    base_config['processing']['verbose'] = args.verbose
+    base_config['processing']['enable_caching'] = not args.no_cache
+    base_config['processing']['random_seed'] = args.seed
+    base_config['processing']['skip_importance'] = True   # skip per-tract importance for speed
+    base_config['validation']['compare_baselines'] = not args.skip_baselines
+    base_config['training']['enforce_constraints'] = not args.no_constraints
+    base_config['model']['architecture'] = arch
+    if args.cache_dir:
+        base_config['processing']['cache_dir'] = args.cache_dir
+    if args.prune_features:
+        base_config['processing']['prune_features_path'] = args.prune_features
+
+    print(f"\n{'='*60}")
+    print(f"GRANITE: Multi-FIPS Experiment ({arch.upper()})")
+    print(f"{'='*60}")
+    print(f"Tracts : {len(fips_list)}")
+    print(f"Epochs : {args.epochs or base_config['model'].get('epochs', 100)}")
+    print(f"Output : {output_dir}")
+    print(f"{'='*60}\n")
+
+    rows = []
+    succeeded = []
+    failed = []
+
+    for fips in fips_list:
+        print(f"\n--- Processing {fips} ---")
+        tract_config = copy.deepcopy(base_config)
+        tract_config['data']['target_fips'] = fips
+        tract_config['data']['state_fips'] = fips[:2]
+        tract_config['data']['county_fips'] = fips[2:5]
+        tract_config['data']['neighbor_tracts'] = 0  # single-tract mode
+
+        set_random_seed(args.seed)
+        try:
+            pipeline = GRANITEPipeline(tract_config, output_dir=output_dir)
+            results = pipeline.run()
+        except Exception as e:
+            print(f"  ERROR: {fips} raised exception: {e}")
+            failed.append((fips, str(e)))
+            rows.append({
+                'fips': fips, 'svi': None, 'addresses': None,
+                'architecture': arch,
+                'constraint_error_pct': None, 'spatial_std': None,
+                'morans_i': None, 'pred_min': None, 'pred_max': None,
+                'status': 'FAILED'
+            })
+            continue
+
+        if not results.get('success', False):
+            err = results.get('error', 'unknown')
+            print(f"  FAILED: {fips}: {err}")
+            failed.append((fips, err))
+            rows.append({
+                'fips': fips, 'svi': None, 'addresses': None,
+                'architecture': arch,
+                'constraint_error_pct': None, 'spatial_std': None,
+                'morans_i': None, 'pred_min': None, 'pred_max': None,
+                'status': 'FAILED'
+            })
+            continue
+
+        summary = results.get('summary', {})
+        tract_info = results.get('tract_info', {})
+        val = results.get('validation_results', {})
+        preds = results.get('predictions')
+
+        svi = tract_info.get('RPL_THEMES')
+        addrs = summary.get('addresses_processed')
+        constraint_err = summary.get('constraint_error')
+        spatial_std = summary.get('spatial_variation')
+        morans_i = None
+        try:
+            morans_i = val['spatial_diagnostics']['spatial_autocorrelation']
+        except (KeyError, TypeError):
+            pass
+        pred_min = pred_max = None
+        try:
+            pred_vals = preds['mean'].values
+            pred_min = float(pred_vals.min())
+            pred_max = float(pred_vals.max())
+        except Exception:
+            pass
+
+        rows.append({
+            'fips': fips,
+            'svi': svi,
+            'addresses': addrs,
+            'architecture': arch,
+            'constraint_error_pct': constraint_err,
+            'spatial_std': spatial_std,
+            'morans_i': morans_i,
+            'pred_min': pred_min,
+            'pred_max': pred_max,
+            'status': 'OK'
+        })
+        succeeded.append(fips)
+        morans_str = f"{morans_i:.4f}" if morans_i is not None else 'N/A'
+        print(f"  OK  svi={svi:.4f}  addrs={addrs}  err={constraint_err:.2f}%  std={spatial_std:.4f}  morans={morans_str}")
+
+    # save per-arch CSV
+    csv_path = os.path.join(output_dir, f'tract_results_{arch}.csv')
+    fieldnames = ['fips', 'svi', 'addresses', 'architecture',
+                  'constraint_error_pct', 'spatial_std', 'morans_i',
+                  'pred_min', 'pred_max', 'status']
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"\nPer-tract results saved to: {csv_path}")
+
+    print(f"\n{'='*60}")
+    print(f"SUMMARY ({arch.upper()}): {len(succeeded)}/{len(fips_list)} tracts succeeded")
+    if failed:
+        print("Failed tracts:")
+        for fips, err in failed:
+            print(f"  {fips}: {err}")
+    print(f"{'='*60}")
+    return 0
+
+
 def main():
     """Main entry point."""
     args = parse_arguments()
+
+    # comma-separated FIPS triggers the multi-FIPS experiment path
+    if args.fips and ',' in args.fips:
+        return run_multi_fips_experiment(args)
+
     config = load_config(args)
-    
+
     if args.global_training:
         return run_global_training(args, config)
     else:

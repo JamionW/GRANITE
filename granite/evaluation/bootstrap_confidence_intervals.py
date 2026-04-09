@@ -114,25 +114,21 @@ def bootstrap_correlation_difference(x, y1, y2, n_bootstrap=1000, ci=0.95, seed=
     ci_lower = np.percentile(boot_diffs, 100 * alpha / 2)
     ci_upper = np.percentile(boot_diffs, 100 * (1 - alpha / 2))
     
-    # Two-tailed p-value: proportion of bootstrap samples with opposite sign
-    # or less extreme than observed
-    if diff_observed > 0:
-        p_value = 2 * np.mean(boot_diffs <= 0)
-    else:
-        p_value = 2 * np.mean(boot_diffs >= 0)
-    
-    # More conservative: p-value based on how often bootstrap crosses 0
-    p_value_zero = np.mean(boot_diffs <= 0) if diff_observed > 0 else np.mean(boot_diffs >= 0)
-    
+    # Two-tailed p-value: shift bootstrap distribution to null (diff=0),
+    # then measure how often the null produces values as extreme as observed
+    boot_diffs_null = boot_diffs - diff_observed
+    p_value = np.mean(np.abs(boot_diffs_null) >= np.abs(diff_observed))
+    p_value = max(p_value, 1.0 / len(boot_diffs))  # floor at 1/n_bootstrap
+
     significant = ci_lower > 0 or ci_upper < 0  # CI doesn't include 0
-    
+
     return {
         'r1': r1,
         'r2': r2,
         'diff': diff_observed,
         'ci_lower': ci_lower,
         'ci_upper': ci_upper,
-        'p_value': p_value_zero,
+        'p_value': p_value,
         'significant': significant,
         'n': n,
         'bootstrap_dist': boot_diffs

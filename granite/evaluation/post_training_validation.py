@@ -403,8 +403,10 @@ def run_bootstrap_analysis(bg_results, output_dir, n_bootstrap=1000, seed=42):
         diff_ci_lower = np.percentile(diff_dist, 2.5)
         diff_ci_upper = np.percentile(diff_dist, 97.5)
         
-        # p-value: proportion of bootstrap samples <= 0
-        p_value = np.mean(diff_dist <= 0)
+        # two-tailed p-value: shift to null (diff=0), measure extremity
+        diff_dist_null = diff_dist - diff_obs
+        p_value = np.mean(np.abs(diff_dist_null) >= np.abs(diff_obs))
+        p_value = max(p_value, 1.0 / len(diff_dist))
         significant = diff_ci_lower > 0 or diff_ci_upper < 0
         
         results['difference'] = {

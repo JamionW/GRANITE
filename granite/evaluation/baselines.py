@@ -17,27 +17,43 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+def _enforce_constraint(predictions: np.ndarray, target_mean: float,
+                        max_iterations: int = 20, tol: float = 1e-6) -> np.ndarray:
+    """Iteratively enforce mean constraint while keeping values in [0, 1].
+
+    Alternates shift-to-mean and clip-to-bounds until convergence.
+    """
+    preds = predictions.copy()
+    for _ in range(max_iterations):
+        current_mean = np.mean(preds)
+        if abs(current_mean - target_mean) < tol:
+            break
+        preds += (target_mean - current_mean)
+        preds = np.clip(preds, 0, 1)
+    return preds
+
+
 class DisaggregationBaseline:
     """Base class for disaggregation methods."""
-    
+
     def __init__(self, name: str):
         self.name = name
         self.fitted = False
-    
+
     def fit(self, tract_gdf: gpd.GeoDataFrame, svi_column: str = 'RPL_THEMES'):
         """Fit baseline to tract-level data."""
         raise NotImplementedError
-    
-    def disaggregate(self, address_coords: np.ndarray, tract_fips: str, 
+
+    def disaggregate(self, address_coords: np.ndarray, tract_fips: str,
                      tract_svi: float) -> np.ndarray:
         """
         Disaggregate tract SVI to address level.
-        
+
         Args:
             address_coords: Nx2 array of (lon, lat) coordinates
             tract_fips: FIPS code of tract being disaggregated
             tract_svi: Known tract-level SVI value
-            
+
         Returns:
             Array of address-level SVI estimates (mean should equal tract_svi)
         """
@@ -87,21 +103,30 @@ class IDWDisaggregation(DisaggregationBaseline):
     
     def fit(self, tract_gdf: gpd.GeoDataFrame, svi_column: str = 'RPL_THEMES'):
         """Fit IDW using all tract centroids and SVI values."""
-        
+
         # Store tract data
         self.tract_fips = tract_gdf['FIPS'].values
         self.tract_svi = tract_gdf[svi_column].values
-        
-        # Compute centroids
-        self.tract_centroids = np.array([
-            [geom.centroid.x, geom.centroid.y] 
+
+        # Compute centroids in lon/lat
+        centroids_lonlat = np.array([
+            [geom.centroid.x, geom.centroid.y]
             for geom in tract_gdf.geometry
         ])
-        
-        # Build KD-tree for fast neighbor lookup
+
+        # Convert to approximate meters for isotropic distance computation
+        lat_center = np.mean(centroids_lonlat[:, 1])
+        self._meters_per_deg_lon = 111320 * np.cos(np.radians(lat_center))
+        self._meters_per_deg_lat = 110540
+
+        self.tract_centroids = centroids_lonlat.copy()
+        self.tract_centroids[:, 0] *= self._meters_per_deg_lon
+        self.tract_centroids[:, 1] *= self._meters_per_deg_lat
+
+        # Build KD-tree on meter-scale coordinates
         self.kdtree = cKDTree(self.tract_centroids)
         self.fitted = True
-        
+
         return self
     
     def disaggregate(self, address_coords: np.ndarray, tract_fips: str,
@@ -111,47 +136,58 @@ class IDWDisaggregation(DisaggregationBaseline):
         """
         if not self.fitted:
             raise ValueError("Model not fitted. Call fit() first.")
-        
+
         n_addresses = len(address_coords)
-        
-        # Find neighbors (excluding target tract itself)
+
+        # Convert address coords to meters (same scale as fitted KD-tree)
+        address_coords_m = address_coords.copy()
+        address_coords_m[:, 0] *= self._meters_per_deg_lon
+        address_coords_m[:, 1] *= self._meters_per_deg_lat
+
+        # Find target tract index so we can exclude it from neighbors
         target_idx = np.where(self.tract_fips == tract_fips)[0]
-        
-        # Get all neighboring tract data
-        distances, indices = self.kdtree.query(
-            address_coords, 
-            k=min(self.n_neighbors + 1, len(self.tract_svi))
-        )
-        
+
+        # Query one extra neighbor to allow filtering out the target tract
+        k_query = min(self.n_neighbors + 1, len(self.tract_svi))
+        distances, indices = self.kdtree.query(address_coords_m, k=k_query)
+
+        # Exclude the target tract from each address's neighbor set
+        if len(target_idx) > 0:
+            filtered_distances = []
+            filtered_indices = []
+            for i in range(n_addresses):
+                mask = ~np.isin(indices[i], target_idx)
+                d = distances[i][mask][:self.n_neighbors]
+                idx = indices[i][mask][:self.n_neighbors]
+                # if filtering removed too many, pad with last valid
+                while len(d) < min(self.n_neighbors, k_query - len(target_idx)):
+                    d = np.append(d, d[-1])
+                    idx = np.append(idx, idx[-1])
+                filtered_distances.append(d)
+                filtered_indices.append(idx)
+            distances = np.array(filtered_distances)
+            indices = np.array(filtered_indices)
+
         # Handle edge case of point exactly on centroid
         min_distance = 1e-10
         distances = np.maximum(distances, min_distance)
-        
+
         # Compute IDW weights
         weights = 1.0 / (distances ** self.power)
         weights = weights / weights.sum(axis=1, keepdims=True)
-        
+
         # Weighted average of neighbor SVI values
         raw_predictions = (weights * self.tract_svi[indices]).sum(axis=1)
         
-        # Constraint enforcement: adjust to ensure mean equals tract SVI
+        # Constraint enforcement: iteratively adjust so mean == tract_svi
+        # while keeping all values in [0, 1]
         current_mean = np.mean(raw_predictions)
         if abs(current_mean) > 1e-8:
-            # Scale to match tract constraint
-            scaling_factor = tract_svi / current_mean
-            adjusted_predictions = raw_predictions * scaling_factor
+            adjusted_predictions = raw_predictions * (tract_svi / current_mean)
         else:
             adjusted_predictions = np.full(n_addresses, tract_svi)
-        
-        # Clip to valid SVI range [0, 1]
-        adjusted_predictions = np.clip(adjusted_predictions, 0, 1)
-        
-        # Final mean adjustment (clipping may have shifted mean)
-        mean_shift = tract_svi - np.mean(adjusted_predictions)
-        adjusted_predictions += mean_shift
-        adjusted_predictions = np.clip(adjusted_predictions, 0, 1)
-        
-        return adjusted_predictions
+
+        return _enforce_constraint(adjusted_predictions, tract_svi)
 
 
 class OrdinaryKrigingDisaggregation(DisaggregationBaseline):
@@ -245,23 +281,15 @@ class OrdinaryKrigingDisaggregation(DisaggregationBaseline):
                 # Fallback to IDW-like behavior
                 predictions[i] = tract_svi
         
-        # Constraint enforcement
+        # Constraint enforcement: iteratively adjust so mean == tract_svi
+        # while keeping all values in [0, 1]
         current_mean = np.mean(predictions)
         if abs(current_mean) > 1e-8:
-            scaling_factor = tract_svi / current_mean
-            predictions = predictions * scaling_factor
+            predictions = predictions * (tract_svi / current_mean)
         else:
             predictions = np.full(n_addresses, tract_svi)
-        
-        # Clip to valid range
-        predictions = np.clip(predictions, 0, 1)
-        
-        # Final mean adjustment
-        mean_shift = tract_svi - np.mean(predictions)
-        predictions += mean_shift
-        predictions = np.clip(predictions, 0, 1)
-        
-        return predictions
+
+        return _enforce_constraint(predictions, tract_svi)
 
 
 class DisaggregationComparison:

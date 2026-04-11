@@ -455,11 +455,12 @@ class GRANITEPipeline:
         return {
             'success': True,
             'predictions': final_predictions,
+            'address_gdf': target_addresses,
             'tract_info': {'FIPS': target_fips, 'RPL_THEMES': target_tract_svi},
             'accessibility_features': target_access_features,  # Target tract only
             'full_accessibility_features': full_accessibility_features,  # All tracts (for feature importance)
             'training_result': training_result,
-            'baseline_comparisons': baseline_results, 
+            'baseline_comparisons': baseline_results,
             'validation_results': validation_results,
             'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility -> SVI',
             'summary': {
@@ -506,7 +507,7 @@ class GRANITEPipeline:
             
             # Generate visualization
             try:
-                from ..visualization.disaggregation_plots import DisaggregationVisualizer
+                from ..visualization.plots import DisaggregationVisualizer
                 viz = DisaggregationVisualizer()
                 plot_path = os.path.join(self.output_dir, 'disaggregation_comparison.png')
                 viz.plot_disaggregation_dashboard(

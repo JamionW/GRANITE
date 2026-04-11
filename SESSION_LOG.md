@@ -1,5 +1,27 @@
 # GRANITE Session Log
 
+## 2026-04-11: Visualization consolidation and multi-tract heatmap
+
+**Files changed:** `granite/visualization/plots.py`, `granite/visualization/disaggregation_plots.py` (removed), `granite/disaggregation/pipeline.py`, `granite/scripts/run_granite.py`, `granite/scripts/run_holdout_validation.py`
+
+### Consolidation
+
+- `DisaggregationVisualizer` was duplicated identically in `plots.py` and `disaggregation_plots.py`. Removed `disaggregation_plots.py`, moved to `graveyard/disaggregation_plots_v2.old`.
+- Updated imports in `pipeline.py` and `run_holdout_validation.py` to point to `granite.visualization.plots`.
+
+### Multi-tract heatmap
+
+- Extended `plot_spatial_disaggregation` to support multi-tract mode via `multi_tract_data` dict parameter. Single-tract mode unchanged.
+- Multi-tract mode: unified SVI colorscale (0-1, RdYlGn_r), deviation panel per address relative to its own tract, tract boundary overlay from TIGER shapefiles, auto-scaled point size for large address counts.
+- Pipeline now returns `address_gdf` in single-tract results dict.
+- `run_multi_fips_experiment` collects per-tract GDFs and predictions, generates multi-tract heatmap automatically when 2+ tracts succeed.
+
+### No cache invalidation
+
+- No feature or routing changes. Cache keys unchanged.
+
+---
+
 ## 2026-04-11: Bug fixes, modal feature refactor, cache improvements
 
 **Files changed:** `granite/data/loaders.py`, `granite/models/gnn.py`, `granite/cache.py`, `granite/disaggregation/pipeline.py`, `granite/evaluation/spatial_diagnostics.py`, `granite/evaluation/accessibility_validator.py`, `granite/evaluation/morans_i_analysis.py`, `granite/evaluation/post_training_validation.py`, `granite/models/mixture_of_experts.py`, `granite/validation/block_group_validation.py`, `granite/features/modal_accessibility.py`, `README.md`, `docs/FEATURES.md`

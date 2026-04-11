@@ -313,7 +313,7 @@ def run_global_training_validation(seed=42):
         
         # Generate visualizations
         try:
-            from granite.visualization.disaggregation_plots import DisaggregationVisualizer
+            from granite.visualization.plots import DisaggregationVisualizer
             viz = DisaggregationVisualizer()
             
             # Create aggregate comparison plot

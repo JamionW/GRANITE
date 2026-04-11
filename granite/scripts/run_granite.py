@@ -435,6 +435,7 @@ def run_multi_fips_experiment(args):
     rows = []
     succeeded = []
     failed = []
+    multi_tract_viz_data = {}  # collect for multi-tract heatmap
 
     for fips in fips_list:
         print(f"\n--- Processing {fips} ---")
@@ -510,6 +511,30 @@ def run_multi_fips_experiment(args):
         succeeded.append(fips)
         morans_str = f"{morans_i:.4f}" if morans_i is not None else 'N/A'
         print(f"  OK  svi={svi:.4f}  addrs={addrs}  err={constraint_err:.2f}%  std={spatial_std:.4f}  morans={morans_str}")
+
+        # collect data for multi-tract heatmap
+        address_gdf = results.get('address_gdf')
+        if address_gdf is not None and preds is not None and svi is not None:
+            multi_tract_viz_data[fips] = {
+                'address_gdf': address_gdf,
+                'predictions': preds['mean'].values,
+                'tract_svi': svi
+            }
+
+    # generate multi-tract heatmap if we have results from 2+ tracts
+    if len(multi_tract_viz_data) >= 2:
+        try:
+            from granite.visualization.plots import DisaggregationVisualizer
+            viz = DisaggregationVisualizer()
+            heatmap_path = os.path.join(output_dir, f'multi_tract_heatmap_{arch}.png')
+            viz.plot_spatial_disaggregation(
+                multi_tract_data=multi_tract_viz_data,
+                title=f'GRANITE Disaggregation ({arch.upper()})',
+                output_path=heatmap_path
+            )
+            print(f"Multi-tract heatmap saved to: {heatmap_path}")
+        except Exception as e:
+            print(f"Warning: multi-tract heatmap failed: {e}")
 
     # save per-arch CSV
     csv_path = os.path.join(output_dir, f'tract_results_{arch}.csv')

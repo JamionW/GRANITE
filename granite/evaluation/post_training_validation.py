@@ -511,11 +511,14 @@ def run_morans_i_analysis(addresses, predictions, ground_truth=None, output_dir=
         neighbors = np.argsort(dist_matrix[i])[1:k+1]
         W[i, neighbors] = 1
     
+    # symmetrize before row-normalizing (k-NN graphs are asymmetric)
+    W = (W + W.T) / 2
+
     # Row-standardize
     row_sums = W.sum(axis=1)
     row_sums[row_sums == 0] = 1
     W = W / row_sums[:, np.newaxis]
-    
+
     def compute_morans_i(values, W, permutations, seed):
         np.random.seed(seed)
         n = len(values)

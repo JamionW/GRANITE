@@ -66,6 +66,9 @@ def compute_spatial_weights(coordinates, method='knn', k=8, threshold=None):
     else:
         raise ValueError(f"Unknown method: {method}")
     
+    # symmetrize before row-normalizing (k-NN graphs are asymmetric)
+    W = (W + W.T) / 2
+
     # Row-standardize
     row_sums = W.sum(axis=1)
     row_sums[row_sums == 0] = 1  # Avoid division by zero

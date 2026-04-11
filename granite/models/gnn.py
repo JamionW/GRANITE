@@ -463,7 +463,8 @@ class AccessibilityGNNTrainer:
         set_random_seed(self.seed)
         
         self.model.train()
-        target_svi = torch.FloatTensor([tract_svi])
+        device = graph_data.x.device
+        target_svi = torch.FloatTensor([tract_svi]).to(device)
         n_addresses = graph_data.x.shape[0]
         
         learned_accessibility_history = []
@@ -579,7 +580,7 @@ class AccessibilityGNNTrainer:
             min_range = 0.05
             range_loss = F.relu(min_range - prediction_range)
         else:
-            range_loss = torch.tensor(0.0)
+            range_loss = torch.tensor(0.0, device=predictions.device)
         
         # 5. Accessibility consistency
         accessibility_consistency_loss = self._compute_accessibility_consistency_loss(predictions)
@@ -614,9 +615,9 @@ class AccessibilityGNNTrainer:
     
     def _compute_accessibility_consistency_loss(self, predictions):
         """Encourage structured predictions"""
-        
+
         if len(predictions) < 4:
-            return torch.tensor(0.0)
+            return torch.tensor(0.0, device=predictions.device)
         
         sorted_preds = torch.sort(predictions)[0]
         
@@ -624,7 +625,7 @@ class AccessibilityGNNTrainer:
             pred_gradient = sorted_preds[1:] - sorted_preds[:-1]
             gradient_loss = F.relu(0.001 - pred_gradient.mean())
         else:
-            gradient_loss = torch.tensor(0.0)
+            gradient_loss = torch.tensor(0.0, device=predictions.device)
         
         return gradient_loss
 
@@ -734,15 +735,16 @@ class MultiTractGNNTrainer:
         
         self.model.train()
         
-        # Convert tract SVIs to tensors
+        # Convert tract SVIs to tensors (match graph device)
+        device = graph_data.x.device
         tract_targets = {
-            fips: torch.FloatTensor([svi]) 
+            fips: torch.FloatTensor([svi]).to(device)
             for fips, svi in tract_svis.items()
         }
-        
+
         # Convert masks to tensors
         tract_masks_tensor = {
-            fips: torch.BoolTensor(mask)
+            fips: torch.BoolTensor(mask).to(device)
             for fips, mask in tract_masks.items()
         }
         
@@ -989,23 +991,23 @@ class MultiTractGNNTrainer:
         if len(constraint_losses) > 0:
             constraint_loss = torch.mean(torch.stack(constraint_losses))
         else:
-            constraint_loss = torch.tensor(0.0)
-        
+            constraint_loss = torch.tensor(0.0, device=predictions.device)
+
         # 2. Within-tract variation encouragement
         variation_losses = []
         for fips, mask in tract_masks.items():
             tract_predictions = predictions[mask]
-            
+
             if len(tract_predictions) > 10:
                 tract_std = tract_predictions.std()
                 min_variation = 0.02
                 variation_loss = F.relu(min_variation - tract_std)
                 variation_losses.append(variation_loss)
-        
+
         if len(variation_losses) > 0:
             variation_loss = torch.mean(torch.stack(variation_losses))
         else:
-            variation_loss = torch.tensor(0.0)
+            variation_loss = torch.tensor(0.0, device=predictions.device)
         
         # 3. Bounds enforcement (always active)
         bounds_loss = torch.mean(F.relu(predictions - 1.0)) + torch.mean(F.relu(-predictions))
@@ -1078,7 +1080,7 @@ class MultiTractGNNTrainer:
             range_penalty = (tract_means_tensor.max() - tract_means_tensor.min()) * 0.05
             return range_penalty
         else:
-            return torch.tensor(0.0)
+            return torch.tensor(0.0, device=predictions.device)
     
     def _compute_overall_constraint_error(self, predictions, tract_targets, tract_masks):
         """Compute weighted average constraint error across tracts"""

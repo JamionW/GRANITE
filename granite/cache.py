@@ -1,8 +1,9 @@
 import hashlib
 import pickle
 import json
+import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 import pandas as pd
 
@@ -12,16 +13,25 @@ class AccessibilityCache:
     Logs all access patterns for workload analysis.
     """
     
-    def __init__(self, cache_dir='./cache'):
+    def __init__(self, cache_dir='./cache', version: str = None):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
-        
+
+        # version tag: when destination data changes, bump this to invalidate
+        self.version = version or '1'
+        version_file = self.cache_dir / 'VERSION'
+        if version_file.exists():
+            stored = version_file.read_text().strip()
+            if stored != self.version:
+                self._invalidate_all(reason=f"version changed: {stored} -> {self.version}")
+        version_file.write_text(self.version)
+
         # Separate directories for different cache types
         self.absolute_cache = self.cache_dir / 'absolute'
         self.differential_cache = self.cache_dir / 'differential'
         self.absolute_cache.mkdir(exist_ok=True)
         self.differential_cache.mkdir(exist_ok=True)
-        
+
         # Log file for workload analysis
         self.log_file = self.cache_dir / 'access_log.jsonl'
         
@@ -29,7 +39,28 @@ class AccessibilityCache:
         """Create deterministic hash from parameters."""
         key_str = json.dumps(kwargs, sort_keys=True)
         return hashlib.md5(key_str.encode()).hexdigest()
-    
+
+    def _invalidate_all(self, reason: str = 'manual'):
+        """Remove all cached data (absolute and differential)."""
+        for subdir in [self.absolute_cache, self.differential_cache]:
+            if subdir.exists():
+                shutil.rmtree(subdir)
+                subdir.mkdir(exist_ok=True)
+        self._log_access('invalidate_all', 'all', reason, hit=False)
+
+    def invalidate(self, older_than_days: int = None):
+        """Remove cache entries. If older_than_days is given, only remove stale entries."""
+        cutoff = datetime.now() - timedelta(days=older_than_days) if older_than_days else None
+        removed = 0
+        for subdir in [self.absolute_cache, self.differential_cache]:
+            for f in subdir.glob('*.pkl'):
+                if cutoff is None or datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
+                    f.unlink()
+                    removed += 1
+        self._log_access('invalidate', 'all', f'removed={removed}', hit=False,
+                        metadata={'older_than_days': older_than_days, 'removed': removed})
+        return removed
+
     def _log_access(self, operation: str, cache_type: str, key: str, 
                     hit: bool, metadata: Dict = None):
         """Log every cache access for workload analysis."""

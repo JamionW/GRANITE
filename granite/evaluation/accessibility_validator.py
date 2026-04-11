@@ -537,29 +537,29 @@ class AccessibilityFeatureValidator:
                 min_time = self.accessibility_features[:, start_idx]
                 count_10min = self.accessibility_features[:, start_idx + 4]  # 10min count
                 
-                if np.std(min_time) > 0 and np.std(count_5) > 0:
-                    corr = pearsonr(min_time, count_5)[0]
+                if np.std(min_time) > 0 and np.std(count_10min) > 0:
+                    corr = pearsonr(min_time, count_10min)[0]
                     time_count_correlations.append({
                         'destination': dest_type,
                         'correlation': corr,
                         'expected_negative': corr < 0,
                         'strength': 'strong' if abs(corr) > 0.5 else 'moderate' if abs(corr) > 0.3 else 'weak'
                     })
-        
+
         directions['time_count_correlations'] = time_count_correlations
-        
+
         # Score vs Count relationships (should be positive)
         score_count_correlations = []
-        
+
         for dest_idx, dest_type in enumerate(dest_types):
             start_idx = dest_idx * 10
-            
+
             if start_idx + 7 < len(self.feature_names):
-                score = self.accessibility_features[:, start_idx + 7]  # accessibility_score
-                count_10min = self.accessibility_features[:, start_idx + 4]  # 60min count
-                
-                if np.std(score) > 0 and np.std(count_5) > 0:
-                    corr = pearsonr(score, count_5)[0]
+                score = self.accessibility_features[:, start_idx + 7]  # dispersion
+                count_10min = self.accessibility_features[:, start_idx + 4]  # 10min count
+
+                if np.std(score) > 0 and np.std(count_10min) > 0:
+                    corr = pearsonr(score, count_10min)[0]
                     score_count_correlations.append({
                         'destination': dest_type,
                         'correlation': corr,
@@ -707,6 +707,9 @@ class AccessibilityFeatureValidator:
                 if dist > 0:
                     W[i, j] = 1.0 / dist
         
+        # symmetrize before row-normalizing (k-NN graphs are asymmetric)
+        W = (W + W.T) / 2
+
         # Row normalize
         row_sums = W.sum(axis=1)
         W = np.divide(W, row_sums[:, np.newaxis], out=np.zeros_like(W), where=row_sums[:, np.newaxis]!=0)

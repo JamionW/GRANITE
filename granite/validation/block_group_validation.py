@@ -162,8 +162,8 @@ class BlockGroupValidator:
         
         merged = bg_predictions.merge(demographics, on='GEOID', how='inner')
         
-        # Require minimum addresses and complete SVI
-        min_addresses = 5
+        # require enough addresses for stable mean estimation
+        min_addresses = 10
         merged = merged[merged['n_addresses'] >= min_addresses]
         
         if 'svi_complete' in merged.columns:

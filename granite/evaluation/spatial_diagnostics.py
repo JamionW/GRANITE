@@ -58,6 +58,9 @@ class SpatialLearningDiagnostics:
                 if distance > 0:
                     W[i, j] = 1.0 / distance  # Inverse distance weighting
         
+        # symmetrize before row-normalizing (k-NN graphs are asymmetric)
+        W = (W + W.T) / 2
+
         # Row-normalize weights
         row_sums = W.sum(axis=1)
         W = W / row_sums[:, np.newaxis]
@@ -406,7 +409,7 @@ class SpatialLearningDiagnostics:
                 'high_variance_features': high_var_features,
                 'high_correlations': high_correlations,
                 'suspicious_patterns': suspicious_patterns,  # This key is required by downstream code
-                'feature_quality_score': len(zero_var_features) / n_features if n_features > 0 else 0  # Lower is better
+                'feature_quality_score': 1.0 - (len(zero_var_features) / n_features) if n_features > 0 else 0  # higher is better: fraction of features with nonzero variance
             }
             
         except Exception as e:

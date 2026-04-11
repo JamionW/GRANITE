@@ -254,18 +254,22 @@ class MixtureOfExpertsTrainer:
             'medium': {'data': [], 'svi': []},
             'high': {'data': [], 'svi': []}
         }
-        
+
+        # deliberate soft-boundary design: tracts near SVI thresholds train
+        # multiple experts (low 0.00-0.40, medium 0.30-0.70, high 0.55-1.00).
+        # overlapping bands smooth expert transitions and give the gate network
+        # blended training signal in ambiguous regions.
         for graph_data, svi in zip(graph_data_list, tract_svi_list):
             # Low SVI expert (suburbs, car-dependent)
             if svi < self.svi_boundaries['low'][1]:
                 stratified['low']['data'].append(graph_data)
                 stratified['low']['svi'].append(svi)
-            
+
             # Medium SVI expert (transition zones)
             if self.svi_boundaries['medium'][0] <= svi <= self.svi_boundaries['medium'][1]:
                 stratified['medium']['data'].append(graph_data)
                 stratified['medium']['svi'].append(svi)
-            
+
             # High SVI expert (urban cores)
             if svi > self.svi_boundaries['high'][0]:
                 stratified['high']['data'].append(graph_data)

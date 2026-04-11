@@ -102,11 +102,18 @@ class DataLoader:
                     f"Download from CDC SVI: https://www.atsdr.cdc.gov/placeandhealth/svi/data_documentation_download.html"
                 )
             
-            # Filter to county
+            # Filter to county (case-insensitive match)
             county_svi = svi_data[
-                (svi_data['ST'] == state_fips) & 
-                (svi_data['COUNTY'] == county_name)
+                (svi_data['ST'] == state_fips) &
+                (svi_data['COUNTY'].str.lower() == county_name.lower())
             ].copy()
+
+            if len(county_svi) == 0:
+                available = svi_data[svi_data['ST'] == state_fips]['COUNTY'].unique()[:10]
+                raise ValueError(
+                    f"No SVI data for county '{county_name}' in state {state_fips}. "
+                    f"Available counties: {list(available)}"
+                )
             
             county_svi['FIPS'] = county_svi['FIPS'].astype(str)
             county_svi['RPL_THEMES'] = county_svi['RPL_THEMES'].replace(-999, np.nan)
@@ -199,11 +206,27 @@ class DataLoader:
         return float(svi)
 
     def _get_county_name(self, state_fips: str, county_fips: str) -> str:
-        """Map FIPS codes to county name"""
+        """Resolve county name from FIPS codes using SVI data, with hardcoded fallback."""
         county_map = {
             ('47', '065'): 'Hamilton'
         }
-        return county_map.get((state_fips, county_fips), 'Unknown')
+        known = county_map.get((state_fips, county_fips))
+        if known:
+            return known
+
+        # attempt lookup from SVI CSV
+        svi_file = os.path.join(self.data_dir, 'raw', 'SVI_2020_US.csv')
+        if os.path.exists(svi_file):
+            try:
+                svi = pd.read_csv(svi_file, dtype={'FIPS': str, 'ST': str}, usecols=['ST', 'FIPS', 'COUNTY'])
+                matches = svi[(svi['ST'] == state_fips) & (svi['FIPS'].str[2:5] == county_fips)]['COUNTY'].dropna().unique()
+                if len(matches) == 1:
+                    return str(matches[0])
+            except Exception:
+                pass
+
+        self._log(f"WARNING: Could not resolve county name for state={state_fips} county={county_fips}")
+        return 'Unknown'
 
     # =========================================================================
     # CONTEXT FEATURES
@@ -602,9 +625,13 @@ class DataLoader:
                 return gpd.GeoDataFrame(columns=['address_id', 'geometry'])
             
             tract_geom = tract.iloc[0].geometry
-            
+
+            # ensure CRS match before spatial predicate
+            if all_addresses.crs != tracts.crs:
+                all_addresses = all_addresses.to_crs(tracts.crs)
+
             tract_addresses = all_addresses[all_addresses.geometry.within(tract_geom)].copy()
-            tract_addresses['tract_fips'] = fips_code
+            tract_addresses['tract_fips'] = str(fips_code).strip()
             
             self._log(f"Found {len(tract_addresses)} addresses in tract {fips_code}")
             return tract_addresses

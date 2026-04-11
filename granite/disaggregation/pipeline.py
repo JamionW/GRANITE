@@ -650,6 +650,64 @@ class GRANITEPipeline:
                 'raw_predictions': None
             }
     
+    def _summarize_travel_times(self, addresses, travel_times):
+        """Extract per-address drive/walk summary stats from raw travel_times DataFrame.
+
+        Returns dict mapping address_id -> {
+            'drive_nearest': float, 'walk_nearest': float,
+            'drive_times': np.array, 'walk_times': np.array
+        }
+        """
+        summaries = {}
+        for _, address in addresses.iterrows():
+            addr_id = address.get('address_id', address.name)
+            addr_tt = travel_times[travel_times['origin_id'] == addr_id]
+
+            if len(addr_tt) == 0:
+                summaries[addr_id] = {
+                    'drive_nearest': 120.0, 'walk_nearest': 120.0,
+                    'drive_times': np.array([120.0]), 'walk_times': np.array([120.0]),
+                }
+                continue
+
+            drive_col = addr_tt['drive_time'].values if 'drive_time' in addr_tt.columns else addr_tt['combined_time'].values
+            walk_col = addr_tt['walk_time'].values if 'walk_time' in addr_tt.columns else addr_tt['combined_time'].values
+
+            valid_drive = drive_col[(drive_col > 0) & np.isfinite(drive_col)]
+            valid_walk = walk_col[(walk_col > 0) & np.isfinite(walk_col)]
+
+            summaries[addr_id] = {
+                'drive_nearest': float(valid_drive.min()) if len(valid_drive) > 0 else 120.0,
+                'walk_nearest': float(valid_walk.min()) if len(valid_walk) > 0 else 120.0,
+                'drive_times': valid_drive if len(valid_drive) > 0 else np.array([120.0]),
+                'walk_times': valid_walk if len(valid_walk) > 0 else np.array([120.0]),
+            }
+        return summaries
+
+    def _build_socioeco_array(self, addresses, data):
+        """Build socioeconomic feature array for addresses (9 cols)."""
+        if 'tract_fips' in addresses.columns:
+            unique_tracts = addresses['tract_fips'].unique()
+            socioeco_array = np.zeros((len(addresses), 9))
+            for tract_fips in unique_tracts:
+                tract_mask = addresses['tract_fips'] == tract_fips
+                tract_features = self.data_loader.get_tract_socioeconomic_features(
+                    str(tract_fips), data['svi']
+                )
+                socioeco_array[tract_mask] = list(tract_features.values())
+        else:
+            if 'FIPS' in addresses.columns:
+                tract_fips = str(addresses['FIPS'].iloc[0]).strip()
+            elif hasattr(addresses.iloc[0], 'FIPS'):
+                tract_fips = str(addresses.iloc[0].FIPS).strip()
+            else:
+                tract_fips = str(data.get('target_fips', '47065000600'))
+            socioeconomic_context = self.data_loader.get_tract_socioeconomic_features(
+                tract_fips, data['svi']
+            )
+            socioeco_array = np.tile(list(socioeconomic_context.values()), (len(addresses), 1))
+        return socioeco_array
+
     def _extract_building_features(self, addresses):
         """Extract building and flood features from address GeoDataFrame columns.
 
@@ -917,7 +975,7 @@ class GRANITEPipeline:
 
             if not skip_cache_lookup and accessibility_computer.cache is not None:
                 addr_hash, dest_hashes = _generate_cache_key(addresses, destinations)
-                cache_key = f"{addr_hash}_complete"
+                cache_key = f"{addr_hash}_base_modal_v2"
                 
                 cached_complete = accessibility_computer.cache.get_absolute(
                     mode='all_destinations',
@@ -927,17 +985,26 @@ class GRANITEPipeline:
                 )
                 
                 if cached_complete is not None:
-                    self._log(f"Retrieved COMPLETE accessibility features from cache ({cached_complete.shape[0]} addresses)")
+                    self._log(f"Retrieved accessibility features from cache ({cached_complete.shape[0]} addresses)")
+                    # cache stores base+modal only; add socioeco and building fresh
+                    enhanced_features = cached_complete
+
+                    socioeco_array = self._build_socioeco_array(addresses, data)
+                    combined = np.column_stack([enhanced_features, socioeco_array])
+
                     building_feats, _ = self._extract_building_features(addresses)
                     if building_feats.shape[1] > 0:
-                        cached_complete = np.column_stack([cached_complete, building_feats])
-                        self._log(f" Appended {building_feats.shape[1]} building features (not cached)")
-                    return cached_complete
-            
-            # CHANGE 2: Calculate features for all destination types with error handling
+                        combined = np.column_stack([combined, building_feats])
+
+                    self._log(f" Base+modal: {enhanced_features.shape[1]}, socioeco: {socioeco_array.shape[1]}, building: {building_feats.shape[1]}, total: {combined.shape[1]}")
+                    return combined
+
+            # Calculate features for all destination types with error handling
             all_features = []
             feature_names = []
             successful_computations = 0
+            # per-address drive/walk summaries for modal features, keyed by dest_type
+            per_address_times = {}
             
             for dest_type, dest_gdf in destinations.items():
                 self._log(f" Processing {dest_type} accessibility...")
@@ -964,6 +1031,26 @@ class GRANITEPipeline:
                                 f'{dest_type}_drive_advantage', f'{dest_type}_dispersion',
                                 f'{dest_type}_time_range', f'{dest_type}_percentile'
                             ])
+                            # try to load cached per-address travel time summaries
+                            cached_tt = accessibility_computer.cache.get_absolute(
+                                mode='modal_times', dest_type=dest_type,
+                                threshold=0, origins_hash=dest_cache_key
+                            )
+                            if cached_tt is not None:
+                                per_address_times[dest_type] = cached_tt
+                            else:
+                                # modal_times not yet cached; recompute from OSRM (uses route cache, fast)
+                                self._log(f"  Recomputing {dest_type} travel times for modal features...")
+                                tt = accessibility_computer.calculate_realistic_travel_times(
+                                    origins=addresses, destinations=dest_gdf
+                                )
+                                if tt is not None and len(tt) > 0:
+                                    per_address_times[dest_type] = self._summarize_travel_times(addresses, tt)
+                                    accessibility_computer.cache.set_absolute(
+                                        per_address_times[dest_type],
+                                        mode='modal_times', dest_type=dest_type,
+                                        threshold=0, origins_hash=dest_cache_key
+                                    )
                             successful_computations += 1
                             continue  # Skip to next destination type
                     
@@ -1005,7 +1092,12 @@ class GRANITEPipeline:
                     if dest_features is None or dest_features.size == 0:
                         self._log(f"No features extracted for {dest_type}",level='ERROR')
                         continue
-                    
+
+                    # extract per-address drive/walk summaries for modal features
+                    per_address_times[dest_type] = self._summarize_travel_times(
+                        addresses, travel_times
+                    )
+
                     # Check feature dimensions
                     expected_addresses = len(addresses)
                     if dest_features.shape[0] != expected_addresses:
@@ -1068,6 +1160,14 @@ class GRANITEPipeline:
                             threshold=0,
                             origins_hash=dest_cache_key
                         )
+                        if dest_type in per_address_times:
+                            accessibility_computer.cache.set_absolute(
+                                per_address_times[dest_type],
+                                mode='modal_times',
+                                dest_type=dest_type,
+                                threshold=0,
+                                origins_hash=dest_cache_key
+                            )
                         self._log(f"Cached {dest_type} features for reuse")
 
                 except Exception as e:
@@ -1149,12 +1249,20 @@ class GRANITEPipeline:
                     
                     self._log(f"Computing modal features for {len(set(address_tract_ids))} unique tracts")
                     
+                    # build address_id list matching row order
+                    address_ids = [
+                        row.get('address_id', row.name)
+                        for _, row in addresses.iterrows()
+                    ]
+
                     # Compute modal features
                     modal_features, modal_names = compute_modal_features(
                         accessibility_features=accessibility_matrix,
                         feature_names=feature_names,
                         tract_svi_data=tract_svi_dict,
-                        address_tract_ids=address_tract_ids
+                        address_tract_ids=address_tract_ids,
+                        per_address_times=per_address_times,
+                        address_ids=address_ids
                     )
                     
                     self._log(f"Generated {modal_features.shape[1]} modal features")
@@ -1207,16 +1315,19 @@ class GRANITEPipeline:
             zero_var_count = np.sum(zero_var_mask)
 
             if zero_var_count > 0:
-                self._log(f"{zero_var_count} features have zero variance (keeping for consistency)", level='WARN')
-                
-                # Debug zero variance features
+                # 24 tract-level constants (15 modal + 9 socioeco) are expected to have
+                # zero within-tract variance; additional zero-variance features (e.g.
+                # count thresholds where all addresses reach the same number) are common
+                # but worth noting.
+                expected_zero = 24
+                level = 'WARN' if zero_var_count > expected_zero + 5 else 'INFO'
+                self._log(f"{zero_var_count} zero-variance features ({expected_zero} expected from tract-level constants)", level=level)
+
                 for i in range(final_features.shape[1]):
                     if zero_var_mask[i]:
                         feature_name = complete_feature_names[i] if i < len(complete_feature_names) else f"feature_{i}"
                         unique_vals = len(np.unique(final_features[:, i]))
-                        self._log(f" Zero-variance feature: {feature_name}: {unique_vals} unique values, std={np.std(final_features[:, i]):.8f}")
-                
-                self._log(f"Keeping all {final_features.shape[1]} features (including {zero_var_count} zero-variance)")
+                        self._log(f" Zero-variance: {feature_name} ({unique_vals} unique, std={np.std(final_features[:, i]):.8f})")
             
             # Check for excessive negative values (some can be negative, like drive_advantage)
             negative_features = []
@@ -1279,74 +1390,29 @@ class GRANITEPipeline:
             
             self._log(f"SUCCESS: Generated {enhanced_features.shape[1]} features for {len(addresses)} addresses")
             
-            # Add socioeconomic controls
-            if 'FIPS' in addresses.columns:
-                tract_fips = str(addresses['FIPS'].iloc[0]).strip()
-            elif hasattr(addresses.iloc[0], 'FIPS'):
-                tract_fips = str(addresses.iloc[0].FIPS).strip()
-            else:
-                # Fallback: extract from tract context
-                tract_fips = str(data.get('target_fips', '47065000600'))
-
-            self._log(f"Extracted tract FIPS: {tract_fips}")
-            if 'tract_fips' in addresses.columns:
-                # Multi-tract mode: extract features for each tract
-                unique_tracts = addresses['tract_fips'].unique()
-                self._log(f"Extracting socioeconomic features for {len(unique_tracts)} tracts")
-                
-                socioeco_array = np.zeros((len(addresses), 9))
-                
-                for tract_fips in unique_tracts:
-                    tract_mask = addresses['tract_fips'] == tract_fips
-                    tract_features = self.data_loader.get_tract_socioeconomic_features(
-                        str(tract_fips), data['svi']
-                    )
-                    
-                    self._log(f" Tract {tract_fips}: no_vehicle={tract_features['pct_no_vehicle']:.1f}%, poverty={tract_features['pct_poverty']:.1f}%")
-                    
-                    # Assign to addresses in this tract
-                    socioeco_array[tract_mask] = list(tract_features.values())
-            else:
-                # Single tract fallback
-                tract_fips = str(addresses.iloc[0].get('FIPS', ''))
-                socioeconomic_context = self.data_loader.get_tract_socioeconomic_features(
-                    tract_fips, data['svi']
-                )
-                socioeco_array = np.tile(list(socioeconomic_context.values()), (len(addresses), 1))
-                self._log(f"Single tract: no_vehicle={socioeconomic_context['pct_no_vehicle']:.1f}%")
-
-            # Combine
+            # add socioeconomic controls and building features (never cached)
+            socioeco_array = self._build_socioeco_array(addresses, data)
             combined_features = np.column_stack([enhanced_features, socioeco_array])
 
-            # append address-level building and flood features (not cached, fast to recompute)
-            # side-effect: sets self._building_feature_names for _generate_feature_names
             building_feats, _ = self._extract_building_features(addresses)
             if building_feats.shape[1] > 0:
                 combined_features = np.column_stack([combined_features, building_feats])
 
             self._log(f"Final feature matrix: {combined_features.shape}")
-            self._log(f" Accessibility features: {enhanced_features.shape[1]}")
-            self._log(f" Socioeconomic controls: {socioeco_array.shape[1]}")
-            self._log(f" Building/flood/nlcd features: {building_feats.shape[1]}")
-            self._log(f" Breakdown:")
-            self._log(f"   Base accessibility: 30")
-            self._log(f"   Modal features: 15")
-            self._log(f"   Socioeconomic: 9")
-            self._log(f"   Building/flood/nlcd: {building_feats.shape[1]}")
-            self._log(f"   Total: {combined_features.shape[1]}")
+            self._log(f" Base+modal: {enhanced_features.shape[1]}, socioeco: {socioeco_array.shape[1]}, building: {building_feats.shape[1]}")
 
             if accessibility_computer.cache is not None:
                 addr_hash, dest_hashes = _generate_cache_key(addresses, destinations)
-                cache_key = f"{addr_hash}_complete"
-                
+                cache_key = f"{addr_hash}_base_modal_v2"
+
                 accessibility_computer.cache.set_absolute(
-                    combined_features,
+                    enhanced_features,
                     mode='all_destinations',
                     dest_type='complete',
                     threshold=0,
                     origins_hash=cache_key
                 )
-                self._log(f"Cached complete feature matrix for reuse")
+                self._log(f"Cached base+modal features ({enhanced_features.shape[1]} cols) for reuse")
             
             return combined_features
             
@@ -3925,11 +3991,14 @@ ACCESSIBILITY-VULNERABILITY
         # Do spatial join ONCE to assign tract IDs to all addresses
         self._log("Performing one-time spatial join to assign tract IDs...")
         addresses_with_tracts = gpd.sjoin(
-            all_addresses, 
-            tracts_gdf[['FIPS', 'geometry']], 
-            how='left', 
+            all_addresses,
+            tracts_gdf[['FIPS', 'geometry']],
+            how='left',
             predicate='within'
         )
+        n_unmatched = addresses_with_tracts['FIPS'].isna().sum()
+        if n_unmatched > 0:
+            self._log(f"{n_unmatched}/{len(addresses_with_tracts)} addresses did not fall within any tract (will be excluded from training)", level='WARN')
 
         train_addresses = []
         train_tract_svis = {}
@@ -3999,9 +4068,15 @@ ACCESSIBILITY-VULNERABILITY
         )
         
         # 6. Build GLOBAL graph with all training addresses
-        state_fips = training_fips_list[0][:2]
-        county_fips = training_fips_list[0][2:5]
-        
+        # derive county from the majority of training tracts (warns if mixed)
+        county_set = set((f[:2], f[2:5]) for f in training_fips_list)
+        if len(county_set) > 1:
+            self._log(f"WARNING: training tracts span {len(county_set)} counties: {county_set}. "
+                      f"Road network and graph will use the most common county.")
+        from collections import Counter
+        county_counts = Counter((f[:2], f[2:5]) for f in training_fips_list)
+        state_fips, county_fips = county_counts.most_common(1)[0][0]
+
         train_graph = self.data_loader.create_spatial_accessibility_graph(
             addresses=train_addresses_df,
             accessibility_features=normalized_train_features,

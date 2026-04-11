@@ -4,10 +4,11 @@ Professional, focused visualizations without editorial content
 """
 
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Union
 from scipy.stats import pearsonr, shapiro, probplot
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import warnings
@@ -1126,38 +1127,55 @@ Comparison:
             return self.colors['naive']
         return 'gray'
     
-    def plot_spatial_disaggregation(self, 
-                                    address_gdf,
-                                    predictions: np.ndarray,
-                                    tract_svi: float,
+    def plot_spatial_disaggregation(self,
+                                    address_gdf=None,
+                                    predictions: np.ndarray = None,
+                                    tract_svi: float = None,
                                     title: str = "GNN Disaggregation",
-                                    output_path: str = None) -> plt.Figure:
+                                    output_path: str = None,
+                                    multi_tract_data: Dict = None,
+                                    tract_boundaries_path: str = None) -> plt.Figure:
         """
         Create spatial map of disaggregated predictions.
-        
-        Args:
+
+        Supports single-tract mode (original) and multi-tract mode.
+
+        Single-tract args:
             address_gdf: GeoDataFrame with address points
             predictions: Array of predicted SVI values
             tract_svi: Known tract SVI
             title: Plot title
+
+        Multi-tract args:
+            multi_tract_data: Dict keyed by tract FIPS, each value a dict with
+                'address_gdf', 'predictions', 'tract_svi'
+            tract_boundaries_path: Path to TIGER tract shapefile for boundary overlay
+            title: Plot title (appended with tract count)
+
+        Shared args:
             output_path: Path to save figure
         """
+        if multi_tract_data is not None:
+            return self._plot_multi_tract_disaggregation(
+                multi_tract_data, title, output_path, tract_boundaries_path
+            )
+
+        # single-tract mode (original behavior)
         fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-        
-        # Extract coordinates
+
         x = address_gdf.geometry.x.values
         y = address_gdf.geometry.y.values
-        
-        # Left: Predictions
+
+        # left: predictions
         ax1 = axes[0]
-        scatter = ax1.scatter(x, y, c=predictions, cmap='RdYlGn_r', 
+        scatter = ax1.scatter(x, y, c=predictions, cmap='RdYlGn_r',
                              s=30, alpha=0.7, edgecolors='none')
         plt.colorbar(scatter, ax=ax1, label='Predicted SVI')
         ax1.set_xlabel('Longitude')
         ax1.set_ylabel('Latitude')
         ax1.set_title(f'{title}\n(Tract SVI: {tract_svi:.4f})', fontweight='bold')
-        
-        # Right: Deviation from tract mean
+
+        # right: deviation from tract mean
         ax2 = axes[1]
         deviations = predictions - tract_svi
         max_dev = max(abs(deviations.min()), abs(deviations.max()))
@@ -1168,14 +1186,127 @@ Comparison:
         ax2.set_xlabel('Longitude')
         ax2.set_ylabel('Latitude')
         ax2.set_title('Spatial Variation Pattern\n(Blue=Lower, Red=Higher)', fontweight='bold')
-        
+
         plt.tight_layout()
-        
+
         if output_path:
             plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
             print(f"Saved: {output_path}")
-        
+
         return fig
+
+    def _plot_multi_tract_disaggregation(self, multi_tract_data, title, output_path,
+                                          tract_boundaries_path):
+        """multi-tract spatial heatmap across all tracts on shared axes."""
+        import os
+
+        n_tracts = len(multi_tract_data)
+
+        # collect all coordinates, predictions, and per-address deviations
+        all_x, all_y, all_preds, all_devs = [], [], [], []
+        total_addresses = 0
+
+        for fips, tdata in multi_tract_data.items():
+            gdf = tdata['address_gdf']
+            preds = np.asarray(tdata['predictions'])
+            tsvi = tdata['tract_svi']
+
+            x = gdf.geometry.x.values
+            y = gdf.geometry.y.values
+
+            all_x.append(x)
+            all_y.append(y)
+            all_preds.append(preds)
+            all_devs.append(preds - tsvi)
+            total_addresses += len(x)
+
+        all_x = np.concatenate(all_x)
+        all_y = np.concatenate(all_y)
+        all_preds = np.concatenate(all_preds)
+        all_devs = np.concatenate(all_devs)
+
+        # scale point size based on address count
+        point_size = max(3, min(30, 5000 / max(total_addresses, 1)))
+
+        fig, axes = plt.subplots(1, 2, figsize=(18, 8))
+
+        # try to load tract boundaries for background overlay
+        tract_geoms = self._load_tract_boundaries(
+            tract_boundaries_path, list(multi_tract_data.keys())
+        )
+
+        for ax in axes:
+            if tract_geoms is not None:
+                tract_geoms.boundary.plot(ax=ax, color='#999999', linewidth=0.6, zorder=1)
+
+        # left panel: unified SVI colorscale
+        ax1 = axes[0]
+        scatter = ax1.scatter(all_x, all_y, c=all_preds, cmap='RdYlGn_r',
+                             vmin=0, vmax=1, s=point_size, alpha=0.7,
+                             edgecolors='none', zorder=2)
+        plt.colorbar(scatter, ax=ax1, label='Predicted SVI', shrink=0.8)
+        ax1.set_xlabel('Longitude')
+        ax1.set_ylabel('Latitude')
+        ax1.set_title(f'{title}\n({n_tracts} tracts, {total_addresses:,} addresses)',
+                     fontweight='bold')
+        ax1.set_aspect('equal')
+
+        # right panel: deviation from each address's own tract SVI
+        ax2 = axes[1]
+        max_dev = max(abs(all_devs.min()), abs(all_devs.max())) if len(all_devs) > 0 else 0.1
+        scatter2 = ax2.scatter(all_x, all_y, c=all_devs, cmap='coolwarm',
+                              vmin=-max_dev, vmax=max_dev, s=point_size,
+                              alpha=0.7, edgecolors='none', zorder=2)
+        plt.colorbar(scatter2, ax=ax2, label='Deviation from Tract SVI', shrink=0.8)
+        ax2.set_xlabel('Longitude')
+        ax2.set_ylabel('Latitude')
+        ax2.set_title('Spatial Variation Pattern\n(Blue=Lower, Red=Higher than Tract Mean)',
+                     fontweight='bold')
+        ax2.set_aspect('equal')
+
+        plt.tight_layout()
+
+        if output_path:
+            plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight',
+                       facecolor='white', edgecolor='none')
+            print(f"Saved: {output_path}")
+
+        return fig
+
+    def _load_tract_boundaries(self, shapefile_path, fips_list):
+        """load tract boundary polygons for overlay. returns None on failure."""
+        try:
+            import geopandas as gpd
+        except ImportError:
+            return None
+
+        if shapefile_path is None:
+            # try default TIGER location
+            import os
+            default_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                'data', 'raw', 'tl_2020_47_tract', 'tl_2020_47_tract.shp'
+            )
+            if os.path.exists(default_path):
+                shapefile_path = default_path
+            else:
+                return None
+
+        try:
+            tracts = gpd.read_file(shapefile_path)
+            # filter to matching FIPS codes
+            matched = tracts[tracts['GEOID'].isin(fips_list)]
+            if matched.empty:
+                # try without filtering (show all county tracts for context)
+                county_fips = fips_list[0][:5] if fips_list else None
+                if county_fips:
+                    matched = tracts[
+                        (tracts['STATEFP'] == county_fips[:2]) &
+                        (tracts['COUNTYFP'] == county_fips[2:5])
+                    ]
+            return matched if not matched.empty else None
+        except Exception:
+            return None
 
 
 def create_disaggregation_visualizations(comparison_results: Dict,

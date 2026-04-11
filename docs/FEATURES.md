@@ -1,115 +1,208 @@
 # GRANITE Feature Reference
 
-Complete inventory of features available to the GNN, organized by implementation status and source.
+Complete inventory of features used by the GNN, organized by source and group.
 
-## Implemented Features (54 total)
+## Summary
 
-### Base Accessibility (30 features: 10 per destination type)
+72+ features per address (variable depending on property type coverage), organized in four groups:
 
-Computed per address from real OSRM travel times to each destination type (employment, healthcare, grocery).
+| Group | Count | Varies within tract? | Source |
+|---|---|---|---|
+| Base accessibility | 30 | Yes | OSRM travel times |
+| Modal accessibility | 15 | Yes | Per-address OSRM drive + walk times |
+| Socioeconomic controls | 9 | No (tract-level) | CDC SVI / ACS |
+| Address-level attributes | 18 (variable) | Yes | Parcel, building, flood, land cover |
+| **Total** | **72+** | | |
 
-**Temporal (3 per type):**
+Of these, 9 are tract-level constants (socioeconomic controls). Modal features were previously tract-level constants but are now computed per address from OSRM driving and walking travel times, giving them within-tract variance.
 
-| # | Feature | Formula | Expected SVI Correlation |
-|---|---------|---------|--------------------------|
-| 1 | `{type}_min_time` | min driving time to any destination | Positive |
-| 2 | `{type}_mean_time` | mean driving time to all destinations | Positive |
-| 3 | `{type}_median_time` | median driving time | Positive |
+---
 
-**Count (3 per type):**
+## Group 1: Base Accessibility (30 features)
 
-| # | Feature | Formula | Expected SVI Correlation |
-|---|---------|---------|--------------------------|
-| 4 | `{type}_count_5min` | destinations reachable in 5 min driving | Negative |
-| 5 | `{type}_count_10min` | destinations reachable in 10 min driving | Negative |
-| 6 | `{type}_count_15min` | destinations reachable in 15 min driving | Negative |
+10 features per destination type, computed per address from real OSRM travel times.
 
-**Equity/Mode (4 per type):**
+### Per destination type
 
-| # | Feature | Formula | Expected SVI Correlation |
-|---|---------|---------|--------------------------|
-| 7 | `{type}_drive_advantage` | mean walk time / mean drive time | Positive |
-| 8 | `{type}_dispersion` | CV of drive times (std/mean) | Positive |
-| 9 | `{type}_time_range` | max drive time - min drive time | Positive |
-| 10 | `{type}_percentile` | rank percentile within tract | Positive |
+| # | Feature | Description | Expected SVI correlation |
+|---|---------|-------------|--------------------------|
+| 1 | `{type}_min_time` | Min driving time to any destination | Positive |
+| 2 | `{type}_mean_time` | Mean driving time across all destinations | Positive |
+| 3 | `{type}_median_time` | Median driving time | Positive |
+| 4 | `{type}_count_5min` | Destinations reachable in 5 min driving | Negative |
+| 5 | `{type}_count_10min` | Destinations reachable in 10 min driving | Negative |
+| 6 | `{type}_count_15min` | Destinations reachable in 15 min driving | Negative |
+| 7 | `{type}_drive_advantage` | (walk_avg - drive_avg) / walk_avg, clipped to [-0.2, 1.0] | Positive |
+| 8 | `{type}_dispersion` | CV of drive times (std/mean), clipped to [0, 1] | Positive |
+| 9 | `{type}_time_range` | (max - min) / mean drive time, clipped to [0, 2] | Positive |
+| 10 | `{type}_percentile` | Rank percentile of mean_time within tract | Positive |
 
-**Destination types and data sources:**
-- `employment`: LEHD Workplace Area Characteristics 2021 (259 locations in Hamilton County)
-- `healthcare`: CMS Hospital Compare (12 facilities)
-- `grocery`: OpenStreetMap supermarket tags (181 stores)
+### Destination types
 
-### Modal Features (15 features: 5 per destination type)
+| Type | Data source | Count |
+|---|---|---|
+| `employment` | LEHD Workplace Area Characteristics 2021 | 1,329 locations |
+| `healthcare` | CMS Hospital Compare | 12 facilities |
+| `grocery` | OpenStreetMap supermarket/grocery tags | 189 stores |
 
-Cross-mode comparisons computed from driving and walking travel times.
+### Empirical finding
 
-| # | Feature | Description |
-|---|---------|-------------|
-| 1 | `modal_{type}_avg_time` | Average across both modes |
-| 2 | `modal_{type}_time_std` | Standard deviation across modes |
-| 3 | `modal_{type}_access_density` | Destination density metric |
-| 4 | `modal_{type}_equity_gap` | Walk time minus drive time gap |
-| 5 | `modal_{type}_car_advantage` | Ratio of walk to drive accessibility |
+Accessibility features show near-zero within-tract variance (r ~ 0.03 with SVI predictions). Raw spatial coordinates (r ~ 0.67) dramatically outperform them as predictors. This is a validated empirical finding, not a data quality problem. In Hamilton County, addresses within a single tract are close enough that travel-time differences are negligible.
 
-**Known limitation:** Modal features are currently computed at tract level. All addresses in a tract receive identical modal values, reducing within-tract variation.
+---
 
-### Socioeconomic Controls (9 features)
+## Group 2: Modal Accessibility (15 features)
 
-Tract-level ACS variables from CDC SVI, applied uniformly to all addresses within a tract.
+5 features per destination type, computed per address from OSRM driving and walking travel times. Per-address travel time summaries (drive/walk nearest, full time arrays) are extracted during base feature computation and cached alongside per-destination features.
 
-| # | Feature | ACS Source | Description |
+| # | Feature | Formula | Description |
+|---|---------|---------|-------------|
+| 1 | `{type}_transit_dependence` | (drive_nearest + walk_nearest) / 2 | Avg time to nearest destination across both modes |
+| 2 | `{type}_car_effective_access` | std(drive_nearest, walk_nearest) | Mode disparity for nearest destination |
+| 3 | `{type}_walk_effective_access` | \|{drive reachable in 10min} union {walk reachable in 10min}\| | Destinations reachable by either mode |
+| 4 | `{type}_modal_access_gap` | \|walk_nearest - drive_nearest\| | Absolute equity gap between modes |
+| 5 | `{type}_forced_walk_burden` | walk_nearest / drive_nearest | How much worse walking is than driving |
+
+Feature names are kept from the original implementation for downstream compatibility; the semantics have changed from tract-level vehicle-ownership-weighted features to per-address multi-modal travel time comparisons.
+
+When per-address travel times are unavailable (e.g., partial cache from an older run), the function falls back to a tract-level approximation derived from base accessibility features.
+
+**Source:** `granite/features/modal_accessibility.py`
+
+---
+
+## Group 3: Socioeconomic Controls (9 features)
+
+Tract-level ACS variables from the CDC Social Vulnerability Index, applied uniformly to all addresses within a tract.
+
+| # | Feature | SVI field | Description |
 |---|---------|-----------|-------------|
-| 1 | `no_vehicle` | E_NOVEH | Households without vehicle access |
-| 2 | `poverty` | E_POV150 | Population below 150% poverty line |
-| 3 | `unemployment` | E_UNEMP | Unemployed population |
-| 4 | `no_highschool` | E_NOHSDP | No high school diploma |
-| 5 | `age65_plus` | E_AGE65 | Population 65 and older |
-| 6 | `age17_under` | E_AGE17 | Population under 17 |
-| 7 | `disability` | E_DISABL | Population with disabilities |
-| 8 | `single_parent` | E_SNGPNT | Single-parent households |
-| 9 | `minority` | E_MINRTY | Minority population |
+| 1 | `pct_no_vehicle` | EP_NOVEH | % households without vehicle access |
+| 2 | `pct_poverty` | EP_POV150 | % population below 150% poverty line |
+| 3 | `pct_unemployed` | EP_UNEMP | % civilian labor force unemployed |
+| 4 | `pct_no_hs_diploma` | EP_NOHSDP | % age 25+ without high school diploma |
+| 5 | `pct_uninsured` | EP_UNINSUR | % civilian noninstitutionalized without health insurance |
+| 6 | `pct_mobile_homes` | EP_MOBILE | % housing units that are mobile homes |
+| 7 | `pct_crowded` | EP_CROWD | % occupied housing with more people than rooms |
+| 8 | `population` | E_TOTPOP | Total population |
+| 9 | `housing_units` | E_HU | Total housing units |
 
-**Known limitation:** These are tract-level aggregates. They do not vary within a tract and therefore cannot drive within-tract disaggregation on their own. Their role is to provide socioeconomic context to the GNN.
+**Known limitation:** Same as modal features: tract-level constants that cannot drive within-tract disaggregation.
 
-## Candidate Features (Not Yet Implemented)
+**Source:** `granite/data/loaders.py` (`get_tract_socioeconomic_features`)
 
-Identified through literature review and feature pipeline analysis as potential improvements.
+---
 
-### Transit Accessibility (via GTFS)
-- Transit travel times to each destination type (requires CARTA GTFS feed)
-- Transit frequency and coverage metrics
-- Transit/drive ratio per address
-- Walk-to-transit time (distance to nearest stop)
+## Group 4: Address-Level Attributes (up to 18 features)
 
-### Temporal Variation
-- Peak vs. off-peak accessibility differences
-- Morning commute vs. midday access patterns
-- Weekend vs. weekday accessibility
+Extracted from `combined_address_features.csv`. Feature count varies per tract depending on data availability (particularly PROPTYPE coverage).
 
-### Interaction Terms
-- `accessibility x no_vehicle`: effective accessibility given vehicle ownership
-- `drive_advantage x poverty`: mode dependency weighted by economic vulnerability
-- Vehicle-weighted accessibility metrics (weight travel times by tract vehicle ownership rates)
+### Building (2 features)
 
-### Address-Level Refinements
-- Compute `drive_advantage` per address instead of per tract
-- Housing type indicators (from parcel data if available)
-- Distance to nearest transit stop per address
-- Land use classification per address (NLCD data available in `data/`)
+| Feature | Description |
+|---------|-------------|
+| `log_bldg_footprint_m2` | log(1 + building footprint area in m2) |
+| `bldg_vertex_count` | Building polygon vertex count (shape complexity) |
+
+**Source:** Microsoft Building Footprints
+
+### Flood (1 feature)
+
+| Feature | Description |
+|---------|-------------|
+| `in_sfha` | Binary: address in FEMA Special Flood Hazard Area |
+
+**Source:** FEMA National Flood Hazard Layer
+
+### Building Type (1 feature)
+
+| Feature | Description |
+|---------|-------------|
+| `is_residential` | Binary: OSM building type is residential/house/apartments/detached/etc. |
+
+**Source:** OpenStreetMap building tags
+
+### Parcel (3 features)
+
+| Feature | Description |
+|---------|-------------|
+| `log_appvalue` | log of county-appraised property value |
+| `build_to_land_ratio` | Building area / lot area |
+| `log_acres` | log of parcel acreage |
+
+**Source:** Hamilton County tax assessor parcel data
+
+### Land Use Code (4 features, one-hot)
+
+| Feature | LUCODE range |
+|---------|-------------|
+| `lucode_residential` | 100-199 |
+| `lucode_commercial` | 200-299 |
+| `lucode_industrial` | 300-399 |
+| `lucode_other` | All other codes |
+
+**Source:** Hamilton County tax assessor
+
+### Property Type (up to 5 features, one-hot)
+
+Only property types present in the tract's addresses are encoded, so the count varies (0-5).
+
+| Feature | Code | Description |
+|---------|------|-------------|
+| `proptype_residential` | 22.0 | Single-family residential |
+| `proptype_apartment_10plus` | 40.0 | Apartment 10+ units |
+| `proptype_commercial` | 8.0 | Commercial |
+| `proptype_rental_40pct` | 32.0 | Rental 40%+ |
+| `proptype_cha_housing` | 11.0 | Chattanooga Housing Authority |
+
+**Source:** Hamilton County tax assessor
+
+### NLCD Land Cover (3 features)
+
+| Feature | Description |
+|---------|-------------|
+| `nlcd_land_cover` | NLCD classification code (raw numeric) |
+| `nlcd_impervious_pct` | Percent impervious surface |
+| `nlcd_tree_canopy_pct` | Percent tree canopy cover |
+
+**Source:** USGS National Land Cover Database
+
+---
+
+## Context Features (5 features, separate from feature matrix)
+
+Used by the GNN's context-gating mechanism to modulate accessibility features. These are passed to the model separately and do not appear in the feature matrix column count.
+
+| # | Feature | Derivation |
+|---|---------|------------|
+| 1 | pct_no_vehicle | Normalized from socioeconomic group |
+| 2 | pct_poverty | Normalized from socioeconomic group |
+| 3 | pct_unemployed | Normalized from socioeconomic group |
+| 4 | pct_no_hs_diploma | Normalized from socioeconomic group |
+| 5 | population | E_TOTPOP / 10000 |
+
+**Source:** `granite/data/loaders.py` (`create_context_features_for_addresses`)
+
+---
 
 ## Feature Quality Notes
 
-From validation runs on 4-tract configurations:
+From validation runs on multi-tract configurations:
 
 - Time/count anti-correlation: r = -0.956 (correct; shorter times correlate with higher counts)
-- 73.3% of testable features show expected correlation directions with SVI
-- `dispersion` features show inverse correlations (expected positive, observed negative); warrants investigation
+- `dispersion` features show inverse correlations in some tracts (expected positive, observed negative)
 - `drive_advantage` shows inverse correlation in some runs; may reflect the urban accessibility paradox (vulnerable populations in spatially accessible urban cores)
-- Zero-variance features: 0
-- NaN values: 0
+- Zero-variance features: 11 per tract typical (9 socioeconomic constants + count features where all addresses reach the same number of destinations within the threshold). Previously 24+ when modal features were also tract-level constants.
 
 ## File Locations
 
-- Feature extraction: `granite/data/enhanced_accessibility.py`
-- Modal computation: `granite/features/modal_accessibility.py`
-- OSRM routing: `granite/routing/osrm_router.py`
-- Feature caching: `granite/cache.py` (stored in `./granite_cache/`)
+| Component | File |
+|---|---|
+| Base accessibility extraction | `granite/data/enhanced_accessibility.py` |
+| Modal feature computation | `granite/features/modal_accessibility.py` |
+| Socioeconomic extraction | `granite/data/loaders.py` |
+| Building/flood/NLCD extraction | `granite/disaggregation/pipeline.py` (`_extract_building_features`) |
+| Per-address travel time summaries | `granite/disaggregation/pipeline.py` (`_summarize_travel_times`) |
+| Feature assembly + caching | `granite/disaggregation/pipeline.py` (`_compute_accessibility_features`) |
+| Feature name generation | `granite/disaggregation/pipeline.py` (`_generate_feature_names`) |
+| OSRM routing | `granite/routing/osrm_router.py` |

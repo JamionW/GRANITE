@@ -1,5 +1,49 @@
 # GRANITE Session Log
 
+## 2026-04-11: Bug fixes, modal feature refactor, cache improvements
+
+**Files changed:** `granite/data/loaders.py`, `granite/models/gnn.py`, `granite/cache.py`, `granite/disaggregation/pipeline.py`, `granite/evaluation/spatial_diagnostics.py`, `granite/evaluation/accessibility_validator.py`, `granite/evaluation/morans_i_analysis.py`, `granite/evaluation/post_training_validation.py`, `granite/models/mixture_of_experts.py`, `granite/validation/block_group_validation.py`, `granite/features/modal_accessibility.py`, `README.md`, `docs/FEATURES.md`
+
+### Bug fixes (12 bugs)
+
+- **#7 CRS mismatch in spatial join** (`loaders.py`): Added CRS check before `within()` in `get_addresses_for_tract`
+- **#10 Hardcoded county name** (`loaders.py`): `_get_county_name` now falls back to SVI CSV lookup; `load_svi_data` uses case-insensitive match and raises `ValueError` on empty result
+- **#4 GPU device mismatch** (`gnn.py`, 8 locations): All CPU tensors now use `.to(device)` matching graph data device
+- **#5 No cache invalidation** (`cache.py`): Added version tag (auto-invalidates on change), `invalidate()` method with optional TTL, and `_invalidate_all()`
+- **#6 Bootstrap p-value**: Already fixed in previous session (verified)
+- **#8 Single-county assumption** (`pipeline.py`): Global training now derives county from most common tract FIPS, warns if mixed
+- **#9 MoE overlap documentation** (`mixture_of_experts.py`): Added comment documenting deliberate soft-boundary design
+- **#11 FIPS strip inconsistency** (`loaders.py`): Added `str().strip()` at tract_fips assignment
+- **#12 Zero-variance logging** (`pipeline.py`): Log level now INFO when near expected count (24 constants), WARN only when unexpectedly high
+- **#13 Quality score inversion** (`spatial_diagnostics.py`): Changed to `1 - (bad/total)` so higher = better
+- **#14 Silent address drop** (`pipeline.py`): Logs unmatched address count after spatial join
+- **#15 Low BG threshold** (`block_group_validation.py`): Raised minimum from 5 to 10 addresses per block group
+
+### Validator bug fix
+
+- **NameError in accessibility_validator.py**: `count_5` referenced but never defined at lines 540-541 and 561-562; replaced with `count_10min` which was the intended variable. Validator now runs all 7 steps.
+
+### Modal features refactored to per-address computation
+
+- **Before:** 5 features per destination type computed at tract level from vehicle ownership rates and base features. All addresses in a tract received identical values (zero within-tract variance).
+- **After:** Computed per address from OSRM driving and walking travel times. New semantics: avg_time (mean of drive/walk nearest), time_std (mode disparity), access_density (union of destinations reachable in 10min by either mode), equity_gap (|walk - drive| nearest), car_advantage (walk/drive ratio nearest).
+- Pipeline extracts per-address travel time summaries via `_summarize_travel_times()` during base feature computation and caches them alongside per-destination features.
+- Fallback to tract-level approximation when per-address times unavailable (partial cache from older runs).
+- Output shape unchanged: (n_addresses, 15). Feature names unchanged for downstream compatibility.
+- `employment_walk_effective_access` now ranks #3 in feature importance (was negligible as tract constant).
+
+### Cache key changes
+
+- Complete feature cache key changed from `_base_modal` to `_base_modal_v2` to invalidate stale entries with old modal features.
+- New `modal_times` cache entries store per-address travel time summaries per destination type.
+- Cache now stores base+modal only (not socioeco/building); those are recomputed fresh on cache hit.
+
+### Documentation updates
+
+- README and FEATURES.md updated to reflect per-address modal features, reduced zero-variance count (11 vs 24), cache invalidation API, and corrected feature count.
+
+---
+
 ## 2026-04-09: Baseline and evaluation bug fixes
 
 **Files changed:** `granite/evaluation/baselines.py`, `granite/evaluation/bootstrap_confidence_intervals.py`, `granite/evaluation/post_training_validation.py`

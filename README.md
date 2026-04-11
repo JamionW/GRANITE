@@ -19,34 +19,37 @@ Disaggregation is treated as an allocation problem: the tract mean is fixed, and
 Hamilton County, Tennessee (FIPS 47065): 85 tracts with valid SVI data, 102,647 address points (66 tracts with sufficient address coverage for analysis).
 
 **Data sources:**
-- LEHD Workplace Area Characteristics 2021 (259 employment locations)
+- LEHD Workplace Area Characteristics 2021 (1,329 employment locations)
 - CMS Hospital Compare (12 healthcare facilities)
-- OpenStreetMap (181 grocery stores)
+- OpenStreetMap (189 grocery stores)
 - CDC Social Vulnerability Index 2020
 - TIGER/Line census tract boundaries and road networks
 - OSRM routing engine (driving and walking profiles)
 - Hamilton County tax assessor parcel data (appraised value, land use, property type, acreage)
 - Microsoft Building Footprints (footprint area, vertex count)
-- FEMA National Flood Hazard Layer (SFHA status, flood zone classification)
-- OpenStreetMap building tags (building type, levels)
+- FEMA National Flood Hazard Layer (SFHA status)
+- OpenStreetMap building tags (building type)
+- USGS National Land Cover Database (land cover class, impervious surface, tree canopy)
 
 ## Features
 
-70 features per address (when all address-level data is available), organized in four groups:
+72+ features per address (variable depending on property type coverage), organized in four groups:
 
 **30 base accessibility features** (10 per destination type: employment, healthcare, grocery). Temporal metrics (min, mean, median travel time), count metrics (destinations reachable within 5/10/15 min), and equity metrics (drive advantage ratio, dispersion, time range, percentile rank).
 
-**15 modal features** (5 per destination type). Vehicle-ownership-weighted accessibility: transit dependence, car-effective access, walk-effective access, modal access gap, and forced walk burden.
+**15 modal features** (5 per destination type). Computed per address from OSRM driving and walking travel times: avg time to nearest destination (mean of drive and walk), time std (mode disparity), access density (destinations reachable within 10 min by either mode), equity gap (|walk - drive| to nearest), and car advantage (walk/drive ratio to nearest).
 
-**9 socioeconomic controls.** Tract-level ACS variables: no vehicle, poverty, unemployment, no high school diploma, uninsured, mobile homes, crowded housing, population, housing units.
+**9 socioeconomic controls.** Tract-level ACS variables from CDC SVI: no vehicle (EP_NOVEH), poverty (EP_POV150), unemployment (EP_UNEMP), no high school diploma (EP_NOHSDP), uninsured (EP_UNINSUR), mobile homes (EP_MOBILE), crowded housing (EP_CROWD), population (E_TOTPOP), housing units (E_HU). Tract-level constants.
 
-**16 address-level features.** Building footprint (log area, vertex count), FEMA flood zone (SFHA binary, zone classification), OSM building type (residential binary), parcel data (log appraised value, build-to-land ratio, log acres), land use code (4-category one-hot), property type (top-5 one-hot).
+**18 address-level features** (variable, 15-19 depending on property type coverage). Building footprint (log area, vertex count), FEMA flood zone (SFHA binary), OSM building type (residential binary), parcel data (log appraised value, build-to-land ratio, log acres), land use code (4-category one-hot), property type (up to 5 one-hot), NLCD land cover (classification code, impervious surface %, tree canopy %).
 
 See `docs/FEATURES.md` for the complete feature reference.
 
 ## Architecture
 
-Hybrid GCN/GAT graph neural network (3 layers, ~50K parameters):
+Two GNN architectures, selectable via `--architecture {gcn_gat|sage}`:
+
+**gcn_gat (default):** Hybrid GCN/GAT graph neural network (3 convolution layers, ~50K parameters):
 
 1. Optional context-gated feature modulation (socioeconomic context gates accessibility features)
 2. Feature encoder: input dim to 64 dimensions (2-layer MLP)
@@ -54,6 +57,8 @@ Hybrid GCN/GAT graph neural network (3 layers, ~50K parameters):
 4. GATConv: attention-weighted neighbor aggregation (2 heads)
 5. GCNConv: final spatial aggregation with dimensionality reduction
 6. Prediction head: SVI output with sigmoid activation
+
+**sage:** GraphSAGE variant. Same encoder, context gating, and prediction heads, but replaces the GCN+GAT+GCN convolution stack with three SAGEConv layers with batch normalization. Uses neighborhood sampling instead of fixed graph structure.
 
 Training uses a multi-component loss: constraint satisfaction (tract mean preservation, weight configurable), spatial variation encouragement, bounds enforcement, and accessibility consistency. Post-training additive correction is available via config but currently disabled for the constraint ablation experiment.
 
@@ -135,7 +140,7 @@ All parameters live in `config.yaml`. CLI arguments override config values. Key 
 
 ## Caching
 
-First runs compute OSRM travel times for all origin/destination pairs (can take 30+ minutes for multi-tract runs). Subsequent runs with the same addresses and destinations hit the cache and complete in under 5 minutes. Address-level features (parcel, building, flood) are not cached; they are re-extracted from the CSV on each run. Cache location: `./granite_cache/`.
+First runs compute OSRM travel times for all origin/destination pairs (can take 30+ minutes for multi-tract runs). Subsequent runs with the same addresses and destinations hit the cache and complete in under 5 minutes. Address-level features (parcel, building, flood, socioeconomic) are not cached; they are re-extracted on each run. The cache supports version tags for invalidation when destination data changes, and a `cache.invalidate(older_than_days=N)` API for TTL-based cleanup. Cache location: `./granite_cache/`.
 
 ## Key Research Findings
 

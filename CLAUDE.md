@@ -58,7 +58,7 @@ granite --fips 47065000600 --no-cache
 
 ## Feature matrix
 
-54 features per address: 30 base accessibility features, 15 modal/tract features, 9 socioeconomic features. Of these, 24 are tract-level constants, which is a known limitation currently under investigation.
+72+ features per address: 30 base accessibility features, 15 modal features (now per-address from OSRM drive/walk times), 9 socioeconomic features, 18+ address-level attributes (building, parcel, flood, NLCD). Of these, 9 are tract-level constants (socioeconomic controls).
 
 Accessibility features (travel times, destination counts, modal gaps) show near-zero within-tract variance. Raw spatial coordinates (r~0.67) dramatically outperform accessibility features (r~0.03) as predictors. This is a validated empirical finding; do not treat it as a data quality problem.
 

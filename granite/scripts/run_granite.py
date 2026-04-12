@@ -101,6 +101,10 @@ Examples:
         '--prune-features', type=str, default=None, metavar='REPORT_PATH',
         help='Path to importance_report.txt; drops features with negative importance before training'
     )
+    parser.add_argument(
+        '--diagnostics', action='store_true',
+        help='Generate diagnostic plots (stage validation, accessibility validation)'
+    )
 
     return parser.parse_args()
 
@@ -148,6 +152,7 @@ def load_config(args):
     config['model']['architecture'] = args.architecture
     if args.prune_features:
         config['processing']['prune_features_path'] = args.prune_features
+    config['diagnostics'] = args.diagnostics
 
     return config
 
@@ -528,8 +533,8 @@ def run_multi_fips_experiment(args):
             viz = DisaggregationVisualizer()
             heatmap_path = os.path.join(output_dir, f'multi_tract_heatmap_{arch}.png')
             viz.plot_spatial_disaggregation(
-                multi_tract_data=multi_tract_viz_data,
-                title=f'GRANITE Disaggregation ({arch.upper()})',
+                tract_results=multi_tract_viz_data,
+                title=f'GRANITE Disaggregation ({len(multi_tract_viz_data)} tracts, {arch.upper()})',
                 output_path=heatmap_path
             )
             print(f"Multi-tract heatmap saved to: {heatmap_path}")

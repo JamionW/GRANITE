@@ -41,36 +41,48 @@ class GRANITEResearchVisualizer:
         self.good_r2 = 0.36
         self.moderate_r2 = 0.16
 
-    def create_comprehensive_research_analysis(self, results: Dict, output_dir: str):
-        """Create clean research analysis without editorial content"""
+    def create_comprehensive_research_analysis(self, results: Dict, output_dir: str,
+                                                diagnostics: bool = False):
+        """Create clean research analysis without editorial content.
+
+        Args:
+            results: Research results dictionary
+            output_dir: Base output directory
+            diagnostics: If True, generate stage1/stage2/statistical_summary plots.
+                         Default False (only spatial_analysis.png is produced).
+        """
         import os
         os.makedirs(output_dir, exist_ok=True)
-        
-        # 1. Stage 1 Validation - Core question: Does GNN learn accessibility?
-        stage1_path = os.path.join(output_dir, 'stage1_validation.png')
-        self.plot_accessibility_learning_validation(
-            learned_accessibility=results.get('learned_accessibility'),
-            traditional_accessibility=results.get('traditional_accessibility'),
-            output_path=stage1_path
-        )
-        
-        # 2. Stage 2 Validation - Core question: Does model predict SVI?
-        stage2_path = os.path.join(output_dir, 'stage2_validation.png')
-        self.plot_svi_prediction_validation(
-            gnn_predictions=results.get('gnn_predictions'),
-            stage2_metrics=results.get('stage2_metrics', {}),
-            tract_svi=results.get('tract_svi', None),
-            output_path=stage2_path
-        )
-        
-        # 3. Statistical Summary - Core metrics only
-        stats_path = os.path.join(output_dir, 'statistical_summary.png')
-        self.plot_statistical_summary(
-            results=results,
-            output_path=stats_path
-        )
-        
-        # 4. Spatial Analysis - Geographic patterns
+
+        if diagnostics:
+            # 1. Stage 1 Validation
+            diag_dir = os.path.join(output_dir, 'visualizations')
+            os.makedirs(diag_dir, exist_ok=True)
+
+            stage1_path = os.path.join(diag_dir, 'stage1_validation.png')
+            self.plot_accessibility_learning_validation(
+                learned_accessibility=results.get('learned_accessibility'),
+                traditional_accessibility=results.get('traditional_accessibility'),
+                output_path=stage1_path
+            )
+
+            # 2. Stage 2 Validation
+            stage2_path = os.path.join(diag_dir, 'stage2_validation.png')
+            self.plot_svi_prediction_validation(
+                gnn_predictions=results.get('gnn_predictions'),
+                stage2_metrics=results.get('stage2_metrics', {}),
+                tract_svi=results.get('tract_svi', None),
+                output_path=stage2_path
+            )
+
+            # 3. Statistical Summary
+            stats_path = os.path.join(diag_dir, 'statistical_summary.png')
+            self.plot_statistical_summary(
+                results=results,
+                output_path=stats_path
+            )
+
+        # 4. Spatial Analysis - always generated
         spatial_path = os.path.join(output_dir, 'spatial_analysis.png')
         self.plot_spatial_analysis(
             gnn_predictions=results.get('gnn_predictions'),
@@ -560,39 +572,40 @@ Next Steps:
     def plot_spatial_analysis(self, gnn_predictions: pd.DataFrame,
                             learned_accessibility: np.ndarray,
                             output_path: str):
-        """Clean spatial analysis without editorial content"""
-        
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        """3-panel spatial analysis: SVI predictions, learned accessibility, access-vulnerability scatter"""
+
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         fig.suptitle('Spatial Analysis', fontsize=14, fontweight='bold')
-        
+
         if gnn_predictions is None or gnn_predictions.empty:
-            fig.text(0.5, 0.5, 'No spatial data available', 
+            fig.text(0.5, 0.5, 'No spatial data available',
                     ha='center', va='center', fontsize=16)
             plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
             plt.close()
             return
-        
+
         predictions = gnn_predictions['mean'].values
         x_coords = gnn_predictions.get('x', np.arange(len(predictions))).values
         y_coords = gnn_predictions.get('y', np.arange(len(predictions))).values
-        
-        # 1. SVI Prediction Map
-        ax1 = axes[0, 0]
+
+        # 1. SVI Prediction Map (fixed 0-1 colorscale)
+        ax1 = axes[0]
         if 'x' in gnn_predictions.columns:
-            scatter1 = ax1.scatter(x_coords, y_coords, c=predictions, 
-                                 s=15, alpha=0.7, cmap='viridis')
+            scatter1 = ax1.scatter(x_coords, y_coords, c=predictions,
+                                 s=15, alpha=0.7, cmap='RdYlGn_r',
+                                 vmin=0, vmax=1)
             ax1.set_title('SVI Predictions')
             ax1.set_xlabel('Longitude')
             ax1.set_ylabel('Latitude')
             ax1.set_aspect('equal')
             plt.colorbar(scatter1, ax=ax1, label='Predicted SVI')
         else:
-            ax1.text(0.5, 0.5, 'No coordinates\navailable', 
+            ax1.text(0.5, 0.5, 'No coordinates\navailable',
                     ha='center', va='center', transform=ax1.transAxes)
             ax1.set_title('SVI Predictions')
-        
+
         # 2. Accessibility Map
-        ax2 = axes[0, 1]
+        ax2 = axes[1]
         if learned_accessibility is not None and 'x' in gnn_predictions.columns:
             accessibility_mean = np.mean(learned_accessibility, axis=1)
             scatter2 = ax2.scatter(x_coords, y_coords, c=accessibility_mean,
@@ -603,75 +616,31 @@ Next Steps:
             ax2.set_aspect('equal')
             plt.colorbar(scatter2, ax=ax2, label='Accessibility')
         else:
-            ax2.text(0.5, 0.5, 'No accessibility\ndata available', 
+            ax2.text(0.5, 0.5, 'No accessibility\ndata available',
                     ha='center', va='center', transform=ax2.transAxes)
             ax2.set_title('Learned Accessibility')
-        
-        # 3. Accessibility-Vulnerability Relationship
-        ax3 = axes[1, 0]
+
+        # 3. Accessibility-Vulnerability Scatter
+        ax3 = axes[2]
         if learned_accessibility is not None:
             accessibility_mean = np.mean(learned_accessibility, axis=1)
             correlation, p_value = pearsonr(accessibility_mean, predictions)
-            
+
             ax3.scatter(accessibility_mean, predictions, alpha=0.6, s=20, color='purple')
-            
-            # Regression line
+
             z = np.polyfit(accessibility_mean, predictions, 1)
             p = np.poly1d(z)
             ax3.plot(sorted(accessibility_mean), p(sorted(accessibility_mean)), "r--", alpha=0.8)
-            
+
             ax3.set_xlabel('Learned Accessibility')
             ax3.set_ylabel('Predicted SVI')
-            ax3.set_title(f'Access-Vulnerability Link\nr = {correlation:.3f}')
+            ax3.set_title(f'Access-Vulnerability (r = {correlation:.3f})')
             ax3.grid(True, alpha=0.3)
-            
-            # Equity assessment
-            if correlation < -0.3:
-                equity_text = "Strong Equity\nPattern"
-                equity_color = 'lightgreen'
-            elif correlation < -0.1:
-                equity_text = "Moderate Equity\nPattern"
-                equity_color = 'lightyellow'
-            else:
-                equity_text = "Weak/No Equity\nPattern"
-                equity_color = 'lightcoral'
-            
-            ax3.text(0.05, 0.95, equity_text, transform=ax3.transAxes,
-                    bbox=dict(boxstyle='round', facecolor=equity_color, alpha=0.8),
-                    verticalalignment='top', fontweight='bold')
         else:
-            ax3.text(0.5, 0.5, 'No accessibility\ndata for analysis', 
+            ax3.text(0.5, 0.5, 'No accessibility\ndata for analysis',
                     ha='center', va='center', transform=ax3.transAxes)
-            ax3.set_title('Access-Vulnerability Link')
-        
-        # 4. Summary Statistics
-        ax4 = axes[1, 1]
-        ax4.axis('off')
-        
-        # Calculate spatial statistics
-        spatial_stats = f"""Spatial Summary:
+            ax3.set_title('Access-Vulnerability')
 
-Sample Size: {len(predictions):,} addresses
-Mean SVI: {np.mean(predictions):.4f}
-Spatial Std: {np.std(predictions):.4f}
-Range: {np.ptp(predictions):.4f}
-
-Spatial Extent:
-• X Range: {np.ptp(x_coords):.4f}
-• Y Range: {np.ptp(y_coords):.4f}
-
-Pattern Assessment:
-• Variation: {self._assess_spatial_variation(predictions)}
-• Coverage: {self._assess_spatial_coverage(len(predictions))}
-
-Equity Analysis:
-{f"• Access-Vulnerability: r = {correlation:.3f}" if learned_accessibility is not None else "• No accessibility data"}
-{f"• Equity Pattern: {self._assess_equity_pattern(correlation)}" if learned_accessibility is not None else ""}"""
-        
-        ax4.text(0.05, 0.95, spatial_stats.strip(), transform=ax4.transAxes,
-                fontsize=10, verticalalignment='top', fontfamily='monospace',
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcyan', alpha=0.8))
-        
         plt.tight_layout()
         plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
@@ -1131,36 +1100,41 @@ Comparison:
                                     address_gdf=None,
                                     predictions: np.ndarray = None,
                                     tract_svi: float = None,
-                                    title: str = "GNN Disaggregation",
+                                    tract_results: Dict = None,
+                                    title: str = None,
                                     output_path: str = None,
                                     multi_tract_data: Dict = None,
                                     tract_boundaries_path: str = None) -> plt.Figure:
         """
         Create spatial map of disaggregated predictions.
 
-        Supports single-tract mode (original) and multi-tract mode.
+        Single-tract mode (when address_gdf is provided):
+            Two-panel layout: predictions + deviation from tract mean.
 
-        Single-tract args:
-            address_gdf: GeoDataFrame with address points
-            predictions: Array of predicted SVI values
-            tract_svi: Known tract SVI
+        Multi-tract mode (when tract_results or multi_tract_data is provided):
+            Two-panel layout on shared axes: unified SVI colorscale + deviation.
+
+        Args:
+            address_gdf: GeoDataFrame with address points (single-tract)
+            predictions: Array of predicted SVI values (single-tract)
+            tract_svi: Known tract SVI (single-tract)
+            tract_results: Dict keyed by FIPS, each value a dict with
+                'address_gdf', 'predictions', 'tract_svi' (multi-tract)
             title: Plot title
-
-        Multi-tract args:
-            multi_tract_data: Dict keyed by tract FIPS, each value a dict with
-                'address_gdf', 'predictions', 'tract_svi'
-            tract_boundaries_path: Path to TIGER tract shapefile for boundary overlay
-            title: Plot title (appended with tract count)
-
-        Shared args:
             output_path: Path to save figure
+            multi_tract_data: Deprecated alias for tract_results
+            tract_boundaries_path: Path to TIGER shapefile for boundary overlay
         """
-        if multi_tract_data is not None:
+        # support both parameter names
+        multi = tract_results or multi_tract_data
+        if multi is not None:
             return self._plot_multi_tract_disaggregation(
-                multi_tract_data, title, output_path, tract_boundaries_path
+                multi, title, output_path, tract_boundaries_path
             )
 
         # single-tract mode (original behavior)
+        if title is None:
+            title = "GNN Disaggregation"
         fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
         x = address_gdf.geometry.x.values
@@ -1169,7 +1143,8 @@ Comparison:
         # left: predictions
         ax1 = axes[0]
         scatter = ax1.scatter(x, y, c=predictions, cmap='RdYlGn_r',
-                             s=30, alpha=0.7, edgecolors='none')
+                             s=30, alpha=0.7, edgecolors='none',
+                             vmin=0, vmax=1)
         plt.colorbar(scatter, ax=ax1, label='Predicted SVI')
         ax1.set_xlabel('Longitude')
         ax1.set_ylabel('Latitude')
@@ -1195,18 +1170,18 @@ Comparison:
 
         return fig
 
-    def _plot_multi_tract_disaggregation(self, multi_tract_data, title, output_path,
+    def _plot_multi_tract_disaggregation(self, tract_data, title, output_path,
                                           tract_boundaries_path):
         """multi-tract spatial heatmap across all tracts on shared axes."""
         import os
 
-        n_tracts = len(multi_tract_data)
+        n_tracts = len(tract_data)
 
         # collect all coordinates, predictions, and per-address deviations
         all_x, all_y, all_preds, all_devs = [], [], [], []
         total_addresses = 0
 
-        for fips, tdata in multi_tract_data.items():
+        for fips, tdata in tract_data.items():
             gdf = tdata['address_gdf']
             preds = np.asarray(tdata['predictions'])
             tsvi = tdata['tract_svi']
@@ -1225,21 +1200,30 @@ Comparison:
         all_preds = np.concatenate(all_preds)
         all_devs = np.concatenate(all_devs)
 
-        # scale point size based on address count
-        point_size = max(3, min(30, 5000 / max(total_addresses, 1)))
+        # auto-scale point size
+        if total_addresses >= 20000:
+            point_size = 3
+        elif total_addresses >= 5000:
+            point_size = 10
+        else:
+            point_size = 30
+
+        # default title
+        if title is None:
+            title = f"GRANITE Disaggregation ({n_tracts} tracts, GCN)"
 
         fig, axes = plt.subplots(1, 2, figsize=(18, 8))
 
         # try to load tract boundaries for background overlay
         tract_geoms = self._load_tract_boundaries(
-            tract_boundaries_path, list(multi_tract_data.keys())
+            tract_boundaries_path, list(tract_data.keys())
         )
 
         for ax in axes:
             if tract_geoms is not None:
-                tract_geoms.boundary.plot(ax=ax, color='#999999', linewidth=0.6, zorder=1)
+                tract_geoms.boundary.plot(ax=ax, color='gray', linewidth=0.5, zorder=1)
 
-        # left panel: unified SVI colorscale
+        # left panel: unified SVI colorscale 0 to 1
         ax1 = axes[0]
         scatter = ax1.scatter(all_x, all_y, c=all_preds, cmap='RdYlGn_r',
                              vmin=0, vmax=1, s=point_size, alpha=0.7,
@@ -1251,7 +1235,7 @@ Comparison:
                      fontweight='bold')
         ax1.set_aspect('equal')
 
-        # right panel: deviation from each address's own tract SVI
+        # right panel: deviation from each address's own tract SVI (coolwarm)
         ax2 = axes[1]
         max_dev = max(abs(all_devs.min()), abs(all_devs.max())) if len(all_devs) > 0 else 0.1
         scatter2 = ax2.scatter(all_x, all_y, c=all_devs, cmap='coolwarm',
@@ -1267,7 +1251,7 @@ Comparison:
         plt.tight_layout()
 
         if output_path:
-            plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight',
+            plt.savefig(output_path, dpi=300, bbox_inches='tight',
                        facecolor='white', edgecolor='none')
             print(f"Saved: {output_path}")
 
@@ -1285,7 +1269,7 @@ Comparison:
             import os
             default_path = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                'data', 'raw', 'tl_2020_47_tract', 'tl_2020_47_tract.shp'
+                'data', 'raw', 'tl_2020_47_tract.shp'
             )
             if os.path.exists(default_path):
                 shapefile_path = default_path

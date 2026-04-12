@@ -1,5 +1,45 @@
 # GRANITE Session Log
 
+## 2026-04-12: Trim visualization output to 3 retained plots
+
+**Files changed:** `granite/visualization/plots.py`, `granite/disaggregation/pipeline.py`, `granite/evaluation/accessibility_validator.py`, `granite/evaluation/feature_importance.py`, `granite/scripts/run_granite.py`
+
+### Diagnostic plots gated behind --diagnostics flag
+
+- 7 diagnostic plots (stage1_validation, stage2_validation, statistical_summary, and 4 accessibility_validation plots) now only generate when `--diagnostics` is passed
+- `create_comprehensive_research_analysis` takes `diagnostics=False` parameter; diagnostic plots go to `output/visualizations/` when enabled
+- `validate_granite_accessibility_features` takes `diagnostics=False` parameter; plots go to `output/accessibility_validation/` when enabled
+- Code for generating diagnostic plots is preserved, not deleted
+
+### Feature importance label bug fixed
+
+- Cumulative importance annotations now handle the case where cumulative never reaches 80%/90% thresholds (falls back to total feature count)
+- Fixed pluralization: "1 feature explains" vs "N features explain"
+
+### spatial_analysis.png consolidated to 3-panel layout
+
+- Changed from 2x2 (with text stats panel) to 1x3: SVI predictions, learned accessibility, access-vulnerability scatter
+- SVI predictions panel now uses fixed 0-1 colorscale (RdYlGn_r) for cross-tract comparability
+- Removed "Moderate Equity Pattern" text box from scatter panel; r value shown in title only
+
+### plot_spatial_disaggregation updated
+
+- Added `tract_results` parameter (backward-compatible with existing `multi_tract_data`)
+- Auto-scale point size: s=30 (<5000 addresses), s=10 (<20000), s=3 (>=20000)
+- Fixed TIGER shapefile path (was looking in nonexistent subdirectory)
+- Single-tract mode now also uses fixed 0-1 SVI colorscale
+
+### Output directory cleanup
+
+- Default run produces: spatial_analysis.png, disaggregation_comparison.png, feature_importance/, CSVs, and results_summary.json
+- output/visualizations/ and output/accessibility_validation/ only created with --diagnostics
+
+### No cache invalidation
+
+- No feature or routing changes. Cache keys unchanged.
+
+---
+
 ## 2026-04-11: Visualization consolidation and multi-tract heatmap
 
 **Files changed:** `granite/visualization/plots.py`, `granite/visualization/disaggregation_plots.py` (removed), `granite/disaggregation/pipeline.py`, `granite/scripts/run_granite.py`, `granite/scripts/run_holdout_validation.py`

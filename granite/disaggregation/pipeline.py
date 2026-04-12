@@ -384,12 +384,13 @@ class GRANITEPipeline:
                 accessibility_features=target_access_features,
                 destinations={
                     'employment': data['employment_destinations'],
-                    'healthcare': data['healthcare_destinations'], 
+                    'healthcare': data['healthcare_destinations'],
                     'grocery': data['grocery_destinations']
                 },
                 feature_names=feature_names,
                 tract_svi=target_tract_svi,
-                output_dir=os.path.join(self.output_dir, 'accessibility_validation')
+                output_dir=os.path.join(self.output_dir, 'accessibility_validation'),
+                diagnostics=self.config.get('diagnostics', False)
             )
         except Exception as e:
             self._log(f"Accessibility validation failed: {str(e)}", level='WARN')
@@ -2314,11 +2315,8 @@ class GRANITEPipeline:
 
     def _create_research_visualizations(self, results):
         """Create research visualization outputs"""
-        
+
         try:
-            viz_output_dir = os.path.join(self.output_dir, 'visualizations')
-            os.makedirs(viz_output_dir, exist_ok=True)
-            
             # Prepare data for visualizer
             viz_data = {
                 'gnn_predictions': results['predictions'],
@@ -2329,12 +2327,14 @@ class GRANITEPipeline:
                 'validation_results': results['validation_results'],
                 'training_result': results['training_result']
             }
-            
-            # Create visualizations
-            self.visualizer.create_comprehensive_research_analysis(viz_data, viz_output_dir)
-            
-            self._log(f"Research visualizations saved to {viz_output_dir}")
-            
+
+            diagnostics = self.config.get('diagnostics', False)
+            self.visualizer.create_comprehensive_research_analysis(
+                viz_data, self.output_dir, diagnostics=diagnostics
+            )
+
+            self._log(f"Research visualizations saved to {self.output_dir}")
+
         except Exception as e:
             self._log(f"Could not create visualizations: {str(e)}", level='WARN')
 
@@ -2708,61 +2708,65 @@ class GRANITEPipeline:
         """
         try:
             viz_dir = os.path.join(self.output_dir, 'visualizations')
-            os.makedirs(viz_dir, exist_ok=True)
-            
+
             self._log("Generating disaggregation visualizations...")
-            
+
             # Collect data from test results
             valid_results = {
                 fips: r for fips, r in test_results.items()
                 if r.get('mean_error_pct') is not None
             }
-            
+
             if not valid_results:
                 self._log("No valid results for visualization")
                 return
-            
-            # 1. Aggregate baseline comparison
-            self._plot_aggregate_baseline_comparison(valid_results, viz_dir)
-            
-            # 2. Per-tract disaggregation analysis (matrix layout)
-            self._plot_per_tract_disaggregation(valid_results, viz_dir)
-            
-            # 2b. Per-tract geographic visualization (actual coordinates)
-            if all_addresses is not None and tract_gdf is not None:
-                self._plot_geographic_disaggregation(valid_results, viz_dir, 
-                                                    all_addresses, tract_gdf)
-            
-            # 3. Accessibility-SVI relationship
-            self._plot_accessibility_svi_relationship(valid_results, viz_dir)
-            
-            # 4. Expert routing (if MoE)
-            if expert_usage:
-                self._plot_expert_routing(valid_results, expert_usage, viz_dir)
-            
-            # 5. Constraint satisfaction analysis
-            self._plot_constraint_analysis(valid_results, viz_dir)
 
-            # 6. Raw vs corrected analysis 
-            self._plot_raw_vs_corrected_analysis(valid_results, viz_dir)
+            diagnostics = self.config.get('diagnostics', False)
+            if diagnostics:
+                os.makedirs(viz_dir, exist_ok=True)
 
-            # 7. Error stratified by SVI quintile
-            self._plot_error_by_svi_quintile(valid_results, viz_dir)
+                # 1. Aggregate baseline comparison
+                self._plot_aggregate_baseline_comparison(valid_results, viz_dir)
 
-            # 8. Feature transparency analysis
-            # Aggregate features from all test tracts
-            all_features = np.vstack([r['features'] for r in valid_results.values() if 'features' in r])
-            all_predictions = np.concatenate([r['predictions'] for r in valid_results.values()])
+                # 2. Per-tract disaggregation analysis (matrix layout)
+                self._plot_per_tract_disaggregation(valid_results, viz_dir)
 
-            feature_analysis = self._analyze_feature_usage(
-                features=all_features,
-                feature_names=self._generate_feature_names(all_features.shape[1]),
-                predictions=all_predictions,
-                output_dir=viz_dir
-            )
-            self._plot_feature_transparency(feature_analysis, viz_dir)
-            
-            self._log(f"Visualizations saved to {viz_dir}")
+                # 2b. Per-tract geographic visualization (actual coordinates)
+                if all_addresses is not None and tract_gdf is not None:
+                    self._plot_geographic_disaggregation(valid_results, viz_dir,
+                                                        all_addresses, tract_gdf)
+
+                # 3. Accessibility-SVI relationship
+                self._plot_accessibility_svi_relationship(valid_results, viz_dir)
+
+                # 4. Expert routing (if MoE)
+                if expert_usage:
+                    self._plot_expert_routing(valid_results, expert_usage, viz_dir)
+
+                # 5. Constraint satisfaction analysis
+                self._plot_constraint_analysis(valid_results, viz_dir)
+
+                # 6. Raw vs corrected analysis
+                self._plot_raw_vs_corrected_analysis(valid_results, viz_dir)
+
+                # 7. Error stratified by SVI quintile
+                self._plot_error_by_svi_quintile(valid_results, viz_dir)
+
+                # 8. Feature transparency analysis
+                all_features = np.vstack([r['features'] for r in valid_results.values() if 'features' in r])
+                all_predictions = np.concatenate([r['predictions'] for r in valid_results.values()])
+
+                feature_analysis = self._analyze_feature_usage(
+                    features=all_features,
+                    feature_names=self._generate_feature_names(all_features.shape[1]),
+                    predictions=all_predictions,
+                    output_dir=viz_dir
+                )
+                self._plot_feature_transparency(feature_analysis, viz_dir)
+
+                self._log(f"Diagnostic visualizations saved to {viz_dir}")
+            else:
+                self._log("Diagnostic visualizations skipped (use --diagnostics to enable)")
             
         except Exception as e:
             self._log(f"Visualization generation failed: {e}", level='WARN')

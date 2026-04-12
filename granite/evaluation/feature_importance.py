@@ -224,10 +224,11 @@ class FeatureImportanceAnalyzer:
         ax1.grid(axis='x', alpha=0.3)
         ax1.axvline(0, color='red', linestyle='--', alpha=0.5)
         
-        # Plot 2: Cumulative importance
+        # Plot 2: Cumulative importance (absolute values, sorted descending)
         ax2 = axes[1]
-        sorted_importance = np.sort(df['importance_normalized'].values)[::-1]
-        cumulative = np.cumsum(sorted_importance)
+        abs_importance = np.abs(df['importance_normalized'].values)
+        sorted_importance = np.sort(abs_importance)[::-1]
+        cumulative = np.cumsum(sorted_importance) / np.sum(abs_importance)
         ax2.plot(range(1, len(cumulative)+1), cumulative, 'o-', linewidth=2, markersize=4)
         ax2.axhline(0.8, color='red', linestyle='--', alpha=0.7, label='80% threshold')
         ax2.axhline(0.9, color='orange', linestyle='--', alpha=0.7, label='90% threshold')
@@ -238,9 +239,13 @@ class FeatureImportanceAnalyzer:
         ax2.legend()
         
         # Find how many features explain 80% and 90%
-        n_80 = np.argmax(cumulative >= 0.8) + 1
-        n_90 = np.argmax(cumulative >= 0.9) + 1
-        ax2.text(0.5, 0.15, f'{n_80} features explain 80% of importance\n{n_90} features explain 90% of importance',
+        reached_80 = np.any(cumulative >= 0.8)
+        reached_90 = np.any(cumulative >= 0.9)
+        n_80 = int(np.argmax(cumulative >= 0.8) + 1) if reached_80 else len(cumulative)
+        n_90 = int(np.argmax(cumulative >= 0.9) + 1) if reached_90 else len(cumulative)
+        label_80 = f'{n_80} feature{"" if n_80 == 1 else "s"} explain{"s" if n_80 == 1 else ""} 80% of importance'
+        label_90 = f'{n_90} feature{"" if n_90 == 1 else "s"} explain{"s" if n_90 == 1 else ""} 90% of importance'
+        ax2.text(0.5, 0.15, f'{label_80}\n{label_90}',
                 transform=ax2.transAxes, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
                 fontsize=10)
         

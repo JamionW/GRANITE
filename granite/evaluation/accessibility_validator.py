@@ -1617,7 +1617,8 @@ Issues Detected:
 
 def validate_granite_accessibility_features(addresses, accessibility_features, destinations,
                                           feature_names=None, tract_svi=None,
-                                          output_dir='./accessibility_validation'):
+                                          output_dir='./accessibility_validation',
+                                          diagnostics=False):
     """
     Convenience function to validate GRANITE accessibility features
     
@@ -1644,9 +1645,10 @@ def validate_granite_accessibility_features(addresses, accessibility_features, d
         tract_svi=tract_svi
     )
     
-    # Create visualizations
-    validator.create_validation_visualizations(output_dir)
-    
+    # Create visualizations only when diagnostics enabled
+    if diagnostics:
+        validator.create_validation_visualizations(output_dir)
+
     return results, validator
 
 

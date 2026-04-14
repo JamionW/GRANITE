@@ -354,16 +354,32 @@ class GRANITEPipeline:
             if hasattr(final_predictions, 'reset_index'):
                 final_predictions = final_predictions.reset_index(drop=True)
         
+        # Block group diagnostic: report residual BG error after tract correction
+        if 'per_bg_errors' in training_result:
+            self._log("Block group residual errors (post tract correction, diagnostic only):")
+            bg_errors = []
+            for bg_id, error in sorted(training_result['per_bg_errors'].items()):
+                bg_errors.append(error)
+                if self.verbose:
+                    self._log(f"  {bg_id}: {error:.2f}%")
+            if bg_errors:
+                mean_bg_err = np.mean(bg_errors)
+                median_bg_err = np.median(bg_errors)
+                self._log(
+                    f"Block group residual summary: mean={mean_bg_err:.2f}%, "
+                    f"median={median_bg_err:.2f}%, n={len(bg_errors)}"
+                )
+
         # Validation (only on target tract)
         if n_neighbor_tracts > 0:
-            target_addresses = target_tract_addresses  
+            target_addresses = target_tract_addresses
             target_access_features = accessibility_features[target_mask]
             target_normalized_features = normalized_features[target_mask]
         else:
             target_addresses = tract_addresses
             target_access_features = accessibility_features
             target_normalized_features = normalized_features
-        
+
         if self.verbose:
             self._log("Running accessibility-vulnerability debugging...")
             debug_samples = self._debug_accessibility_vulnerability_relationship(
@@ -529,11 +545,12 @@ class GRANITEPipeline:
 
     def _train_multi_tract_gnn(self, graph_data, tract_svis, addresses):
         """Train GNN with proper multi-tract constraints"""
-        
+
         self._log("Training Multi-Tract Accessibility SVI GNN...")
-        
+
         try:
             from ..models.gnn import AccessibilitySVIGNN, GraphSAGEAccessibilitySVIGNN, MultiTractGNNTrainer, normalize_accessibility_features
+            from ..data.block_group_loader import BlockGroupLoader, rescale_block_group_svis
             import torch
             import pandas as pd
             import numpy as np
@@ -567,34 +584,126 @@ class GRANITEPipeline:
                 self._log("Context-gating ENABLED")
             else:
                 self._log("Context-gating DISABLED (baseline mode)")
-            
+
             # Create tract masks for per-tract constraints
             tract_masks = {}
             for fips in tract_svis.keys():
                 tract_masks[fips] = (addresses['tract_fips'] == fips).values
-            
+
+            # Load block group constraints
+            block_group_targets = None
+            block_group_masks = None
+            try:
+                bg_loader = BlockGroupLoader(
+                    data_dir=self.data_dir, verbose=self.verbose
+                )
+                svi_scope = self.config.get('svi_ranking_scope', 'national')
+                bg_data = bg_loader.get_block_groups_with_demographics(
+                    svi_ranking_scope=svi_scope
+                )
+                addresses_with_bg = bg_loader.assign_addresses_to_block_groups(
+                    addresses, bg_data
+                )
+
+                # build masks and targets for block groups with complete SVI
+                # nested within training tracts and with >= 5 addresses
+                training_tract_fips = set(tract_svis.keys())
+                block_group_targets = {}
+                block_group_masks = {}
+                total_bg_addresses = 0
+
+                for _, bg_row in bg_data.iterrows():
+                    bg_id = bg_row['GEOID']
+
+                    # check svi_complete
+                    if not bg_row.get('svi_complete', False):
+                        continue
+
+                    svi_val = bg_row.get('SVI', None)
+                    if svi_val is None or pd.isna(svi_val):
+                        continue
+
+                    # verify nesting: block group's tract must be a training tract
+                    bg_tract = bg_row.get('tract_fips', bg_id[:11])
+                    if bg_tract not in training_tract_fips:
+                        continue
+
+                    # build boolean mask over address array
+                    bg_mask = (addresses_with_bg['block_group_id'] == bg_id).values
+                    n_bg_addrs = bg_mask.sum()
+                    if n_bg_addrs < 5:
+                        continue
+
+                    block_group_targets[bg_id] = float(svi_val)
+                    block_group_masks[bg_id] = bg_mask
+                    total_bg_addresses += n_bg_addrs
+
+                if len(block_group_targets) == 0:
+                    self._log("No valid block groups found for constraints")
+                    block_group_targets = None
+                    block_group_masks = None
+                else:
+                    n_bg_tracts = len(set(
+                        bg_id[:11] for bg_id in block_group_targets.keys()
+                    ))
+                    self._log(
+                        f"Block group constraints: {len(block_group_targets)} "
+                        f"block groups across {n_bg_tracts} tracts "
+                        f"({total_bg_addresses} addresses covered)"
+                    )
+
+                    # optionally rescale BG SVIs to be consistent with tract SVIs
+                    rescale = self.config.get('rescale_bg_svi', True)
+                    if rescale and block_group_targets:
+                        bg_addr_counts = {
+                            bg_id: int(mask.sum())
+                            for bg_id, mask in block_group_masks.items()
+                        }
+                        # rescale per-tract: group BGs by their parent tract
+                        for tract_fips, tract_svi_val in tract_svis.items():
+                            tract_bg_ids = [
+                                bg_id for bg_id in block_group_targets
+                                if bg_id[:11] == tract_fips
+                            ]
+                            if not tract_bg_ids:
+                                continue
+                            sub_targets = {bg: block_group_targets[bg] for bg in tract_bg_ids}
+                            sub_counts = {bg: bg_addr_counts[bg] for bg in tract_bg_ids}
+                            rescaled = rescale_block_group_svis(
+                                sub_targets, sub_counts, tract_svi_val
+                            )
+                            block_group_targets.update(rescaled)
+
+            except Exception as e:
+                self._log(f"Block group loading failed, continuing without: {e}",
+                          level='WARN')
+                block_group_targets = None
+                block_group_masks = None
+
             # Create Multi-tract trainer
             trainer = MultiTractGNNTrainer(
-                model, 
+                model,
                 config={**self.config.get('training', {}), 'use_multitask': True},
-                seed=seed 
+                seed=seed
             )
-            
+
             # Training parameters
             epochs = self.config.get('model', {}).get('epochs', 100)
-            
+
             self._log(f"Training on {len(tract_svis)} tracts:")
             for fips, svi in tract_svis.items():
                 n_addrs = tract_masks[fips].sum()
                 self._log(f" {fips}: {n_addrs} addresses, SVI={svi:.4f}")
-            
+
             # Train with multi-tract constraints
             training_result = trainer.train(
                 graph_data=graph_data,
                 tract_svis=tract_svis,
                 tract_masks=tract_masks,
                 epochs=epochs,
-                verbose=self.verbose
+                verbose=self.verbose,
+                block_group_targets=block_group_targets,
+                block_group_masks=block_group_masks
             )
             
             # Get raw predictions from training
@@ -621,7 +730,11 @@ class GRANITEPipeline:
             self._log("Per-tract constraint errors:")
             for fips, error in training_result['per_tract_errors'].items():
                 self._log(f" {fips}: {error:.2f}%")
-            
+
+            # Block group constraint errors
+            if 'bg_constraint_error' in training_result:
+                self._log(f" Block group constraint error: {training_result['bg_constraint_error']:.2f}%")
+
             # Quality assessment
             quality = "good" if overall_error < 10 and spatial_std > 0.01 else \
                       "acceptable" if overall_error < 25 else "poor"

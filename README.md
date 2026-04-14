@@ -60,7 +60,7 @@ Two GNN architectures, selectable via `--architecture {gcn_gat|sage}`:
 
 **sage:** GraphSAGE variant. Same encoder, context gating, and prediction heads, but replaces the GCN+GAT+GCN convolution stack with three SAGEConv layers with batch normalization. Uses neighborhood sampling instead of fixed graph structure.
 
-Training uses a multi-component loss: constraint satisfaction (tract mean preservation, weight configurable), spatial variation encouragement, bounds enforcement, and accessibility consistency. Post-training additive correction is available via config but currently disabled for the constraint ablation experiment.
+Training uses a multi-component loss: constraint satisfaction (tract mean preservation, weight configurable), optional block group mean constraints (intermediate supervision between tract and address level, weight configurable via `bg_constraint_weight`), spatial variation encouragement, bounds enforcement, and accessibility consistency. Block group SVI targets are computed independently from ACS block-group-level estimates via CDC percentile methodology, not from disaggregated tract data. Post-training additive correction is available via config but currently disabled for the constraint ablation experiment.
 
 ## Installation
 
@@ -125,8 +125,8 @@ granite/
     features/               # modal accessibility computation
     models/                 # GNN architecture, mixture of experts
     routing/                # OSRM interface
-    scripts/                # CLI entry, address feature acquisition
-    validation/             # block group validation
+    scripts/                # CLI entry, address feature acquisition, data setup
+    validation/             # block group validation (post-hoc, independent of training constraints)
     visualization/          # research plots, disaggregation comparison
 config.yaml                 # system configuration
 docs/                       # feature reference, architecture notes

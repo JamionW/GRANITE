@@ -7,6 +7,7 @@ for validating address-level predictions against known sub-tract aggregates.
 Extended to compute block-group-level SVI using CDC methodology.
 """
 import os
+import time
 import requests
 import numpy as np
 import pandas as pd
@@ -477,17 +478,154 @@ class BlockGroupLoader:
         
         return result
     
+    # all US state FIPS codes (50 states + DC + PR)
+    ALL_STATE_FIPS = [
+        '01', '02', '04', '05', '06', '08', '09', '10', '11', '12',
+        '13', '15', '16', '17', '18', '19', '20', '21', '22', '23',
+        '24', '25', '26', '27', '28', '29', '30', '31', '32', '33',
+        '34', '35', '36', '37', '38', '39', '40', '41', '42', '44',
+        '45', '46', '47', '48', '49', '50', '51', '53', '54', '55',
+        '56', '72',
+    ]
+
+    def fetch_national_acs_data(self, year: int = 2020) -> pd.DataFrame:
+        """Fetch block group ACS data for all US states. Caches to CSV."""
+        cache_file = self.data_dir / 'processed' / 'national_bg_acs_raw.csv'
+        if cache_file.exists():
+            df = pd.read_csv(cache_file, dtype={'GEOID': str})
+            print(f"Loading cached national ACS data ({len(df)} block groups)")
+            return df
+
+        if self.api_key is None:
+            raise ValueError(
+                "Census API key required for national block group data. "
+                "Set CENSUS_API_KEY environment variable."
+            )
+
+        var_list = list(self.ACS_VARIABLES.keys())
+        chunk_size = 48
+        all_states = []
+
+        for idx, state_fips in enumerate(self.ALL_STATE_FIPS, 1):
+            state_data = None
+
+            for i in range(0, len(var_list), chunk_size):
+                chunk_vars = var_list[i:i + chunk_size]
+                variables = ','.join(chunk_vars)
+
+                url = (
+                    f"https://api.census.gov/data/{year}/acs/acs5"
+                    f"?get=NAME,{variables}"
+                    f"&for=block%20group:*"
+                    f"&in=state:{state_fips}%20county:*"
+                    f"&key={self.api_key}"
+                )
+
+                response = requests.get(url, timeout=120)
+                if response.status_code != 200:
+                    raise RuntimeError(
+                        f"Census API error for state {state_fips}: "
+                        f"{response.status_code}: {response.text}"
+                    )
+
+                data = response.json()
+                headers = data[0]
+                rows = data[1:]
+                chunk_df = pd.DataFrame(rows, columns=headers)
+
+                if state_data is None:
+                    state_data = chunk_df
+                else:
+                    geo_cols = ['NAME', 'state', 'county', 'tract', 'block group']
+                    new_cols = [c for c in chunk_df.columns if c not in geo_cols]
+                    state_data = state_data.merge(
+                        chunk_df[geo_cols + new_cols],
+                        on=geo_cols,
+                        how='outer'
+                    )
+
+                time.sleep(0.5)
+
+            state_data['GEOID'] = (
+                state_data['state'] + state_data['county'] +
+                state_data['tract'] + state_data['block group']
+            )
+            for var in self.ACS_VARIABLES.keys():
+                if var in state_data.columns:
+                    state_data[var] = pd.to_numeric(state_data[var], errors='coerce')
+
+            all_states.append(state_data)
+
+            if idx % 5 == 0:
+                n_so_far = sum(len(s) for s in all_states)
+                print(f"Fetched {idx}/{len(self.ALL_STATE_FIPS)} states ({n_so_far} block groups so far)")
+
+        national_df = pd.concat(all_states, ignore_index=True)
+
+        cache_dir = self.data_dir / 'processed'
+        cache_dir.mkdir(exist_ok=True)
+        national_df.to_csv(cache_file, index=False)
+        print(f"Cached national ACS data: {len(national_df)} block groups")
+
+        return national_df
+
+    def compute_national_svi(self) -> pd.DataFrame:
+        """Compute nationally-ranked SVI for all US block groups. Caches to CSV."""
+        cache_file = self.data_dir / 'processed' / 'national_bg_svi.csv'
+        if cache_file.exists():
+            df = pd.read_csv(cache_file, dtype={'GEOID': str})
+            self._log(f"Loading cached national SVI ({len(df)} block groups)")
+            return df
+
+        national_raw = self.fetch_national_acs_data()
+        rates_df = self._compute_demographic_rates(national_raw)
+        svi_df = self._compute_block_group_svi(rates_df)
+
+        # keep only the columns needed downstream
+        keep_cols = ['GEOID', 'population', 'SVI', 'SVI_theme1', 'SVI_theme2',
+                     'SVI_theme3', 'SVI_theme4', 'svi_complete']
+        ep_cols = [c for c in svi_df.columns if c.startswith('EP_')]
+        keep_cols.extend(ep_cols)
+        svi_df = svi_df[[c for c in keep_cols if c in svi_df.columns]]
+
+        cache_dir = self.data_dir / 'processed'
+        cache_dir.mkdir(exist_ok=True)
+        svi_df.to_csv(cache_file, index=False)
+        print(f"Cached national SVI: {len(svi_df)} block groups")
+
+        return svi_df
+
+    def get_hamilton_county_national_svi(self) -> pd.DataFrame:
+        """Get Hamilton County block groups with nationally-ranked SVI."""
+        national = self.compute_national_svi()
+        hamilton = national[national['GEOID'].str.startswith('47065')].copy()
+        n_complete = hamilton['svi_complete'].sum() if 'svi_complete' in hamilton.columns else 0
+        print(f"Hamilton County: {len(hamilton)} block groups with national SVI, {n_complete} complete")
+        return hamilton
+
     def get_block_groups_with_demographics(self, state_fips: str = '47',
-                                            county_fips: str = '065') -> gpd.GeoDataFrame:
-        """Load block groups with both geometries and demographic indicators."""
+                                            county_fips: str = '065',
+                                            svi_ranking_scope: str = 'county') -> gpd.GeoDataFrame:
+        """Load block groups with both geometries and demographic indicators.
+
+        Args:
+            svi_ranking_scope: 'national' ranks BGs against all US BGs;
+                               'county' ranks within county only (original behavior).
+        """
         geometries = self.load_block_group_geometries(state_fips, county_fips)
-        demographics = self.fetch_acs_demographics(state_fips, county_fips)
-        
+
+        if svi_ranking_scope == 'national':
+            demographics = self.get_hamilton_county_national_svi()
+        elif svi_ranking_scope == 'county':
+            demographics = self.fetch_acs_demographics(state_fips, county_fips)
+        else:
+            raise ValueError(f"Invalid svi_ranking_scope: {svi_ranking_scope!r}. Use 'national' or 'county'.")
+
         # Merge
         merged = geometries.merge(demographics, on='GEOID', how='left')
-        
-        self._log(f"Merged {len(merged)} block groups with demographics")
-        
+
+        self._log(f"Merged {len(merged)} block groups with demographics (scope={svi_ranking_scope})")
+
         return merged
     
     def assign_addresses_to_block_groups(self, 
@@ -553,6 +691,48 @@ class BlockGroupLoader:
         return agg
 
 
+def rescale_block_group_svis(bg_targets: Dict[str, float],
+                            bg_address_counts: Dict[str, int],
+                            tract_svi: float) -> Dict[str, float]:
+    """
+    Rescale block group SVIs so their address-weighted mean equals tract_svi.
+
+    Applies an additive shift to preserve relative spacing between block groups,
+    then clips to [0, 1]. Iterates up to 10 times if clipping distorts the mean.
+
+    Args:
+        bg_targets: {geoid: bg_svi}
+        bg_address_counts: {geoid: n_addresses}
+        tract_svi: target tract-level SVI value
+
+    Returns:
+        {geoid: rescaled_svi}
+    """
+    geoids = list(bg_targets.keys())
+    svis = np.array([bg_targets[g] for g in geoids], dtype=float)
+    counts = np.array([bg_address_counts[g] for g in geoids], dtype=float)
+    total = counts.sum()
+
+    if total == 0:
+        return dict(bg_targets)
+
+    initial_svis = svis.copy()
+    initial_weighted_mean = (svis * counts).sum() / total
+
+    for _ in range(10):
+        weighted_mean = (svis * counts).sum() / total
+        if abs(weighted_mean - tract_svi) < 0.001:
+            break
+        shift = tract_svi - weighted_mean
+        svis = np.clip(svis + shift, 0, 1)
+
+    max_change = float(np.max(np.abs(svis - initial_svis)))
+    net_shift = tract_svi - initial_weighted_mean
+    print(f"Rescaled {len(geoids)} block group SVIs: shift={net_shift:+.4f}, max change={max_change:.4f}")
+
+    return {g: float(svis[i]) for i, g in enumerate(geoids)}
+
+
 def load_block_group_validation_data(data_dir: str = './data',
                                       api_key: Optional[str] = None,
                                       verbose: bool = False) -> Tuple[gpd.GeoDataFrame, pd.DataFrame]:
@@ -563,8 +743,8 @@ def load_block_group_validation_data(data_dir: str = './data',
         Tuple of (block_groups_gdf, demographics_df)
     """
     loader = BlockGroupLoader(data_dir, api_key, verbose)
-    
-    bg_gdf = loader.get_block_groups_with_demographics()
+
+    bg_gdf = loader.get_block_groups_with_demographics(svi_ranking_scope='county')
     demographics = loader.fetch_acs_demographics()
     
     return bg_gdf, demographics

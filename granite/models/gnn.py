@@ -681,18 +681,19 @@ class MultiTractGNNTrainer:
 
         # NEW: Training mode controls
         self.enforce_constraints = config.get('enforce_constraints', True)
-        self.constraint_weight = config.get('constraint_weight', 
+        self.constraint_weight = config.get('constraint_weight',
                                         2.0 if self.enforce_constraints else 0.0)
-        
+        self.bg_constraint_weight = config.get('bg_constraint_weight', 1.0)
+
         # Set seed for optimizer initialization
         set_random_seed(seed)
-        
+
         learning_rate = self.config.get('learning_rate', 0.001)
         weight_decay = self.config.get('weight_decay', 1e-4)
-        
+
         self.optimizer = torch.optim.Adam(
-            model.parameters(), 
-            lr=learning_rate, 
+            model.parameters(),
+            lr=learning_rate,
             weight_decay=weight_decay
         )
         
@@ -712,21 +713,24 @@ class MultiTractGNNTrainer:
             'attention_weights': [] 
         }
     
-    def train(self, graph_data, tract_svis: Dict[str, float], 
+    def train(self, graph_data, tract_svis: Dict[str, float],
           tract_masks: Dict[str, np.ndarray], epochs=100, verbose=True,
-          feature_names=None):
+          feature_names=None, block_group_targets=None,
+          block_group_masks=None):
         """
         Train GNN across multiple tracts with per-tract constraints.
-        
+
         STABILITY GUARANTEE: Identical results across runs with same seed.
-        
+
         Args:
             graph_data: PyTorch Geometric Data object with all addresses
             tract_svis: Dict mapping tract FIPS to target SVI values
             tract_masks: Dict mapping tract FIPS to boolean masks
             epochs: Number of training epochs
             verbose: Print training progress
-        
+            block_group_targets: Optional dict mapping BG GEOID to target SVI
+            block_group_masks: Optional dict mapping BG GEOID to boolean masks
+
         Returns:
             Dict with training results including raw predictions
         """
@@ -747,7 +751,20 @@ class MultiTractGNNTrainer:
             fips: torch.BoolTensor(mask).to(device)
             for fips, mask in tract_masks.items()
         }
-        
+
+        # Convert block group data to tensors if provided
+        bg_targets_tensor = None
+        bg_masks_tensor = None
+        if block_group_targets is not None and block_group_masks is not None:
+            bg_targets_tensor = {
+                bg_id: torch.FloatTensor([svi]).to(device)
+                for bg_id, svi in block_group_targets.items()
+            }
+            bg_masks_tensor = {
+                bg_id: torch.BoolTensor(mask).to(device)
+                for bg_id, mask in block_group_masks.items()
+            }
+
         n_addresses = graph_data.x.shape[0]
         
         # Generate auxiliary labels for multi-task learning
@@ -821,9 +838,11 @@ class MultiTractGNNTrainer:
                 
                 # Compute constraint losses
                 losses = self._compute_multi_tract_losses(
-                    predictions, tract_targets, tract_masks_tensor, n_addresses
+                    predictions, tract_targets, tract_masks_tensor, n_addresses,
+                    block_group_targets=bg_targets_tensor,
+                    block_group_masks=bg_masks_tensor
                 )
-                
+
                 # Compute auxiliary losses
                 aux_loss_dict = compute_multitask_loss(
                     outputs, auxiliary_labels, weights=self.multitask_weights
@@ -877,10 +896,12 @@ class MultiTractGNNTrainer:
                 
                 # Compute losses
                 losses = self._compute_multi_tract_losses(
-                    predictions, tract_targets, tract_masks_tensor, n_addresses
+                    predictions, tract_targets, tract_masks_tensor, n_addresses,
+                    block_group_targets=bg_targets_tensor,
+                    block_group_masks=bg_masks_tensor
                 )
                 total_loss = losses['total']
-                
+
                 if verbose and epoch % 10 == 0:
                     print(f"Epoch {epoch}: Loss={total_loss:.4f}")
             
@@ -898,11 +919,18 @@ class MultiTractGNNTrainer:
                 predictions, tract_targets, tract_masks_tensor
             )
             spatial_std = float(predictions.std())
-            
+
             self.training_history['losses'].append(total_loss.item())
             self.training_history['constraint_errors'].append(overall_constraint_error)
             self.training_history['spatial_stds'].append(spatial_std)
             self.training_history['raw_predictions_history'].append(predictions.detach().cpu().numpy())
+
+            # Track block group constraint error
+            if bg_targets_tensor is not None:
+                bg_error = self._compute_overall_constraint_error(
+                    predictions, bg_targets_tensor, bg_masks_tensor
+                )
+                self.training_history.setdefault('bg_constraint_errors', []).append(bg_error)
             
             # Track per-tract errors
             per_tract_errors = self._compute_per_tract_errors(
@@ -928,11 +956,15 @@ class MultiTractGNNTrainer:
             # Progress reporting
             if verbose and epoch % 20 == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
+                bg_msg = ""
+                if bg_targets_tensor is not None:
+                    bg_err = self.training_history['bg_constraint_errors'][-1]
+                    bg_msg = f", BG Constraint={bg_err:.2f}%"
                 print(f"Epoch {epoch:3d}: Loss={total_loss.item():.6f}, "
-                    f"Overall Constraint={overall_constraint_error:.2f}%, "
+                    f"Overall Constraint={overall_constraint_error:.2f}%{bg_msg}, "
                     f"Std={spatial_std:.4f}, "
                     f"LR={current_lr:.6f}")
-                
+
                 # Show per-tract errors
                 for fips, error in list(per_tract_errors.items())[:3]:
                     tract_id = fips[-6:]  # Last 6 digits
@@ -964,30 +996,41 @@ class MultiTractGNNTrainer:
             'learning_converged': self.patience_counter < 15,
             'success': True
         }
-        
+
+        # block group constraint error (final)
+        if bg_targets_tensor is not None:
+            results['bg_constraint_error'] = self._compute_overall_constraint_error(
+                final_predictions, bg_targets_tensor, bg_masks_tensor
+            )
+            results['per_bg_errors'] = self._compute_per_tract_errors(
+                final_predictions, bg_targets_tensor, bg_masks_tensor
+            )
+
         return results
     
-    def _compute_multi_tract_losses(self, predictions, tract_targets, 
-                                    tract_masks, n_addresses):
+    def _compute_multi_tract_losses(self, predictions, tract_targets,
+                                    tract_masks, n_addresses,
+                                    block_group_targets=None,
+                                    block_group_masks=None):
         """
         Multi-tract loss computation with configurable constraint enforcement.
-        
+
         When enforce_constraints=False, the model learns purely from
         accessibility patterns without mean-matching pressure.
         """
-        
+
         # 1. Per-tract constraint losses (weight controlled by config)
         constraint_losses = []
-        
+
         for fips, target_svi in tract_targets.items():
             mask = tract_masks[fips]
             tract_predictions = predictions[mask]
-            
+
             if len(tract_predictions) > 0:
                 tract_mean = tract_predictions.mean()
                 tract_loss = F.mse_loss(tract_mean.unsqueeze(0), target_svi)
                 constraint_losses.append(tract_loss)
-        
+
         if len(constraint_losses) > 0:
             constraint_loss = torch.mean(torch.stack(constraint_losses))
         else:
@@ -1008,13 +1051,27 @@ class MultiTractGNNTrainer:
             variation_loss = torch.mean(torch.stack(variation_losses))
         else:
             variation_loss = torch.tensor(0.0, device=predictions.device)
-        
+
         # 3. Bounds enforcement (always active)
         bounds_loss = torch.mean(F.relu(predictions - 1.0)) + torch.mean(F.relu(-predictions))
-        
+
         # 4. Cross-tract smoothness
         smoothness_loss = self._compute_cross_tract_smoothness(predictions, tract_masks)
-        
+
+        # 5. Block group constraint losses
+        bg_constraint_loss = torch.tensor(0.0, device=predictions.device)
+        if block_group_targets is not None and block_group_masks is not None:
+            bg_losses = []
+            for bg_id, bg_target in block_group_targets.items():
+                bg_mask = block_group_masks[bg_id]
+                bg_predictions = predictions[bg_mask]
+                if len(bg_predictions) > 0:
+                    bg_mean = bg_predictions.mean()
+                    bg_loss = F.mse_loss(bg_mean.unsqueeze(0), bg_target)
+                    bg_losses.append(bg_loss)
+            if len(bg_losses) > 0:
+                bg_constraint_loss = torch.mean(torch.stack(bg_losses))
+
         # NEW: Conditional weighting based on mode
         if self.enforce_constraints:
             # Standard constrained training
@@ -1024,6 +1081,9 @@ class MultiTractGNNTrainer:
                 1.0 * bounds_loss +
                 0.1 * smoothness_loss
             )
+            # add block group constraint if provided
+            if block_group_targets is not None:
+                total_loss = total_loss + self.bg_constraint_weight * bg_constraint_loss
         else:
             # Unconstrained: learn from structure only
             total_loss = (
@@ -1032,13 +1092,14 @@ class MultiTractGNNTrainer:
                 1.0 * bounds_loss +         # Keep valid range
                 0.5 * smoothness_loss       # Spatial structure
             )
-        
+
         return {
             'total': total_loss,
             'constraint': constraint_loss,
             'variation': variation_loss,
             'bounds': bounds_loss,
-            'smoothness': smoothness_loss
+            'smoothness': smoothness_loss,
+            'bg_constraint': bg_constraint_loss
         }
 
     def predict_unconstrained(self, graph_data):

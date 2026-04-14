@@ -74,6 +74,8 @@ Accessibility features (travel times, destination counts, modal gaps) show near-
 
 Block-group-level ACS-derived SVI (11 variables across 4 CDC SVI themes). This is derived independently from ACS components, not from pipeline predictions. Do not substitute IDW-interpolated values as ground truth.
 
+National BG SVI data (242,335 block groups, 239,346 with complete SVI) is cached at `data/processed/national_bg_acs_raw.csv` and `data/processed/national_bg_svi.csv`. These are fetched from Census ACS 5-year estimates and ranked nationally. Use `svi_ranking_scope='national'` in `BlockGroupLoader.get_block_groups_with_demographics()` to rank Hamilton County BGs against the full US distribution instead of county-only.
+
 ## Key result reference points
 
 - IDW block-group correlation: r = 0.558

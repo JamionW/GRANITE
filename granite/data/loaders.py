@@ -1302,7 +1302,7 @@ class DataLoader:
             )
             
             # Get merged geometries + demographics with SVI
-            bg_gdf = loader.get_block_groups_with_demographics(state_fips, county_fips)
+            bg_gdf = loader.get_block_groups_with_demographics(state_fips, county_fips, svi_ranking_scope='county')
             
             if bg_gdf is not None and len(bg_gdf) > 0:
                 # Check if SVI was computed

@@ -1,5 +1,78 @@
 # GRANITE Session Log
 
+## 2026-04-14: National block group SVI data acquisition and validation
+
+**Files changed:** `granite/data/block_group_loader.py`, `CLAUDE.md`
+
+### Census API URL fix
+
+`fetch_national_acs_data()` had `&in=state:{fips}&in=county:*` (two separate `in` params), which the Census API rejects for block group queries. Fixed to `&in=state:{fips}%20county:*` (space-separated single param), matching the working county-level fetch format.
+
+### National data acquired
+
+- Fetched ACS block group data for all 52 states/territories (242,335 block groups)
+- Computed nationally-ranked SVI (239,346 with complete indicators)
+- Cached to `data/processed/national_bg_acs_raw.csv` (63MB) and `data/processed/national_bg_svi.csv` (116MB)
+
+### National ranking consistency results for tract 47065000600
+
+- BG weighted mean SVI: 0.3046 (vs tract CDC SVI: 0.2235)
+- Rescaling shift: -0.0811 (vs -0.1806 with county ranking, 55% reduction)
+- BG1 nationally-ranked SVI: 0.1314 (above 0.05 floor, clipping problem resolved)
+- All three BGs shifted downward under national ranking (county ranking inflated values because Hamilton County is low-vulnerability nationally)
+
+### No cache invalidation
+
+Training-only and data acquisition changes. No feature or routing modifications. Cache keys unchanged.
+
+---
+
+## 2026-04-13: Block group SVI rescaling for constraint consistency
+
+**Files changed:** `granite/data/block_group_loader.py`, `granite/disaggregation/pipeline.py`, `scripts/bg_rescaled_convergence_experiment.py` (new), `scripts/diagnose_bg_consistency.py` (new)
+
+### Diagnosis
+
+Block group SVIs (ACS-derived, percentile-ranked within Hamilton County BGs) do not aggregate to the CDC tract SVI (national percentile ranks). For tract 47065000600: BG weighted mean = 0.4041, tract SVI = 0.2235, discrepancy = 80.8%. This explains why the prior convergence experiment saw tract constraint error blow up to 25-28% when BG constraints were added -- the optimizer had no feasible solution.
+
+### Rescaling function
+
+Added `rescale_block_group_svis()` to `block_group_loader.py`. Pure function: additive shift + clip to [0,1], iterates up to 10 times to handle clipping distortion. Converges within 0.001 of target weighted mean. For this tract: shift = -0.1806, BG1 clips to 0.0, BG2 = 0.290, BG3 = 0.370.
+
+### Pipeline integration
+
+Rescaling wired into `_train_multi_tract_gnn` in `pipeline.py`, gated by `rescale_bg_svi` config key (default True). Rescales per-tract: groups BGs by parent tract and rescales each group against its tract SVI.
+
+### Rescaled convergence experiment results
+
+Same 2x2 design: {GCN, SAGE} x {tract-only, tract+rescaled BG}. Key results:
+- Tract error with BG constraints: 5.01% (GCN), 1.87% (SAGE) -- down from ~25-28% unrescaled
+- BG error: 6.04% (GCN), 3.89% (SAGE) -- down from ~41-43% unrescaled
+- GCN vs SAGE r: 0.693 (rescaled BG) vs 0.420 (tract-only) -- convergence preserved
+- Prior unrescaled BG r was 0.788, but at cost of 25-28% tract error; rescaled achieves 0.693 with 3.4% avg tract error
+
+Interpretation: rescaling resolved constraint tension while preserving convergence benefit.
+
+### No cache invalidation
+
+Training-only changes. No feature or routing modifications. Cache keys unchanged.
+
+---
+
+## 2026-04-12: Wire block group constraints into training
+
+**Files changed:** `granite/models/gnn.py`, `granite/disaggregation/pipeline.py`, `scripts/setup_data.sh` (new)
+
+### Block group mean constraints as additional training loss
+
+- `MultiTractGNNTrainer.__init__`: added `bg_constraint_weight` attribute (default 1.0, configurable via config)
+- `_compute_multi_tract_losses`: new optional `block_group_targets`/`block_group_masks` params; computes per-BG MSE constraint loss averaged across all block groups, returned as `bg_constraint` key in losses dict
+- `train()`: accepts optional BG params, converts to tensors, passes to loss function, tracks `bg_constraint_errors` in training_history, reports BG constraint error at epoch intervals
+- `_train_multi_tract_gnn` in pipeline: loads BG data via `BlockGroupLoader`, spatial-joins addresses, creates masks/targets filtered to `svi_complete==True`, >= 5 addresses, and nesting within training tracts; prints summary at training start
+- Post-training diagnostic: reports per-BG residual mean error after tract correction (no BG correction applied)
+- Backward compatible: all BG params default to `None`; behavior identical to prior code when not provided
+- No cache invalidation: changes are training-only, no feature or routing changes
+
 ## 2026-04-12: Trim visualization output to 3 retained plots
 
 **Files changed:** `granite/visualization/plots.py`, `granite/disaggregation/pipeline.py`, `granite/evaluation/accessibility_validator.py`, `granite/evaluation/feature_importance.py`, `granite/scripts/run_granite.py`

@@ -685,6 +685,11 @@ class MultiTractGNNTrainer:
                                         2.0 if self.enforce_constraints else 0.0)
         self.bg_constraint_weight = config.get('bg_constraint_weight', 1.0)
 
+        # Pairwise ordering loss configuration
+        self.ordering_weight = config.get('ordering_weight', 0.5)
+        self.ordering_min_gap = config.get('ordering_min_gap', 0.5)
+        self.ordering_margin = config.get('ordering_margin', 0.02)
+
         # Set seed for optimizer initialization
         set_random_seed(seed)
 
@@ -716,7 +721,7 @@ class MultiTractGNNTrainer:
     def train(self, graph_data, tract_svis: Dict[str, float],
           tract_masks: Dict[str, np.ndarray], epochs=100, verbose=True,
           feature_names=None, block_group_targets=None,
-          block_group_masks=None):
+          block_group_masks=None, ordering_values=None):
         """
         Train GNN across multiple tracts with per-tract constraints.
 
@@ -730,6 +735,7 @@ class MultiTractGNNTrainer:
             verbose: Print training progress
             block_group_targets: Optional dict mapping BG GEOID to target SVI
             block_group_masks: Optional dict mapping BG GEOID to boolean masks
+            ordering_values: Optional 1D numpy array of raw log_appvalue per address
 
         Returns:
             Dict with training results including raw predictions
@@ -766,7 +772,24 @@ class MultiTractGNNTrainer:
             }
 
         n_addresses = graph_data.x.shape[0]
-        
+
+        # Convert ordering values to tensor if provided
+        ordering_tensor = None
+        ordering_group_masks = None
+        if ordering_values is not None:
+            ordering_tensor = torch.FloatTensor(ordering_values).to(device)
+            n_valid = int((~torch.isnan(ordering_tensor)).sum().item())
+            # prefer block group masks for pair sampling, fall back to tract masks
+            if bg_masks_tensor is not None:
+                ordering_group_masks = bg_masks_tensor
+            else:
+                ordering_group_masks = tract_masks_tensor
+            n_groups = len(ordering_group_masks)
+            if verbose:
+                print(f"Pairwise ordering: {n_valid} of {n_addresses} addresses have valid log_appvalue")
+                print(f"Ordering pairs per epoch: ~{min(100, n_valid) * n_groups} across "
+                      f"{n_groups} groups (min_gap={self.ordering_min_gap}, margin={self.ordering_margin})")
+
         # Generate auxiliary labels for multi-task learning
         auxiliary_labels = None
         if self.use_multitask:
@@ -808,13 +831,25 @@ class MultiTractGNNTrainer:
                     print(f"  Vehicle ownership range: [{labels_dict['vehicle_ownership'].min():.3f}, {labels_dict['vehicle_ownership'].max():.3f}]")
                     print(f"  Employment categories: {np.bincount(labels_dict['employment_category'])}")
                     print("=" * 40 + "\n")
-        
+
         for epoch in range(epochs):
             self.optimizer.zero_grad()
 
+            # sample ordering pairs for this epoch
+            ordering_pairs = None
+            if ordering_tensor is not None and ordering_group_masks is not None:
+                epoch_seed = self.seed + epoch
+                low_idx, high_idx, _pairs_per_group = self._sample_ordering_pairs(
+                    ordering_tensor, ordering_group_masks,
+                    n_pairs_per_group=100, min_gap=self.ordering_min_gap,
+                    seed=epoch_seed
+                )
+                if len(low_idx) > 0:
+                    ordering_pairs = (low_idx, high_idx)
+
             # Check if context features available
             context = getattr(graph_data, 'context', None)
-            
+
             if self.use_multitask and auxiliary_labels is not None:
                 # === MULTI-TASK PATH ===
                 outputs = self.model(
@@ -840,7 +875,8 @@ class MultiTractGNNTrainer:
                 losses = self._compute_multi_tract_losses(
                     predictions, tract_targets, tract_masks_tensor, n_addresses,
                     block_group_targets=bg_targets_tensor,
-                    block_group_masks=bg_masks_tensor
+                    block_group_masks=bg_masks_tensor,
+                    ordering_pairs=ordering_pairs
                 )
 
                 # Compute auxiliary losses
@@ -898,7 +934,8 @@ class MultiTractGNNTrainer:
                 losses = self._compute_multi_tract_losses(
                     predictions, tract_targets, tract_masks_tensor, n_addresses,
                     block_group_targets=bg_targets_tensor,
-                    block_group_masks=bg_masks_tensor
+                    block_group_masks=bg_masks_tensor,
+                    ordering_pairs=ordering_pairs
                 )
                 total_loss = losses['total']
 
@@ -931,7 +968,12 @@ class MultiTractGNNTrainer:
                     predictions, bg_targets_tensor, bg_masks_tensor
                 )
                 self.training_history.setdefault('bg_constraint_errors', []).append(bg_error)
-            
+
+            # Track ordering loss
+            if ordering_pairs is not None:
+                ord_loss_val = losses['ordering'].item()
+                self.training_history.setdefault('ordering_losses', []).append(ord_loss_val)
+
             # Track per-tract errors
             per_tract_errors = self._compute_per_tract_errors(
                 predictions, tract_targets, tract_masks_tensor
@@ -969,7 +1011,16 @@ class MultiTractGNNTrainer:
                 for fips, error in list(per_tract_errors.items())[:3]:
                     tract_id = fips[-6:]  # Last 6 digits
                     print(f"  Tract {tract_id}: {error:.2f}% error")
-        
+
+                # Show ordering loss
+                if ordering_pairs is not None:
+                    ord_val = losses['ordering'].item()
+                    n_active = int((torch.relu(
+                        predictions[ordering_pairs[1]] - predictions[ordering_pairs[0]] + self.ordering_margin
+                    ) > 0).sum().item())
+                    n_total = len(ordering_pairs[0])
+                    print(f"  Ordering: loss={ord_val:.4f}, violated={n_active}/{n_total} pairs")
+
         # Final evaluation
         self.model.eval()
         context = getattr(graph_data, 'context', None)
@@ -1008,10 +1059,98 @@ class MultiTractGNNTrainer:
 
         return results
     
+    def _sample_ordering_pairs(self, ordering_values, group_masks, n_pairs_per_group=100, min_gap=0.5, seed=None):
+        """sample pairwise ordering pairs within groups based on property value gaps."""
+        low_indices = []
+        high_indices = []
+        pairs_per_group = {}
+
+        for group_id, mask in group_masks.items():
+            # get indices with valid (non-nan) ordering values within this group
+            group_indices = torch.where(mask)[0]
+            group_values = ordering_values[group_indices]
+            valid = ~torch.isnan(group_values)
+            valid_indices = group_indices[valid]
+            valid_values = group_values[valid]
+
+            if len(valid_indices) < 2:
+                pairs_per_group[group_id] = 0
+                continue
+
+            # find all pairs where value[i] - value[j] >= min_gap
+            # i = low value (higher vulnerability), j = high value (lower vulnerability)
+            n_valid = len(valid_indices)
+
+            # sort by value to efficiently find pairs with sufficient gap
+            sorted_order = torch.argsort(valid_values)
+            sorted_values = valid_values[sorted_order]
+            sorted_indices = valid_indices[sorted_order]
+
+            # build candidate pairs: for each low-value address, find high-value addresses
+            # with gap >= min_gap using binary search on sorted values
+            candidate_low = []
+            candidate_high = []
+            for i in range(n_valid):
+                # find first j where sorted_values[j] - sorted_values[i] >= min_gap
+                threshold = sorted_values[i] + min_gap
+                j_start = torch.searchsorted(sorted_values, threshold).item()
+                if j_start < n_valid:
+                    for j in range(j_start, n_valid):
+                        candidate_low.append(sorted_indices[i].item())
+                        candidate_high.append(sorted_indices[j].item())
+                        # cap candidates to avoid O(N^2) explosion
+                        if len(candidate_low) > n_pairs_per_group * 10:
+                            break
+                if len(candidate_low) > n_pairs_per_group * 10:
+                    break
+
+            n_candidates = len(candidate_low)
+            if n_candidates == 0:
+                pairs_per_group[group_id] = 0
+                continue
+
+            # sample up to n_pairs_per_group
+            rng_seed = seed if seed is not None else 0
+            rng = torch.Generator()
+            rng.manual_seed(rng_seed)
+
+            if n_candidates <= n_pairs_per_group:
+                sampled = list(range(n_candidates))
+            else:
+                sampled = torch.randperm(n_candidates, generator=rng)[:n_pairs_per_group].tolist()
+
+            for idx in sampled:
+                low_indices.append(candidate_low[idx])
+                high_indices.append(candidate_high[idx])
+
+            pairs_per_group[group_id] = len(sampled)
+
+        device = ordering_values.device
+        if len(low_indices) == 0:
+            return torch.tensor([], dtype=torch.long, device=device), torch.tensor([], dtype=torch.long, device=device), pairs_per_group
+
+        return (
+            torch.tensor(low_indices, dtype=torch.long, device=device),
+            torch.tensor(high_indices, dtype=torch.long, device=device),
+            pairs_per_group
+        )
+
+    def _compute_ordering_loss(self, predictions, low_value_indices, high_value_indices, margin=0.02):
+        """margin-based ranking loss: low-value properties should predict higher vulnerability."""
+        if len(low_value_indices) == 0:
+            return torch.tensor(0.0, device=predictions.device)
+
+        pred_low = predictions[low_value_indices]
+        pred_high = predictions[high_value_indices]
+        # penalize when high-value property predicts higher vulnerability than low-value
+        pair_loss = torch.relu(pred_high - pred_low + margin)
+        return pair_loss.mean()
+
     def _compute_multi_tract_losses(self, predictions, tract_targets,
                                     tract_masks, n_addresses,
                                     block_group_targets=None,
-                                    block_group_masks=None):
+                                    block_group_masks=None,
+                                    ordering_pairs=None):
         """
         Multi-tract loss computation with configurable constraint enforcement.
 
@@ -1072,7 +1211,15 @@ class MultiTractGNNTrainer:
             if len(bg_losses) > 0:
                 bg_constraint_loss = torch.mean(torch.stack(bg_losses))
 
-        # NEW: Conditional weighting based on mode
+        # 6. Pairwise ordering loss
+        ordering_loss = torch.tensor(0.0, device=predictions.device)
+        if ordering_pairs is not None:
+            low_idx, high_idx = ordering_pairs
+            ordering_loss = self._compute_ordering_loss(
+                predictions, low_idx, high_idx, margin=self.ordering_margin
+            )
+
+        # Conditional weighting based on mode
         if self.enforce_constraints:
             # Standard constrained training
             total_loss = (
@@ -1084,6 +1231,9 @@ class MultiTractGNNTrainer:
             # add block group constraint if provided
             if block_group_targets is not None:
                 total_loss = total_loss + self.bg_constraint_weight * bg_constraint_loss
+            # add ordering loss if provided
+            if ordering_pairs is not None:
+                total_loss = total_loss + self.ordering_weight * ordering_loss
         else:
             # Unconstrained: learn from structure only
             total_loss = (
@@ -1099,7 +1249,8 @@ class MultiTractGNNTrainer:
             'variation': variation_loss,
             'bounds': bounds_loss,
             'smoothness': smoothness_loss,
-            'bg_constraint': bg_constraint_loss
+            'bg_constraint': bg_constraint_loss,
+            'ordering': ordering_loss
         }
 
     def predict_unconstrained(self, graph_data):

@@ -680,10 +680,25 @@ class GRANITEPipeline:
                 block_group_targets = None
                 block_group_masks = None
 
+            # Extract ordering values (raw log_appvalue before normalization)
+            ordering_values = None
+            use_ordering = self.config.get('use_ordering_constraints', True)
+            if use_ordering and 'log_appvalue' in addresses.columns:
+                raw_vals = pd.to_numeric(addresses['log_appvalue'], errors='coerce').values.astype(float)
+                n_valid = int(np.sum(~np.isnan(raw_vals)))
+                if n_valid >= 2:
+                    ordering_values = raw_vals
+                    self._log(f"Pairwise ordering: {n_valid} of {len(raw_vals)} addresses have valid log_appvalue")
+                else:
+                    self._log("Pairwise ordering: insufficient valid log_appvalue, skipping")
+            elif use_ordering:
+                self._log("Pairwise ordering: log_appvalue not in address data, skipping")
+
             # Create Multi-tract trainer
+            training_config = {**self.config.get('training', {}), 'use_multitask': True}
             trainer = MultiTractGNNTrainer(
                 model,
-                config={**self.config.get('training', {}), 'use_multitask': True},
+                config=training_config,
                 seed=seed
             )
 
@@ -703,7 +718,8 @@ class GRANITEPipeline:
                 epochs=epochs,
                 verbose=self.verbose,
                 block_group_targets=block_group_targets,
-                block_group_masks=block_group_masks
+                block_group_masks=block_group_masks,
+                ordering_values=ordering_values
             )
             
             # Get raw predictions from training

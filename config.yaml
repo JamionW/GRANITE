@@ -63,6 +63,9 @@ training:
   variation_weight: 1.5
   early_stopping_patience: 15
   apply_post_correction: false
+  ordering_weight: 0.5
+  ordering_min_gap: 0.5
+  ordering_margin: 0.02
 
 # =============================================================================
 # Mixture of Experts

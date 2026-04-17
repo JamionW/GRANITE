@@ -1,10 +1,43 @@
-# GRANITE: Claude Code Context
+# GRANITE
 
-## What this project is
+Constraint-preserving graph neural network for spatial disaggregation of
+the CDC Social Vulnerability Index from census tract resolution to individual
+addresses in Hamilton County, Tennessee (FIPS 47065).
 
-GRANITE disaggregates tract-level CDC Social Vulnerability Index (SVI) values to address-level resolution in Hamilton County, Tennessee (FIPS 47065). The study area has 87 census tracts and ~100,000 addresses.
+## Primary research question
 
-The central finding is a null result: GNNs do not significantly outperform IDW or Kriging under hard aggregate constraints. The constraint mechanism, not learned features, does most of the predictive work. This finding is intentional and analytically valid. Do not treat it as a bug.
+Under what conditions does hard aggregate constraint enforcement improve or
+degrade the accuracy of learned spatial disaggregation models, and which
+feature classes survive constraint correction?
+
+## Contribution
+
+1. Constraint-preserving GNN architecture treating tract-level SVI as a
+   hard aggregate constraint rather than a prediction target.
+2. 73-feature address-level input: parcel attributes, Microsoft building
+   footprints, FEMA flood zones, NLCD land cover (impervious, canopy, land
+   cover class), multi-modal accessibility, socioeconomic controls.
+3. Evaluation against IDW and kriging mapping boundary conditions of learned
+   disaggregation versus proximity-weighted baselines.
+4. Dual-architecture comparison (GraphSAGE vs. GCN-GAT) showing constraint
+   enforcement interacts with model inductive bias to determine which
+   features survive. GraphSAGE currently stronger.
+
+## Framing note
+
+The acronym GRANITE is a project codename. Its original expansion
+("Graph-Refined Accessibility Network for Transportation Equity") is
+retired; do not reproduce it in documentation or comments. Accessibility
+is one of several feature classes, not the primary driver of disaggregation.
+
+PDFM (Agarwal et al., 2024) is positioned as the unconstrained complement.
+
+## Empirical framing
+
+IDW outperforms GRANITE on block-group validation (r=0.558 vs r=0.469).
+This null result is a defensible dissertation contribution establishing
+boundary conditions under which constrained GNN disaggregation collapses
+toward proximity-weighted allocation.
 
 ## Critical constraint: aggregate preservation
 

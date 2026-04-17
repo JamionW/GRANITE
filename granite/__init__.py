@@ -1,10 +1,12 @@
 """
-GRANITE: Graph-Refined Accessibility Network for Transportation Equity
-=====================================================================
+GRANITE
+=======
 
-GNN-based spatial disaggregation of Social Vulnerability Index from
-census tract level to address-level resolution using multi-modal
-transportation accessibility features.
+Constraint-preserving graph neural network for spatial disaggregation of
+the CDC Social Vulnerability Index from census tract resolution to individual
+addresses. The acronym is retained as a project codename.
+
+Study area: Hamilton County, Tennessee (FIPS 47065).
 
 Author: Jamion Williams
 """

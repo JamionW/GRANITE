@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='GRANITE: Graph-Refined Accessibility Network for Transportation Equity',
+        description='GRANITE: constraint-preserving GNN for spatial disaggregation of CDC SVI',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Workflows:

@@ -87,13 +87,18 @@ class GRANITEResearchVisualizer:
         self.plot_spatial_analysis(
             gnn_predictions=results.get('gnn_predictions'),
             learned_accessibility=results.get('learned_accessibility'),
-            output_path=spatial_path
+            output_path=spatial_path,
+            tract_svi=results.get('tract_svi'),
+            tract_fips=results.get('tract_fips')
         )
 
-    def plot_accessibility_learning_validation(self, learned_accessibility: np.ndarray, 
+    def plot_accessibility_learning_validation(self, learned_accessibility: np.ndarray,
                                             traditional_accessibility: Optional[np.ndarray],
                                             output_path: str):
-        """Stage 1: Does GNN learn meaningful accessibility patterns?"""
+        """Stage 1: Does GNN learn meaningful accessibility patterns?
+
+        deprecated: retained for backward compatibility with existing callers.
+        """
         
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
         fig.suptitle('Stage 1: Accessibility Learning Validation', fontsize=14, fontweight='bold')
@@ -570,14 +575,14 @@ Next Steps:
         plt.close()
 
     def plot_spatial_analysis(self, gnn_predictions: pd.DataFrame,
-                            learned_accessibility: np.ndarray,
-                            output_path: str):
-        """3-panel spatial analysis: SVI predictions, learned accessibility, access-vulnerability scatter"""
-
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-        fig.suptitle('Spatial Analysis', fontsize=14, fontweight='bold')
+                            learned_accessibility: np.ndarray = None,
+                            output_path: str = None,
+                            tract_svi: float = None,
+                            tract_fips: str = None):
+        """3-panel spatial analysis: SVI predictions, within-tract deviation, prediction distribution"""
 
         if gnn_predictions is None or gnn_predictions.empty:
+            fig = plt.figure(figsize=(18, 6))
             fig.text(0.5, 0.5, 'No spatial data available',
                     ha='center', va='center', fontsize=16)
             plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
@@ -587,6 +592,18 @@ Next Steps:
         predictions = gnn_predictions['mean'].values
         x_coords = gnn_predictions.get('x', np.arange(len(predictions))).values
         y_coords = gnn_predictions.get('y', np.arange(len(predictions))).values
+        n_addresses = len(predictions)
+
+        # use provided tract_svi or fall back to prediction mean
+        if tract_svi is None:
+            tract_svi = float(np.mean(predictions))
+        if tract_fips:
+            title = f'Spatial Analysis: Tract {tract_fips} (SVI {tract_svi:.3f}, n={n_addresses})'
+        else:
+            title = f'Spatial Analysis: (SVI {tract_svi:.3f}, n={n_addresses})'
+
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        fig.suptitle(title, fontsize=14, fontweight='bold')
 
         # 1. SVI Prediction Map (fixed 0-1 colorscale)
         ax1 = axes[0]
@@ -604,42 +621,41 @@ Next Steps:
                     ha='center', va='center', transform=ax1.transAxes)
             ax1.set_title('SVI Predictions')
 
-        # 2. Accessibility Map
+        # 2. Deviation from Tract Mean
         ax2 = axes[1]
-        if learned_accessibility is not None and 'x' in gnn_predictions.columns:
-            accessibility_mean = np.mean(learned_accessibility, axis=1)
-            scatter2 = ax2.scatter(x_coords, y_coords, c=accessibility_mean,
-                                 s=15, alpha=0.7, cmap='plasma_r')
-            ax2.set_title('Learned Accessibility')
+        deviations = predictions - tract_svi
+        max_dev = max(abs(deviations.min()), abs(deviations.max()), 1e-6)
+        if 'x' in gnn_predictions.columns:
+            scatter2 = ax2.scatter(x_coords, y_coords, c=deviations,
+                                 s=15, alpha=0.7, cmap='coolwarm',
+                                 vmin=-max_dev, vmax=max_dev)
+            ax2.set_title('Within-Tract Variation')
             ax2.set_xlabel('Longitude')
             ax2.set_ylabel('Latitude')
             ax2.set_aspect('equal')
-            plt.colorbar(scatter2, ax=ax2, label='Accessibility')
+            plt.colorbar(scatter2, ax=ax2, label='Deviation from Tract SVI')
         else:
-            ax2.text(0.5, 0.5, 'No accessibility\ndata available',
+            ax2.text(0.5, 0.5, 'No coordinates\navailable',
                     ha='center', va='center', transform=ax2.transAxes)
-            ax2.set_title('Learned Accessibility')
+            ax2.set_title('Within-Tract Variation')
 
-        # 3. Accessibility-Vulnerability Scatter
+        # 3. Prediction Distribution
         ax3 = axes[2]
-        if learned_accessibility is not None:
-            accessibility_mean = np.mean(learned_accessibility, axis=1)
-            correlation, p_value = pearsonr(accessibility_mean, predictions)
-
-            ax3.scatter(accessibility_mean, predictions, alpha=0.6, s=20, color='purple')
-
-            z = np.polyfit(accessibility_mean, predictions, 1)
-            p = np.poly1d(z)
-            ax3.plot(sorted(accessibility_mean), p(sorted(accessibility_mean)), "r--", alpha=0.8)
-
-            ax3.set_xlabel('Learned Accessibility')
-            ax3.set_ylabel('Predicted SVI')
-            ax3.set_title(f'Access-Vulnerability (r = {correlation:.3f})')
-            ax3.grid(True, alpha=0.3)
-        else:
-            ax3.text(0.5, 0.5, 'No accessibility\ndata for analysis',
-                    ha='center', va='center', transform=ax3.transAxes)
-            ax3.set_title('Access-Vulnerability')
+        ax3.hist(predictions, bins=30, alpha=0.7, density=True,
+                color='steelblue', edgecolor='black')
+        ax3.axvline(tract_svi, color='red', linestyle='--', linewidth=2,
+                   label=f'Tract SVI = {tract_svi:.3f}')
+        pred_std = np.std(predictions)
+        pred_range = np.ptp(predictions)
+        ax3.text(0.95, 0.95,
+                f'std = {pred_std:.4f}\nrange = {pred_range:.4f}',
+                transform=ax3.transAxes, ha='right', va='top',
+                fontsize=9, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        ax3.set_xlabel('Predicted SVI')
+        ax3.set_ylabel('Density')
+        ax3.set_title('Prediction Distribution')
+        ax3.legend(fontsize=9)
+        ax3.grid(True, alpha=0.3)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
@@ -823,9 +839,9 @@ class DisaggregationVisualizer:
         methods = comparison_results['methods']
         tract_svi = comparison_results['tract_svi']
         
-        # 1. Constraint Satisfaction Bar Chart
+        # 1. Constraint-Variation Tradeoff Scatter
         ax1 = fig.add_subplot(gs[0, 0])
-        self._plot_constraint_satisfaction(ax1, methods, tract_svi)
+        self._plot_tradeoff_scatter(ax1, methods)
         
         # 2. Spatial Variation Comparison
         ax2 = fig.add_subplot(gs[0, 1])
@@ -835,9 +851,9 @@ class DisaggregationVisualizer:
         ax3 = fig.add_subplot(gs[0, 2])
         self._plot_prediction_distributions(ax3, methods, tract_svi)
         
-        # 4. Accessibility Correlation Comparison
+        # 4. Prediction Range by Method
         ax4 = fig.add_subplot(gs[1, 0])
-        self._plot_accessibility_correlations(ax4, methods)
+        self._plot_prediction_range(ax4, methods)
         
         # 5. GNN vs IDW Scatter
         ax5 = fig.add_subplot(gs[1, 1])
@@ -867,40 +883,35 @@ class DisaggregationVisualizer:
         
         return fig
     
-    def _plot_constraint_satisfaction(self, ax, methods: Dict, tract_svi: float):
-        """Bar chart of constraint satisfaction (mean error %)."""
-        
-        method_names = []
-        errors = []
-        colors = []
-        
+    def _plot_tradeoff_scatter(self, ax, methods: Dict):
+        """Scatter of constraint error % vs spatial variation (std) per method."""
+
         for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
-            if name in methods:
-                method_names.append(name.replace('_', '\n'))
-                errors.append(methods[name]['constraint_error_pct'])
-                colors.append(self._get_method_color(name))
-        
-        bars = ax.bar(method_names, errors, color=colors, alpha=0.8, edgecolor='black')
-        
-        # Add value labels
-        for bar, err in zip(bars, errors):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
-                   f'{err:.1f}%', ha='center', va='bottom', fontsize=9)
-        
-        ax.set_ylabel('Constraint Error (%)', fontsize=10)
-        ax.set_title('Constraint Satisfaction\n(Lower = Better)', fontsize=11, fontweight='bold')
-        ax.axhline(5, color='green', linestyle='--', alpha=0.5, label='5% threshold')
-        ax.set_ylim(0, max(errors) * 1.2 if errors else 10)
-        ax.grid(True, alpha=0.3, axis='y')
+            if name not in methods:
+                continue
+            m = methods[name]
+            err = m['constraint_error_pct']
+            std = m['std']
+            color = self._get_method_color(name)
+            ax.scatter(err, std, color=color, s=120, edgecolors='black',
+                      linewidths=0.8, zorder=5)
+            ax.annotate(name.replace('_', '\n'), (err, std),
+                       textcoords='offset points', xytext=(8, 4),
+                       fontsize=8, color=color)
+
+        ax.set_xlabel('Constraint Error (%)', fontsize=10)
+        ax.set_ylabel('Spatial Variation (std)', fontsize=10)
+        ax.set_title('Constraint-Variation Tradeoff', fontsize=11, fontweight='bold')
+        ax.grid(True, alpha=0.3)
     
     def _plot_variation_comparison(self, ax, methods: Dict):
         """Bar chart comparing spatial variation (std)."""
-        
+
         method_names = []
         stds = []
         colors = []
-        
-        for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
+
+        for name in ['GNN', 'IDW_p2.0']:
             if name in methods:
                 method_names.append(name.replace('_', '\n'))
                 stds.append(methods[name]['std'])
@@ -919,8 +930,8 @@ class DisaggregationVisualizer:
     
     def _plot_prediction_distributions(self, ax, methods: Dict, tract_svi: float):
         """KDE plots of prediction distributions."""
-        
-        for name in ['GNN', 'IDW_p2.0', 'Kriging', 'Naive_Uniform']:
+
+        for name in ['GNN', 'IDW_p2.0']:
             if name in methods:
                 preds = methods[name]['predictions']
                 color = self._get_method_color(name)
@@ -942,41 +953,38 @@ class DisaggregationVisualizer:
         ax.legend(fontsize=8, loc='upper right')
         ax.grid(True, alpha=0.3)
     
-    def _plot_accessibility_correlations(self, ax, methods: Dict):
-        """Bar chart of accessibility-SVI correlations."""
-        
+    def _plot_prediction_range(self, ax, methods: Dict):
+        """Horizontal bar chart of prediction range (max - min) per method."""
+
         method_names = []
-        correlations = []
+        ranges = []
         colors = []
-        
-        for name in ['GNN', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
+
+        for name in ['GNN', 'IDW_p2.0']:
             if name in methods:
-                corr = methods[name].get('accessibility_correlation')
-                if corr is not None:
-                    method_names.append(name.replace('_', '\n'))
-                    correlations.append(corr)
-                    colors.append(self._get_method_color(name))
-        
-        if not correlations:
-            ax.text(0.5, 0.5, 'No accessibility\ndata available', 
+                method_names.append(name.replace('_', '\n'))
+                ranges.append(methods[name]['range'])
+                colors.append(self._get_method_color(name))
+
+        if not ranges:
+            ax.text(0.5, 0.5, 'No method data\navailable',
                    ha='center', va='center', transform=ax.transAxes, fontsize=12)
-            ax.set_title('Accessibility Correlation', fontsize=11, fontweight='bold')
+            ax.set_title('Prediction Range', fontsize=11, fontweight='bold')
             return
-        
-        bars = ax.bar(method_names, correlations, color=colors, alpha=0.8, edgecolor='black')
-        
-        # Color bars by direction (negative = expected equity pattern)
-        for bar, corr in zip(bars, correlations):
-            if corr < -0.3:
-                bar.set_edgecolor('green')
-                bar.set_linewidth(2)
-        
-        ax.set_ylabel('Correlation (r)', fontsize=10)
-        ax.set_title('Accessibility-SVI Correlation\n(Negative = Equity Pattern)', 
+
+        y_pos = np.arange(len(method_names))
+        bars = ax.barh(y_pos, ranges, color=colors, alpha=0.8, edgecolor='black')
+
+        for bar, r in zip(bars, ranges):
+            ax.text(bar.get_width() + 0.001, bar.get_y() + bar.get_height() / 2,
+                   f'{r:.4f}', ha='left', va='center', fontsize=9)
+
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(method_names, fontsize=9)
+        ax.set_xlabel('Prediction Range (max - min)', fontsize=10)
+        ax.set_title('Prediction Range by Method\n(Higher = More Differentiation)',
                     fontsize=11, fontweight='bold')
-        ax.axhline(0, color='black', linewidth=0.5)
-        ax.axhline(-0.3, color='green', linestyle='--', alpha=0.5, label='Strong equity threshold')
-        ax.grid(True, alpha=0.3, axis='y')
+        ax.grid(True, alpha=0.3, axis='x')
     
     def _plot_gnn_vs_baseline(self, ax, methods: Dict, baseline: str = 'IDW_p2.0'):
         """Scatter plot comparing GNN vs baseline predictions."""
@@ -1042,24 +1050,25 @@ Comparison:
     
     def _plot_metrics_table(self, ax, results: Dict):
         """Create metrics comparison table."""
-        
+
         methods = results['methods']
-        
+
         # Build table data
-        columns = ['Method', 'Mean', 'Std', 'Range', 'Err %', 'Access r']
+        columns = ['Method', 'Mean', 'Std', 'Range', 'Err %', "Moran's I"]
         data = []
-        
+
         for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
             if name in methods:
                 m = methods[name]
-                acc_r = f"{m['accessibility_correlation']:.3f}" if m['accessibility_correlation'] else "N/A"
+                moran_val = m.get('morans_i')
+                moran_str = f"{moran_val:.3f}" if moran_val is not None else "n/a"
                 data.append([
                     name,
                     f"{m['mean']:.4f}",
                     f"{m['std']:.4f}",
                     f"{m['range']:.4f}",
                     f"{m['constraint_error_pct']:.2f}",
-                    acc_r
+                    moran_str
                 ])
         
         ax.axis('off')

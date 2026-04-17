@@ -1,16 +1,18 @@
-# GRANITE: Graph-Refined Accessibility Network for Transportation Equity
+# GRANITE
 
-GNN-driven spatial disaggregation of the CDC's tract-level Social Vulnerability Index (SVI) to address-level resolution using multi-modal transportation accessibility features and address-level property attributes.
+Constraint-preserving graph neural network for spatial disaggregation of
+the CDC Social Vulnerability Index from census tract resolution to individual
+addresses in Hamilton County, Tennessee (FIPS 47065).
 
 ## Research Question
 
-Can Graph Neural Networks leverage transportation network topology and multi-modal accessibility patterns to disaggregate tract-level Social Vulnerability Index values to address-level resolution, and how does this approach compare to traditional spatial interpolation methods?
-
-The evolved core question: Under what conditions does hard aggregate constraint enforcement improve or degrade the accuracy of learned spatial disaggregation models, and what feature classes survive constraint correction?
+Under what conditions does hard aggregate constraint enforcement improve or
+degrade the accuracy of learned spatial disaggregation models, and which
+feature classes survive constraint correction?
 
 ## Overview
 
-GRANITE accepts known tract-level SVI values as hard constraints and learns how vulnerability distributes spatially within each tract based on accessibility patterns and address-level property characteristics. The system computes real travel times via OSRM routing to employment, healthcare, and grocery destinations, then uses graph convolution over a road-network-derived spatial graph to produce address-level SVI estimates.
+GRANITE accepts known tract-level SVI values as hard constraints and learns how vulnerability distributes spatially within each tract based on 73 address-level features: parcel attributes, building footprints, flood zones, land cover, multi-modal accessibility, and socioeconomic controls. Graph convolution over a road-network-derived spatial graph produces address-level SVI estimates.
 
 Disaggregation is treated as an allocation problem: the tract mean is fixed, and the GNN learns the within-tract distribution.
 

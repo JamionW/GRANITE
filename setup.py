@@ -71,7 +71,7 @@ setup(
     name="granite-svi",
     version=get_version(),
     author="Jamion Williams",
-    description="Graph-Refined Accessibility Network for Transportation Equity",
+    description="Constraint-preserving GNN for spatial disaggregation of CDC SVI to address-level resolution",
     long_description=open("README.md").read() if os.path.exists("README.md") else "",
     long_description_content_type="text/markdown",
 

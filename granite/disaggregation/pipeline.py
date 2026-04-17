@@ -446,6 +446,7 @@ class GRANITEPipeline:
                 'accessibility_features': target_access_features,
                 'validation_results': validation_results,
                 'tract_svi': target_tract_svi,
+                'tract_fips': target_fips,
                 'training_result': training_result
             })
 
@@ -473,6 +474,8 @@ class GRANITEPipeline:
             'success': True,
             'predictions': final_predictions,
             'address_gdf': target_addresses,
+            'tract_fips': target_fips,
+            'tract_svi': target_tract_svi,
             'tract_info': {'FIPS': target_fips, 'RPL_THEMES': target_tract_svi},
             'accessibility_features': target_access_features,  # Target tract only
             'full_accessibility_features': full_accessibility_features,  # All tracts (for feature importance)
@@ -2453,6 +2456,7 @@ class GRANITEPipeline:
                 'learned_accessibility': results['accessibility_features'],
                 'traditional_accessibility': results['accessibility_features'],  # For comparison
                 'tract_svi': results['tract_svi'],
+                'tract_fips': results.get('tract_fips'),
                 'validation_results': results['validation_results'],
                 'training_result': results['training_result']
             }

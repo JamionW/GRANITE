@@ -1176,26 +1176,22 @@ class SpatialLearningDiagnostics:
         ax2.set_title(f'Center-Distance Relationship (r={corr:.3f})')
         ax2.grid(True, alpha=0.3)
         
-        # 3. Overall accessibility vs predictions
+        # 3. Deviation from Tract Mean
         ax3 = axes[1, 0]
-        overall_access = np.mean(self.accessibility_features, axis=1)
-        ax3.scatter(overall_access, self.raw_predictions, alpha=0.6, s=20, color='purple')
-        
-        z = np.polyfit(overall_access, self.raw_predictions, 1)
-        p = np.poly1d(z)
-        ax3.plot(sorted(overall_access), p(sorted(overall_access)), "r--", alpha=0.8)
-        
-        corr = np.corrcoef(overall_access, self.raw_predictions)[0, 1]
-        ax3.set_xlabel('Overall Accessibility')
-        ax3.set_ylabel('Predictions')
-        ax3.set_title(f'Accessibility vs Predictions (r={corr:.3f})')
-        ax3.grid(True, alpha=0.3)
-        
-        # Color title based on correctness
-        if corr > 0:
-            ax3.title.set_color('red')
-        else:
-            ax3.title.set_color('green')
+        # use stored tract_svi if available, otherwise approximate as prediction mean
+        tract_svi = getattr(self, 'target_svi', None)
+        if tract_svi is None:
+            tract_svi = np.mean(self.raw_predictions)
+        deviations = self.raw_predictions - tract_svi
+        max_dev = max(abs(deviations.min()), abs(deviations.max()), 1e-6)
+        scatter3 = ax3.scatter(x_coords, y_coords, c=deviations,
+                              cmap='coolwarm', s=30, alpha=0.7,
+                              vmin=-max_dev, vmax=max_dev)
+        ax3.set_xlabel('Longitude')
+        ax3.set_ylabel('Latitude')
+        ax3.set_title('Deviation from Tract Mean')
+        ax3.set_aspect('equal')
+        plt.colorbar(scatter3, ax=ax3, label='Deviation')
         
         # 4. Spatial clustering
         ax4 = axes[1, 1]
@@ -1221,16 +1217,21 @@ class SpatialLearningDiagnostics:
         plt.close()
     
     def _plot_accessibility_relationships(self, output_dir):
-        """Plot detailed accessibility relationship analysis"""
-        
+        """Plot detailed accessibility relationship analysis
+
+        deprecated: accessibility-centric framing removed. retained for backward compatibility.
+        """
+        print("[SpatialDiag] WARNING: _plot_accessibility_relationships is deprecated, skipping.")
+        return
+
         if 'enhanced_diagnostics' not in self.diagnostic_results:
             return
-        
+
         enhanced = self.diagnostic_results['enhanced_diagnostics']
-        
+
         if 'correlation_analysis' not in enhanced:
             return
-        
+
         accessibility_indices = enhanced['correlation_analysis']['accessibility_indices']
         
         n_plots = len(accessibility_indices)

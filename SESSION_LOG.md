@@ -1,5 +1,37 @@
 # GRANITE Session Log
 
+## 2026-04-17: Dashboard redesign and tract_fips bugfix
+
+**Files changed:** `granite/visualization/plots.py`, `granite/disaggregation/pipeline.py`
+
+**What changed and why:**
+- `_plot_constraint_satisfaction` replaced with `_plot_tradeoff_scatter`: X-axis constraint error %, Y-axis spatial std. Shows each method as a labeled point -- GNN trades constraint precision for within-tract differentiation.
+- `_plot_variation_comparison`, `_plot_prediction_distributions`, `_plot_prediction_range`: filtered to GNN and IDW_p2.0 only. Naive_Uniform, IDW_p3.0, Kriging are zero-valued in these panels and add no information. They still appear in the metrics table as floor references.
+- `plot_spatial_analysis`: "Tract ?" fallback replaced -- title now omits tract reference when FIPS unavailable instead of showing a question mark.
+- `pipeline.py _process_single_tract`: added `tract_fips` and `tract_svi` as top-level keys in return dict.
+- `pipeline.py _create_research_visualizations` call site: added `tract_fips` to viz_data dict.
+- `pipeline.py save_results` viz_data: added `tract_fips` via `results.get('tract_fips')`.
+- Regenerated all figures for 5 tracts with SAGE architecture; collated into `output/mehdi_review/_figures/`.
+
+**Cache invalidation:** none. Visualization-only and caller-side changes.
+
+---
+
+## 2026-04-16: Remove accessibility-centric framing from visualizations
+
+**Files changed:** `granite/visualization/plots.py`, `granite/evaluation/spatial_diagnostics.py`
+
+**What changed and why:**
+- `plot_spatial_analysis`: replaced learned accessibility map and access-vulnerability scatter with within-tract deviation map (coolwarm) and prediction distribution histogram. title now shows tract FIPS, SVI, and address count.
+- `_plot_accessibility_correlations` renamed to `_plot_prediction_range`: horizontal bar chart of (max - min) per method replaces accessibility correlation bars.
+- `_plot_metrics_table`: "Access r" column replaced with "Moran's I" (displays n/a when not available in comparison_results).
+- `_plot_spatial_patterns` (spatial_diagnostics.py): axes[1,0] replaced accessibility scatter with deviation-from-tract-mean geographic scatter.
+- `_plot_accessibility_relationships` (spatial_diagnostics.py): short-circuited with deprecation warning; body retained for backward compatibility.
+- `plot_accessibility_learning_validation`: marked deprecated in docstring; method body unchanged.
+- regenerated all figures for 5 tracts (47065000700, 47065000600, 47065011326, 47065011321, 47065002400) with SAGE architecture; collated into `_figures/`.
+
+**Cache invalidation:** none. visualization-only changes.
+
 ## 2026-04-14: National block group SVI data acquisition and validation
 
 **Files changed:** `granite/data/block_group_loader.py`, `CLAUDE.md`
@@ -210,3 +242,29 @@ Training-only changes. No feature or routing modifications. Cache keys unchanged
 - Both baselines now use this shared function
 - Impact: baseline constraint satisfaction will now match the GNN's hard constraint, making comparison fair
 - No cache invalidation needed
+
+## 2026-04-16: Dr Mehdi review run -- five tracts spanning SVI spectrum
+
+**Files changed:** none (pipeline run only)
+
+### What was done
+
+Ran `granite --architecture sage` sequentially on five Hamilton County tracts for Dr Mehdi's review. No code changes were required; all five tracts ran cleanly.
+
+Outputs saved to `output/mehdi_review/<FIPS>/` with figures collated and renamed in `output/mehdi_review/_figures/`.
+
+### Tracts and results
+
+| FIPS        | SVI   | n_addresses | constraint_err% | spatial_std | morans_i |
+|-------------|-------|-------------|-----------------|-------------|----------|
+| 47065000700 | 0.114 | 1,784       | 8.75            | 0.0390      | 0.7774   |
+| 47065000600 | 0.224 | 2,089       | 13.16           | 0.0771      | 0.9415   |
+| 47065011326 | 0.510 | 2,738       | 0.80            | 0.1024      | 0.9858   |
+| 47065011321 | 0.696 | 3,756       | 1.97            | 0.0997      | 0.9333   |
+| 47065002400 | 0.891 | 1,918       | 2.68            | 0.0769      | 0.9392   |
+
+### Cache notes
+
+- 47065000600 was a full cache hit (62s); all others required OSRM modal feature recomputation (~1-2 hrs each).
+- Feature count varies 71-73 across tracts due to zero-variance building features; existing behavior, no impact on comparability.
+- No cache keys were invalidated.

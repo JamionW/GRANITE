@@ -812,9 +812,8 @@ class DisaggregationVisualizer:
         # Color scheme
         self.colors = {
             'gnn': '#2E7D32',       # Dark green
-            'idw': '#1565C0',       # Blue
-            'kriging': '#7B1FA2',   # Purple
-            'naive': '#757575',     # Gray
+            'dasymetric': '#E65100', # Warm orange
+            'pycnophylactic': '#1565C0', # Cool blue
             'highlight': '#FF6F00'  # Orange
         }
     
@@ -855,9 +854,9 @@ class DisaggregationVisualizer:
         ax4 = fig.add_subplot(gs[1, 0])
         self._plot_prediction_range(ax4, methods)
         
-        # 5. GNN vs IDW Scatter
+        # 5. GNN vs Dasymetric Scatter
         ax5 = fig.add_subplot(gs[1, 1])
-        self._plot_gnn_vs_baseline(ax5, methods, baseline='IDW_p2.0')
+        self._plot_gnn_vs_baseline(ax5, methods, baseline='Dasymetric')
         
         # 6. Spatial Pattern (if coordinates available)
         ax6 = fig.add_subplot(gs[1, 2])
@@ -886,7 +885,7 @@ class DisaggregationVisualizer:
     def _plot_tradeoff_scatter(self, ax, methods: Dict):
         """Scatter of constraint error % vs spatial variation (std) per method."""
 
-        for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
+        for name in ['GNN', 'Dasymetric', 'Pycnophylactic']:
             if name not in methods:
                 continue
             m = methods[name]
@@ -895,7 +894,7 @@ class DisaggregationVisualizer:
             color = self._get_method_color(name)
             ax.scatter(err, std, color=color, s=120, edgecolors='black',
                       linewidths=0.8, zorder=5)
-            ax.annotate(name.replace('_', '\n'), (err, std),
+            ax.annotate(name, (err, std),
                        textcoords='offset points', xytext=(8, 4),
                        fontsize=8, color=color)
 
@@ -911,19 +910,19 @@ class DisaggregationVisualizer:
         stds = []
         colors = []
 
-        for name in ['GNN', 'IDW_p2.0']:
+        for name in ['GNN', 'Dasymetric', 'Pycnophylactic']:
             if name in methods:
-                method_names.append(name.replace('_', '\n'))
+                method_names.append(name)
                 stds.append(methods[name]['std'])
                 colors.append(self._get_method_color(name))
-        
+
         bars = ax.bar(method_names, stds, color=colors, alpha=0.8, edgecolor='black')
-        
+
         # Add value labels
         for bar, std in zip(bars, stds):
             ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.002,
                    f'{std:.4f}', ha='center', va='bottom', fontsize=9)
-        
+
         ax.set_ylabel('Standard Deviation', fontsize=10)
         ax.set_title('Spatial Variation\n(Higher = More Disaggregation)', fontsize=11, fontweight='bold')
         ax.grid(True, alpha=0.3, axis='y')
@@ -931,11 +930,11 @@ class DisaggregationVisualizer:
     def _plot_prediction_distributions(self, ax, methods: Dict, tract_svi: float):
         """KDE plots of prediction distributions."""
 
-        for name in ['GNN', 'IDW_p2.0']:
+        for name in ['GNN', 'Dasymetric', 'Pycnophylactic']:
             if name in methods:
                 preds = methods[name]['predictions']
                 color = self._get_method_color(name)
-                label = name.replace('_', ' ')
+                label = name
                 
                 if np.std(preds) > 1e-6:
                     sns.kdeplot(preds, ax=ax, color=color, label=label, linewidth=2)
@@ -960,9 +959,9 @@ class DisaggregationVisualizer:
         ranges = []
         colors = []
 
-        for name in ['GNN', 'IDW_p2.0']:
+        for name in ['GNN', 'Dasymetric', 'Pycnophylactic']:
             if name in methods:
-                method_names.append(name.replace('_', '\n'))
+                method_names.append(name)
                 ranges.append(methods[name]['range'])
                 colors.append(self._get_method_color(name))
 
@@ -986,7 +985,7 @@ class DisaggregationVisualizer:
                     fontsize=11, fontweight='bold')
         ax.grid(True, alpha=0.3, axis='x')
     
-    def _plot_gnn_vs_baseline(self, ax, methods: Dict, baseline: str = 'IDW_p2.0'):
+    def _plot_gnn_vs_baseline(self, ax, methods: Dict, baseline: str = 'Dasymetric'):
         """Scatter plot comparing GNN vs baseline predictions."""
         
         if 'GNN' not in methods or baseline not in methods:
@@ -1025,6 +1024,8 @@ class DisaggregationVisualizer:
         tract_svi = results['tract_svi']
         gnn = methods.get('GNN', {})
         
+        dasy = methods.get('Dasymetric', {})
+        pycno = methods.get('Pycnophylactic', {})
         summary_text = f"""Disaggregation Summary
 {'='*30}
 
@@ -1038,8 +1039,8 @@ GNN Disaggregation:
   Constraint Error: {gnn.get('constraint_error_pct', 0):.2f}%
 
 Comparison:
-  Variation vs Naive: {gnn.get('std', 0) - methods.get('Naive_Uniform', {}).get('std', 0):+.4f}
-  Variation vs IDW: {gnn.get('std', 0) - methods.get('IDW_p2.0', methods.get('IDW_p2', {})).get('std', 0):+.4f}
+  Variation vs Dasymetric: {gnn.get('std', 0) - dasy.get('std', 0):+.4f}
+  Variation vs Pycnophylactic: {gnn.get('std', 0) - pycno.get('std', 0):+.4f}
 """
         
         ax.text(0.05, 0.95, summary_text, transform=ax.transAxes,
@@ -1057,7 +1058,7 @@ Comparison:
         columns = ['Method', 'Mean', 'Std', 'Range', 'Err %', "Moran's I"]
         data = []
 
-        for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
+        for name in ['GNN', 'Dasymetric', 'Pycnophylactic']:
             if name in methods:
                 m = methods[name]
                 moran_val = m.get('morans_i')
@@ -1097,12 +1098,10 @@ Comparison:
         """Get color for method."""
         if 'GNN' in method_name:
             return self.colors['gnn']
-        elif 'IDW' in method_name:
-            return self.colors['idw']
-        elif 'Kriging' in method_name:
-            return self.colors['kriging']
-        elif 'Naive' in method_name:
-            return self.colors['naive']
+        elif 'Dasymetric' in method_name:
+            return self.colors['dasymetric']
+        elif 'Pycnophylactic' in method_name:
+            return self.colors['pycnophylactic']
         return 'gray'
     
     def plot_spatial_disaggregation(self,

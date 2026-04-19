@@ -194,16 +194,111 @@ class DataLoader:
         """Get tract-level SVI value for a given FIPS code."""
         tract_fips = str(tract_fips).strip()
         tract_data = svi_data[svi_data['FIPS'].astype(str).str.strip() == tract_fips]
-        
+
         if len(tract_data) == 0:
             self._log(f"WARNING: No SVI data for tract {tract_fips}, using default 0.5")
             return 0.5
-        
+
         svi = tract_data.iloc[0].get('RPL_THEMES', 0.5)
         if pd.isna(svi) or svi < 0:
             return 0.5
-        
+
         return float(svi)
+
+    # =========================================================================
+    # TARGET ABSTRACTION: SVI or property value
+    # =========================================================================
+
+    def load_property_value_data(self) -> pd.DataFrame:
+        """Load county-wide property values from address features CSV.
+
+        Returns DataFrame with columns: hash, log_appvalue, appvalue_norm
+        where appvalue_norm is min-max normalized to [0,1] across the county.
+        """
+        if hasattr(self, '_property_value_cache') and self._property_value_cache is not None:
+            return self._property_value_cache
+
+        csv_candidates = [
+            os.path.join(self.data_dir, 'raw', 'address_features', 'combined_address_features.csv'),
+        ]
+        for csv_path in csv_candidates:
+            if not os.path.exists(csv_path):
+                continue
+            df = pd.read_csv(csv_path, dtype={'hash': str},
+                             usecols=['hash', 'log_appvalue'])
+            df = df.dropna(subset=['log_appvalue'])
+            df = df.drop_duplicates('hash')
+
+            vmin = float(df['log_appvalue'].min())
+            vmax = float(df['log_appvalue'].max())
+            if vmax <= vmin:
+                vmax = vmin + 1.0
+            df['appvalue_norm'] = (df['log_appvalue'] - vmin) / (vmax - vmin)
+
+            # store normalization params for inverse transform
+            self._pv_norm_min = vmin
+            self._pv_norm_max = vmax
+
+            self._property_value_cache = df.set_index('hash')
+            self._log(f"Loaded property values: {len(df)} parcels, "
+                      f"log range [{vmin:.2f}, {vmax:.2f}]")
+            return self._property_value_cache
+
+        raise FileNotFoundError(
+            "combined_address_features.csv not found; required for property_value target"
+        )
+
+    def get_tract_target_value(self, tract_fips: str, svi_data: pd.DataFrame,
+                               target: str = 'svi',
+                               tract_addresses: 'gpd.GeoDataFrame' = None) -> float:
+        """Get tract-level aggregate for the active target.
+
+        For svi: returns RPL_THEMES from CDC SVI data.
+        For property_value: returns mean normalized log_appvalue across
+        addresses in the tract.
+        """
+        if target == 'svi':
+            return self._get_tract_svi(tract_fips, svi_data)
+
+        if target == 'property_value':
+            if tract_addresses is None or len(tract_addresses) == 0:
+                self._log(f"WARNING: no addresses for tract {tract_fips}, "
+                          f"cannot compute property_value target")
+                return 0.5
+            pv = self.load_property_value_data()
+            if 'hash' not in tract_addresses.columns:
+                self._log(f"WARNING: 'hash' column missing; cannot compute property_value target")
+                return 0.5
+            matched = tract_addresses['hash'].map(pv['appvalue_norm']).dropna()
+            if len(matched) == 0:
+                self._log(f"WARNING: no property values matched for tract {tract_fips}")
+                return 0.5
+            return float(matched.mean())
+
+        raise ValueError(f"Unknown target '{target}'; expected 'svi' or 'property_value'")
+
+    def get_address_truth_values(self, addresses: 'gpd.GeoDataFrame',
+                                  target: str = 'svi') -> Optional[np.ndarray]:
+        """Return per-address ground truth for the active target.
+
+        For svi: returns None (no address-level SVI ground truth).
+        For property_value: returns normalized log_appvalue per address,
+        NaN where data is missing.
+        """
+        if target == 'svi':
+            return None
+
+        if target == 'property_value':
+            pv = self.load_property_value_data()
+            if 'hash' not in addresses.columns:
+                self._log("WARNING: 'hash' column missing; no truth values available")
+                return None
+            truth = addresses['hash'].map(pv['appvalue_norm']).values.astype(float)
+            n_valid = int(np.sum(~np.isnan(truth)))
+            self._log(f"Address truth vector: {n_valid}/{len(truth)} have property values")
+            return truth
+
+        return None
 
     def _get_county_name(self, state_fips: str, county_fips: str) -> str:
         """Resolve county name from FIPS codes using SVI data, with hardcoded fallback."""
@@ -540,6 +635,8 @@ class DataLoader:
                             addresses_gdf = addresses_gdf.to_crs('EPSG:4326')
                         
                         keep_cols = ['address_id', 'geometry']
+                        if 'hash' in addresses_gdf.columns:
+                            keep_cols.append('hash')
                         if 'full_address' in addresses_gdf.columns:
                             keep_cols.append('full_address')
                         elif 'street' in addresses_gdf.columns:

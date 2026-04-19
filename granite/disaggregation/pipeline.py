@@ -23,10 +23,10 @@ from ..visualization.plots import GRANITEResearchVisualizer, DisaggregationVisua
 from ..evaluation.spatial_diagnostics import SpatialLearningDiagnostics
 from ..evaluation.accessibility_validator import validate_granite_accessibility_features, integrate_with_spatial_diagnostics
 from ..evaluation.baselines import (
-    DisaggregationComparison, 
+    DisaggregationComparison,
     NaiveUniformBaseline,
-    IDWDisaggregation, 
-    OrdinaryKrigingDisaggregation
+    DasymetricDisaggregation,
+    PycnophylacticDisaggregation
 )
 from granite.models.mixture_of_experts import create_moe_model, MixtureOfExpertsTrainer
 
@@ -182,66 +182,81 @@ class GRANITEPipeline:
 
     def _process_single_tract(self, target_fips, data):
         """Process single tract or multiple tracts with accessibility -> SVI approach"""
-        
+
+        # determine disaggregation target
+        active_target = self.config.get('data', {}).get('target', 'svi')
+        self._log(f"Disaggregation target: {active_target}")
+
         # Clear stale accessibility cache
         cache_dir = os.path.join(self.data_dir, 'cache', 'accessibility_features')
         if os.path.exists(cache_dir):
             import shutil
             shutil.rmtree(cache_dir)
             self._log("Cleared old accessibility cache - will recompute with real data")
-        
+
         # Check if multi-tract mode
         n_neighbor_tracts = self.config.get('data', {}).get('neighbor_tracts', 0)
-        
+
         if n_neighbor_tracts > 0:
             # Multi-tract mode
             self._log(f"Multi-tract mode: {n_neighbor_tracts} neighbors")
             tract_list = self.data_loader.get_neighboring_tracts(target_fips, n_neighbor_tracts)
-            
+
             # Combine addresses from all tracts
             all_addresses = []
             tract_svis = {}
-            
+
             for fips in tract_list:
                 fips = str(fips).strip()
                 tract_data = data['tracts'][data['tracts']['FIPS'] == fips]
                 if len(tract_data) == 0:
                     continue
-                
-                tract_svis[fips] = float(tract_data.iloc[0]['RPL_THEMES'])
+
                 addresses = self.data_loader.get_addresses_for_tract(fips)
                 addresses['tract_fips'] = fips
+
+                tract_svis[fips] = self.data_loader.get_tract_target_value(
+                    fips, data['svi'], target=active_target,
+                    tract_addresses=addresses
+                )
                 all_addresses.append(addresses)
-            
+
             if len(all_addresses) == 0:
                 return {'success': False, 'error': 'No addresses in selected tracts'}
-            
+
             tract_addresses = pd.concat(all_addresses, ignore_index=True)
             target_tract_svi = tract_svis[target_fips]
-            
+
             self._log(f"Combined {len(tract_addresses)} addresses from {len(tract_list)} tracts")
         else:
             # Single tract mode
             self._log(f"Processing tract {target_fips}...")
             target_fips = str(target_fips).strip()
             data['tracts']['FIPS'] = data['tracts']['FIPS'].astype(str).str.strip()
-            
+
             target_tract = data['tracts'][data['tracts']['FIPS'] == target_fips]
             if len(target_tract) == 0:
                 return {'success': False, 'error': f'FIPS {target_fips} not found'}
-            
-            tract_info = target_tract.iloc[0]
-            target_tract_svi = tract_info['RPL_THEMES']
-            
+
             tract_addresses = self.data_loader.get_addresses_for_tract(target_fips)
             if len(tract_addresses) == 0:
                 return {'success': False, 'error': f'No addresses found for tract {target_fips}'}
-            
+
             tract_addresses['tract_fips'] = target_fips
+
+            target_tract_svi = self.data_loader.get_tract_target_value(
+                target_fips, data['svi'], target=active_target,
+                tract_addresses=tract_addresses
+            )
             tract_svis = {target_fips: target_tract_svi}
-        
+
+        # get address-level truth vector (non-None for property_value target)
+        address_truth = self.data_loader.get_address_truth_values(
+            tract_addresses, target=active_target
+        )
+
         self._log(f"Found {len(tract_addresses)} total addresses")
-        self._log(f"Target tract {target_fips} SVI: {target_tract_svi:.4f}")
+        self._log(f"Target tract {target_fips} target value: {target_tract_svi:.4f}")
         
         state_fips = target_fips[:2]
         county_fips = target_fips[2:5]
@@ -253,6 +268,9 @@ class GRANITEPipeline:
 
         if accessibility_features is None:
             return {'success': False, 'error': 'Failed to compute accessibility features'}
+
+        self._log(f"Active feature count: {accessibility_features.shape[1]} "
+                  f"(target={active_target})")
 
         # Generate feature names
         feature_names = self._generate_feature_names(accessibility_features.shape[1])
@@ -460,17 +478,30 @@ class GRANITEPipeline:
                 output_dir=os.path.join(self.output_dir, 'attention_analysis')
             )
 
-        # Baseline comparisons (IDW, Kriging vs GNN disaggregation)
-        baseline_results = self._run_disaggregation_baselines(
-            addresses=target_addresses,
-            predictions=final_predictions['mean'].values,
-            tract_gdf=data['tracts'],
-            tract_fips=target_fips,
-            tract_svi=target_tract_svi,
-            accessibility_features=target_access_features
-        )
+        # Baseline comparisons (Dasymetric, Pycnophylactic vs GNN disaggregation)
+        if active_target == 'svi':
+            baseline_results = self._run_disaggregation_baselines(
+                addresses=target_addresses,
+                predictions=final_predictions['mean'].values,
+                tract_gdf=data['tracts'],
+                tract_fips=target_fips,
+                tract_svi=target_tract_svi,
+                accessibility_features=target_access_features
+            )
+        elif active_target == 'property_value':
+            baseline_results = self._run_property_value_baselines(
+                addresses=target_addresses,
+                predictions=final_predictions['mean'].values,
+                tract_gdf=data['tracts'],
+                tract_fips=target_fips,
+                tract_target_value=target_tract_svi,
+                accessibility_features=target_access_features
+            )
+        else:
+            self._log(f"Baselines skipped (unknown target={active_target})")
+            baseline_results = {}
         
-        return {
+        result = {
             'success': True,
             'predictions': final_predictions,
             'address_gdf': target_addresses,
@@ -482,7 +513,8 @@ class GRANITEPipeline:
             'training_result': training_result,
             'baseline_comparisons': baseline_results,
             'validation_results': validation_results,
-            'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility -> SVI',
+            'target': active_target,
+            'methodology': f'{"Multi-tract" if n_neighbor_tracts > 0 else "Single-tract"} Accessibility -> {"SVI" if active_target == "svi" else "PropertyValue"}',
             'summary': {
                 'addresses_processed': len(target_addresses),
                 'total_training_addresses': len(tract_addresses),
@@ -493,22 +525,31 @@ class GRANITEPipeline:
                 'training_epochs': training_result.get('epochs_trained', 0)
             }
         }
+
+        # attach address-level truth vector for validation (property_value target)
+        if address_truth is not None:
+            if n_neighbor_tracts > 0:
+                target_mask = tract_addresses['tract_fips'] == target_fips
+                result['address_truth'] = address_truth[target_mask.values]
+            else:
+                result['address_truth'] = address_truth
+
+        return result
     
-    def _run_disaggregation_baselines(self, addresses, predictions, tract_gdf, 
+    def _run_disaggregation_baselines(self, addresses, predictions, tract_gdf,
                                        tract_fips, tract_svi, accessibility_features=None):
         """
-        Run disaggregation baseline comparisons (IDW, Kriging, Naive).
+        Run disaggregation baseline comparisons (Dasymetric, Pycnophylactic, Naive).
         """
         self._log("Running disaggregation baseline comparisons...")
-        
+
         try:
             comparison = DisaggregationComparison(verbose=self.verbose)
-            
+
             # Register baselines
             comparison.add_baseline(NaiveUniformBaseline())
-            comparison.add_baseline(IDWDisaggregation(power=2.0, n_neighbors=8))
-            comparison.add_baseline(IDWDisaggregation(power=3.0, n_neighbors=8))
-            comparison.add_baseline(OrdinaryKrigingDisaggregation())
+            comparison.add_baseline(DasymetricDisaggregation(ancillary_column='nlcd_impervious_pct'))
+            comparison.add_baseline(PycnophylacticDisaggregation(n_iterations=50, k_neighbors=8))
             
             # Run comparison
             results = comparison.run_comparison(
@@ -542,6 +583,74 @@ class GRANITEPipeline:
             
         except Exception as e:
             self._log(f"Baseline comparison failed: {e}", level='WARN')
+            import traceback
+            traceback.print_exc()
+            return {'error': str(e)}
+
+    def _run_property_value_baselines(self, addresses, predictions, tract_gdf,
+                                       tract_fips, tract_target_value,
+                                       accessibility_features=None):
+        """Run dasymetric and pycnophylactic baselines for property_value target.
+
+        Computes per-tract mean normalized property value and uses that as
+        the allocation target, analogous to how SVI baselines use
+        RPL_THEMES.
+        """
+        self._log("Running property-value baseline comparisons (Dasymetric, Pycnophylactic)...")
+
+        try:
+            # build per-tract mean property value column
+            pv_data = self.data_loader.load_property_value_data()
+            all_addresses = self.data_loader.load_address_points()
+            tracts_gdf = self.data_loader.load_census_tracts(
+                tract_fips[:2], tract_fips[2:5]
+            )
+
+            # spatial join to assign tract FIPS to every address
+            if all_addresses.crs != tracts_gdf.crs:
+                all_addresses = all_addresses.to_crs(tracts_gdf.crs)
+            joined = gpd.sjoin(
+                all_addresses[['hash', 'geometry']],
+                tracts_gdf[['FIPS', 'geometry']],
+                how='inner', predicate='within'
+            )
+
+            if 'hash' in joined.columns:
+                joined['appvalue_norm'] = joined['hash'].map(pv_data['appvalue_norm'])
+                tract_means = joined.groupby('FIPS')['appvalue_norm'].mean()
+            else:
+                self._log("Cannot compute per-tract property values (no hash column)")
+                return {'error': 'no hash column for property value baseline'}
+
+            # add column to tract_gdf copy
+            baseline_tracts = tract_gdf.copy()
+            baseline_tracts['pv_mean'] = baseline_tracts['FIPS'].map(tract_means)
+            # fill missing with global median so baselines don't break
+            global_median = float(tract_means.median())
+            baseline_tracts['pv_mean'] = baseline_tracts['pv_mean'].fillna(global_median)
+
+            comparison = DisaggregationComparison(verbose=self.verbose)
+            comparison.add_baseline(NaiveUniformBaseline())
+            comparison.add_baseline(DasymetricDisaggregation(ancillary_column='nlcd_impervious_pct'))
+            comparison.add_baseline(PycnophylacticDisaggregation(n_iterations=50, k_neighbors=8))
+
+            results = comparison.run_comparison(
+                tract_gdf=baseline_tracts,
+                address_gdf=addresses,
+                gnn_predictions=predictions,
+                tract_fips=tract_fips,
+                tract_svi=tract_target_value,
+                accessibility_features=accessibility_features,
+                svi_column='pv_mean'
+            )
+
+            if self.verbose:
+                comparison.print_summary()
+
+            return results
+
+        except Exception as e:
+            self._log(f"Property-value baseline comparison failed: {e}", level='WARN')
             import traceback
             traceback.print_exc()
             return {'error': str(e)}
@@ -593,10 +702,15 @@ class GRANITEPipeline:
             for fips in tract_svis.keys():
                 tract_masks[fips] = (addresses['tract_fips'] == fips).values
 
-            # Load block group constraints
+            # Load block group constraints (only applicable to SVI target)
             block_group_targets = None
             block_group_masks = None
+            active_target_mt = self.config.get('data', {}).get('target', 'svi')
+            if active_target_mt != 'svi':
+                self._log(f"Block group SVI constraints skipped (target={active_target_mt})")
             try:
+                if active_target_mt != 'svi':
+                    raise RuntimeError("n/a")
                 bg_loader = BlockGroupLoader(
                     data_dir=self.data_dir, verbose=self.verbose
                 )
@@ -678,14 +792,17 @@ class GRANITEPipeline:
                             block_group_targets.update(rescaled)
 
             except Exception as e:
-                self._log(f"Block group loading failed, continuing without: {e}",
-                          level='WARN')
+                if active_target_mt == 'svi':
+                    self._log(f"Block group loading failed, continuing without: {e}",
+                              level='WARN')
                 block_group_targets = None
                 block_group_masks = None
 
             # Extract ordering values (raw log_appvalue before normalization)
+            # skip ordering when property_value is the target to avoid circularity
             ordering_values = None
-            use_ordering = self.config.get('use_ordering_constraints', True)
+            active_target = self.config.get('data', {}).get('target', 'svi')
+            use_ordering = self.config.get('use_ordering_constraints', True) and active_target != 'property_value'
             if use_ordering and 'log_appvalue' in addresses.columns:
                 raw_vals = pd.to_numeric(addresses['log_appvalue'], errors='coerce').values.astype(float)
                 n_valid = int(np.sum(~np.isnan(raw_vals)))
@@ -842,17 +959,38 @@ class GRANITEPipeline:
             socioeco_array = np.tile(list(socioeconomic_context.values()), (len(addresses), 1))
         return socioeco_array
 
+    # features excluded when target=property_value to prevent target leakage
+    # approved 2026-04-18; see docs/property_value_feature_audit.md
+    _PROPERTY_VALUE_EXCLUDED_FEATURES = {
+        'log_appvalue', 'build_to_land_ratio', 'bldg_footprint_m2',
+        'bldg_vertex_count', 'log_acres', 'LUCODE', 'PROPTYPE',
+        'osm_building_type',
+    }
+
     def _extract_building_features(self, addresses):
         """Extract building and flood features from address GeoDataFrame columns.
 
         Returns (array of shape (n, k), list of k feature names).
         Returns empty array if building columns are absent.
         """
+        active_target = self.config.get('data', {}).get('target', 'svi')
+
         expected = [
             'bldg_footprint_m2', 'bldg_vertex_count', 'in_sfha', 'osm_building_type',
             'log_appvalue', 'build_to_land_ratio', 'log_acres', 'LUCODE', 'PROPTYPE',
             'nlcd_land_cover', 'nlcd_impervious_pct', 'nlcd_tree_canopy_pct',
         ]
+
+        # exclude value-derived columns when disaggregating property value
+        if active_target == 'property_value':
+            excluded = self._PROPERTY_VALUE_EXCLUDED_FEATURES
+            before = len(expected)
+            expected = [c for c in expected if c not in excluded]
+            n_dropped = before - len(expected)
+            self._log(f"Property value leakage exclusion: {n_dropped} features dropped, "
+                      f"{len(expected)} building features remain")
+            self._log(f"  excluded: {', '.join(sorted(excluded))}")
+            self._log(f"  retained: {', '.join(expected) if expected else '(none)'}")
         available = [c for c in expected if c in addresses.columns]
 
         if not available:
@@ -1990,9 +2128,23 @@ class GRANITEPipeline:
         
         apply_correction = self.config.get('training', {}).get('apply_post_correction', False)
         if apply_correction:
+            # iterative bounded projection
+            adjusted_predictions = predictions.copy()
+            max_iter = 50
+            tol = 1e-8
+            n_iter = 0
+            for i in range(max_iter):
+                error = tract_svi - np.mean(adjusted_predictions)
+                if abs(error) < tol:
+                    break
+                adjusted_predictions = np.clip(adjusted_predictions + error, 0.0, 1.0)
+                n_iter = i + 1
+            residual = abs(np.mean(adjusted_predictions) - tract_svi)
+            self._log(f" Constraint projection: {n_iter} iterations, residual={residual:.2e}")
+            if n_iter == max_iter and residual > tol:
+                self._log(f" Projection did not converge: target={tract_svi:.6f}, "
+                          f"final_mean={np.mean(adjusted_predictions):.6f}", level='WARN')
             adjustment = tract_svi - current_mean
-            adjusted_predictions = predictions + adjustment
-            adjusted_predictions = np.clip(adjusted_predictions, 0.0, 1.0)
         else:
             adjusted_predictions = predictions
             adjustment = 0.0
@@ -2420,29 +2572,17 @@ class GRANITEPipeline:
             return None
 
     def _apply_strong_constraint_correction(self, predictions, tract_svi):
-        """Apply stronger constraint correction while preserving spatial variation"""
-        
-        current_mean = np.mean(predictions)
-        current_std = np.std(predictions)
-        
-        # Strong adjustment to meet constraint
-        adjustment = tract_svi - current_mean
-        corrected_predictions = predictions + adjustment
-        
-        # Preserve relative spatial patterns while meeting constraint
-        corrected_predictions = np.clip(corrected_predictions, 0.0, 1.0)
-        
-        # Verify constraint is met
-        final_mean = np.mean(corrected_predictions)
-        final_error = abs(final_mean - tract_svi) / tract_svi * 100
-        
-        if final_error > 1.0:  # Still > 1% error
-            # Apply proportional scaling as backup
-            if tract_svi > 0:
-                scale_factor = tract_svi / current_mean
-                corrected_predictions = predictions * scale_factor
-                corrected_predictions = np.clip(corrected_predictions, 0.0, 1.0)
-        
+        """Apply iterative bounded projection to meet tract mean constraint"""
+
+        corrected_predictions = predictions.copy()
+        max_iter = 50
+        tol = 1e-8
+        for i in range(max_iter):
+            error = tract_svi - np.mean(corrected_predictions)
+            if abs(error) < tol:
+                break
+            corrected_predictions = np.clip(corrected_predictions + error, 0.0, 1.0)
+
         return corrected_predictions
 
     def _create_research_visualizations(self, results):
@@ -3017,16 +3157,16 @@ class GRANITEPipeline:
         errors = [results[f]['mean_error_pct'] for f in fips_list]
         
         # Get baseline data if available
-        gnn_stds, idw_stds, access_corrs = [], [], []
+        gnn_stds, dasy_stds, access_corrs = [], [], []
         for f in fips_list:
             baseline = results[f].get('baseline_comparison', {})
             methods = baseline.get('methods', {})
-            
+
             gnn_data = methods.get('GNN', {})
-            idw_data = methods.get('IDW_p2.0', {})
-            
+            dasy_data = methods.get('Dasymetric', {})
+
             gnn_stds.append(gnn_data.get('std', np.std(results[f].get('predictions', [0]))))
-            idw_stds.append(idw_data.get('std', 0))
+            dasy_stds.append(dasy_data.get('std', 0))
             access_corrs.append(gnn_data.get('accessibility_correlation', 0))
         
         # Panel 1: Spatial variation by method
@@ -3034,7 +3174,7 @@ class GRANITEPipeline:
         x_pos = np.arange(len(fips_list))
         width = 0.35
         ax1.bar(x_pos - width/2, gnn_stds, width, label='GNN', color='#2E7D32', alpha=0.8)
-        ax1.bar(x_pos + width/2, idw_stds, width, label='IDW', color='#1565C0', alpha=0.8)
+        ax1.bar(x_pos + width/2, dasy_stds, width, label='Dasymetric', color='#1565C0', alpha=0.8)
         ax1.set_xlabel('Tract')
         ax1.set_ylabel('Spatial Variation (std)')
         ax1.set_title('Disaggregation Quality by Tract')
@@ -3043,15 +3183,15 @@ class GRANITEPipeline:
         ax1.legend()
         ax1.grid(True, alpha=0.3, axis='y')
         
-        # Panel 2: GNN vs IDW scatter
+        # Panel 2: GNN vs Dasymetric scatter
         ax2 = axes[0, 1]
-        ax2.scatter(idw_stds, gnn_stds, c=svis, cmap='RdYlGn_r', s=100, 
+        ax2.scatter(dasy_stds, gnn_stds, c=svis, cmap='RdYlGn_r', s=100,
                    edgecolors='black', linewidth=1)
-        max_val = max(max(gnn_stds), max(idw_stds)) * 1.1
+        max_val = max(max(gnn_stds), max(dasy_stds)) * 1.1
         ax2.plot([0, max_val], [0, max_val], 'k--', alpha=0.5, label='1:1 line')
-        ax2.set_xlabel('IDW Variation (std)')
+        ax2.set_xlabel('Dasymetric Variation (std)')
         ax2.set_ylabel('GNN Variation (std)')
-        ax2.set_title('GNN vs IDW (color = tract SVI)')
+        ax2.set_title('GNN vs Dasymetric (color = tract SVI)')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
         cbar = plt.colorbar(ax2.collections[0], ax=ax2)
@@ -3072,9 +3212,9 @@ class GRANITEPipeline:
         
         # Panel 4: Variation vs SVI
         ax4 = axes[1, 0]
-        ax4.scatter(svis, gnn_stds, c='#2E7D32', s=100, label='GNN', 
+        ax4.scatter(svis, gnn_stds, c='#2E7D32', s=100, label='GNN',
                    edgecolors='black', linewidth=1)
-        ax4.scatter(svis, idw_stds, c='#1565C0', s=100, label='IDW',
+        ax4.scatter(svis, dasy_stds, c='#1565C0', s=100, label='Dasymetric',
                    edgecolors='black', linewidth=1, marker='s')
         ax4.set_xlabel('Tract SVI')
         ax4.set_ylabel('Spatial Variation (std)')
@@ -3117,9 +3257,9 @@ CONSTRAINT SATISFACTION
 
 DISAGGREGATION QUALITY  
   GNN Mean Variation: {np.mean(gnn_stds):.4f}
-  IDW Mean Variation: {np.mean(idw_stds):.4f}
-  GNN Advantage: {np.mean(gnn_stds) - np.mean(idw_stds):+.4f}
-  GNN > IDW: {sum(1 for g, i in zip(gnn_stds, idw_stds) if g > i)}/{len(fips_list)}
+  Dasymetric Mean Variation: {np.mean(dasy_stds):.4f}
+  GNN Advantage: {np.mean(gnn_stds) - np.mean(dasy_stds):+.4f}
+  GNN > Dasymetric: {sum(1 for g, d in zip(gnn_stds, dasy_stds) if g > d)}/{len(fips_list)}
 
 ACCESSIBILITY-VULNERABILITY
   Mean Correlation: {np.mean(access_corrs):.3f}
@@ -3718,38 +3858,59 @@ ACCESSIBILITY-VULNERABILITY
 
     def save_results(self, results, output_dir=None):
         """Save pipeline results"""
-        
+
         if not results.get('success', False):
             self._log("No results to save")
             return
-        
+
         save_dir = output_dir or self.output_dir
-        
+
         # Save predictions
         predictions_path = os.path.join(save_dir, 'granite_predictions.csv')
         results['predictions'].to_csv(predictions_path, index=False)
-        
+
         # Save accessibility features
         if 'accessibility_features' in results:
             features_path = os.path.join(save_dir, 'accessibility_features.csv')
             features_df = pd.DataFrame(results['accessibility_features'])
             features_df.to_csv(features_path, index=False)
-        
+
+        # Save address-level truth vector and all method predictions (property_value target)
+        if 'address_truth' in results and results['address_truth'] is not None:
+            truth_df = results['predictions'][['address_id', 'x', 'y', 'mean']].copy()
+            truth_df.rename(columns={'mean': 'granite'}, inplace=True)
+            truth_df['truth'] = results['address_truth']
+
+            # append baseline predictions if available
+            baselines = results.get('baseline_comparisons', {}).get('methods', {})
+            for method_key, col_name in [('Dasymetric', 'dasymetric'), ('Pycnophylactic', 'pycnophylactic')]:
+                if method_key in baselines and 'predictions' in baselines[method_key]:
+                    preds = baselines[method_key]['predictions']
+                    if len(preds) == len(truth_df):
+                        truth_df[col_name] = preds
+
+            truth_path = os.path.join(save_dir, 'address_truth.csv')
+            truth_df.to_csv(truth_path, index=False)
+            self._log(f"Address truth vector saved to {truth_path} "
+                      f"(columns: {list(truth_df.columns)})")
+
         # Save summary
         summary_path = os.path.join(save_dir, 'results_summary.json')
         import json
-        
+
+        active_target = results.get('target', 'svi')
         summary = {
             'methodology': results.get('methodology', 'GRANITE'),
+            'target': active_target,
             'tract_fips': results['tract_info']['FIPS'],
-            'tract_svi': float(results['tract_info']['RPL_THEMES']),
+            'tract_target_value': float(results['tract_info']['RPL_THEMES']),
             'summary_metrics': results['summary'],
             'validation_results': results['validation_results']
         }
-        
+
         with open(summary_path, 'w') as f:
             json.dump(summary, f, indent=2, default=str)
-        
+
         self._log(f"Results saved to {save_dir}")
 
     def _debug_accessibility_vulnerability_relationship(self, final_predictions, accessibility_features, addresses):
@@ -4310,9 +4471,9 @@ ACCESSIBILITY-VULNERABILITY
             comparison = DisaggregationComparison(verbose=False)  # Quiet for batch
             
             comparison.add_baseline(NaiveUniformBaseline())
-            comparison.add_baseline(IDWDisaggregation(power=2.0, n_neighbors=8))
-            comparison.add_baseline(OrdinaryKrigingDisaggregation())
-            
+            comparison.add_baseline(DasymetricDisaggregation(ancillary_column='nlcd_impervious_pct'))
+            comparison.add_baseline(PycnophylacticDisaggregation(n_iterations=50, k_neighbors=8))
+
             results = comparison.run_comparison(
                 tract_gdf=tract_gdf,
                 address_gdf=test_addresses,
@@ -4565,11 +4726,17 @@ ACCESSIBILITY-VULNERABILITY
                     
                     raw_predictions = predictions.cpu().numpy()
                     
-                    # Per-tract mean-shift correction
+                    # Per-tract iterative bounded projection
                     raw_mean = float(np.mean(raw_predictions))
                     shift = actual_svi - raw_mean
-                    corrected_predictions = raw_predictions + shift
-                    corrected_predictions = np.clip(corrected_predictions, 0.0, 1.0)
+                    corrected_predictions = raw_predictions.copy()
+                    max_iter = 50
+                    tol = 1e-8
+                    for _proj_i in range(max_iter):
+                        proj_error = actual_svi - np.mean(corrected_predictions)
+                        if abs(proj_error) < tol:
+                            break
+                        corrected_predictions = np.clip(corrected_predictions + proj_error, 0.0, 1.0)
                     
                     # Calculate metrics
                     predicted_mean = float(np.mean(corrected_predictions))
@@ -4615,7 +4782,7 @@ ACCESSIBILITY-VULNERABILITY
                     }
                     
                     # Log results
-                    idw_std = baseline_results.get('methods', {}).get('IDW_p2.0', {}).get('std', 0)
+                    dasy_std = baseline_results.get('methods', {}).get('Dasymetric', {}).get('std', 0)
                     self._log(f"  {test_fips}: SVI={actual_svi:.3f}, Shift={shift:+.3f}, "
                              f"Std={spatial_std:.4f}, Expert={expert_names[dominant_expert]}")
                     
@@ -4646,22 +4813,22 @@ ACCESSIBILITY-VULNERABILITY
                 # Combine all test addresses and predictions
                 all_test_addresses = []
                 all_test_predictions = {'GRANITE': []}
-                idw_predictions = []
-                kriging_predictions = []
-                
+                dasymetric_predictions = []
+                pycnophylactic_predictions = []
+
                 for fips, result in test_results.items():
                     test_addr = self.data_loader.get_addresses_for_tract(fips)
                     if test_addr is not None and len(test_addr) > 0:
                         all_test_addresses.append(test_addr)
                         all_test_predictions['GRANITE'].append(result['predictions'])
-                        
+
                         # Collect baseline predictions
                         if 'baseline_comparison' in result:
                             baselines = result['baseline_comparison'].get('methods', {})
-                            if 'IDW_p2.0' in baselines:
-                                idw_predictions.append(baselines['IDW_p2.0']['predictions'])
-                            if 'Kriging' in baselines:
-                                kriging_predictions.append(baselines['Kriging']['predictions'])
+                            if 'Dasymetric' in baselines:
+                                dasymetric_predictions.append(baselines['Dasymetric']['predictions'])
+                            if 'Pycnophylactic' in baselines:
+                                pycnophylactic_predictions.append(baselines['Pycnophylactic']['predictions'])
                 
                 if all_test_addresses:
                     combined_addresses = gpd.GeoDataFrame(
@@ -4674,10 +4841,10 @@ ACCESSIBILITY-VULNERABILITY
                     method_predictions = {
                         'GRANITE': np.concatenate(all_test_predictions['GRANITE'])
                     }
-                    if idw_predictions:
-                        method_predictions['IDW'] = np.concatenate(idw_predictions)
-                    if kriging_predictions:
-                        method_predictions['Kriging'] = np.concatenate(kriging_predictions)
+                    if dasymetric_predictions:
+                        method_predictions['Dasymetric'] = np.concatenate(dasymetric_predictions)
+                    if pycnophylactic_predictions:
+                        method_predictions['Pycnophylactic'] = np.concatenate(pycnophylactic_predictions)
                     
                     # Create validator and run comparison
                     validator = BlockGroupValidator(block_groups, verbose=self.verbose)
@@ -4832,7 +4999,7 @@ ACCESSIBILITY-VULNERABILITY
         
         # Panel 1: Constraint satisfaction comparison
         ax1 = fig.add_subplot(gs[0, 0])
-        methods = ['GRANITE', 'IDW', 'Kriging', 'Naive']
+        methods = ['GRANITE', 'Dasymetric', 'Pycnophylactic', 'Naive']
         errors = [
             np.mean([r['mean_error_pct'] for r in granite_results.values()]),
             # Extract from baseline_results...
@@ -4858,7 +5025,7 @@ ACCESSIBILITY-VULNERABILITY
         bg_corrs = [
             block_group_validation.get('GRANITE', {}).get('correlations', {})
                 .get('poverty_correlation', {}).get('r', 0),
-            block_group_validation.get('IDW', {}).get('correlations', {})
+            block_group_validation.get('Dasymetric', {}).get('correlations', {})
                 .get('poverty_correlation', {}).get('r', 0),
             # etc.
         ]
@@ -4869,7 +5036,7 @@ ACCESSIBILITY-VULNERABILITY
         ax3.axhline(y=0.15, color='orange', linestyle='--', alpha=0.5, label='Moderate threshold')
         
         # Panel 4-6: Scatter plots for top 3 methods vs block group poverty
-        for idx, method in enumerate(['GRANITE', 'IDW', 'Kriging']):
+        for idx, method in enumerate(['GRANITE', 'Dasymetric', 'Pycnophylactic']):
             ax = fig.add_subplot(gs[1, idx])
             
             if method in block_group_validation:

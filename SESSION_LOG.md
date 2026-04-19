@@ -1,5 +1,84 @@
 # GRANITE Session Log
 
+## 2026-04-19: Fix post-training constraint correction with iterative bounded projection
+
+**Files changed:** `granite/disaggregation/pipeline.py`, `config.yaml`
+
+**What changed and why:**
+- `config.yaml`: enabled `apply_post_correction: true` (was `false`). Without this, constraint errors were raw GNN training residuals with no post-hoc enforcement.
+- `pipeline.py _finalize_predictions`: replaced single-pass additive shift + clip with iterative bounded projection (max_iter=50, tol=1e-8). Single-pass fails when clipping at 0 or 1 shifts the mean away from target; iterative loop re-applies the residual error until convergence.
+- `pipeline.py` multi-tract holdout path (line ~4741): same fix applied to inline per-tract correction.
+- `pipeline.py _apply_strong_constraint_correction`: same fix applied (was dead code but fixed for consistency).
+
+**Verification (5 Mehdi tracts, 50 epochs each, cached):**
+
+| FIPS        | SVI   | Iters | Residual  | Error  | Std    |
+|-------------|-------|-------|-----------|--------|--------|
+| 47065000700 | 0.114 | 2     | 7.45e-09  | 0.00%  | 0.0737 |
+| 47065000600 | 0.224 | 3     | 0.00e+00  | 0.00%  | 0.0724 |
+| 47065011326 | 0.510 | 1     | 0.00e+00  | 0.00%  | 0.1000 |
+| 47065011321 | 0.696 | 2     | 0.00e+00  | 0.00%  | 0.0844 |
+| 47065002400 | 0.891 | 4     | 0.00e+00  | 0.00%  | 0.1357 |
+
+All constraint errors < 1e-6. Boundary tracts (0.114, 0.891) required 2-4 iterations due to clip-induced mean drift. Baseline methods (Dasymetric, Pycnophylactic) unaffected at machine epsilon.
+
+**Cache invalidation:** none. Post-training correction only; no feature, routing, or cache key changes.
+
+## 2026-04-19: Update visualization code for Dasymetric/Pycnophylactic baselines
+
+**Files changed:** `granite/visualization/plots.py`, `granite/evaluation/post_training_validation.py`, `granite/scripts/run_granite.py`, `output/mehdi_review/_figures/README.md`
+
+**What changed and why:**
+- `plots.py`: replaced all IDW/Kriging/Naive_Uniform method references with Dasymetric/Pycnophylactic across dashboard panels (tradeoff scatter, variation bars, prediction distributions, prediction range, GNN-vs-baseline scatter, summary statistics, metrics table). Updated color scheme: dasymetric=#E65100 (warm orange), pycnophylactic=#1565C0 (cool blue). Removed overlap-handling code from tradeoff scatter (three distinct methods separate naturally).
+- `post_training_validation.py`: updated color dicts, bootstrap difference test (now GRANITE vs Dasymetric), report text, summary checklist, docstrings, and help text to reference new baselines.
+- `run_granite.py`: updated `--skip-baselines` help text.
+- `README.md` in `_figures/`: updated dashboard description to reflect three-method display.
+
+**Smoke test (tract 47065000600, 2089 addresses):**
+- Dashboard: all three methods (GNN, Dasymetric, Pycnophylactic) appear in every panel.
+- Metrics table: exactly three rows, no floor references.
+- Tradeoff scatter: three distinct non-overlapping points.
+- No KeyError, no missing-method warnings, no dangling IDW/Kriging strings in output artifacts.
+
+**Cache invalidation:** none. No feature, routing, or pipeline logic changed.
+
+## 2026-04-18: Retire IDW/Kriging baselines, add Dasymetric and Pycnophylactic
+
+**Files changed:** `granite/evaluation/baselines.py`, `granite/disaggregation/pipeline.py`, `granite/evaluation/post_training_validation.py`, `graveyard/disaggregation_baselines_idw_kriging.py`
+
+**What changed and why:**
+- IDW and Kriging baselines retired to `graveyard/disaggregation_baselines_idw_kriging.py`. Point-interpolation methods collapse to tract mean under single-centroid interpolation; replaced by mass-preserving disaggregation baselines.
+- `baselines.py`: added `DasymetricDisaggregation` (additive dasymetric using `nlcd_impervious_pct` ancillary) and `PycnophylacticDisaggregation` (Tobler 1979 iterative smoothing seeded from multi-tract gradient). Both satisfy `disaggregate()` interface. `DisaggregationComparison.run_comparison()` now passes `address_gdf` through to `disaggregate()` for ancillary column access. Base class `disaggregate()` signature extended with optional `address_gdf` parameter.
+- `pipeline.py`: all IDW/Kriging imports, constructor calls, result key references (`IDW_p2.0`, `Kriging`), visualization labels, and block group validation collection updated to use `Dasymetric` and `Pycnophylactic`.
+- `post_training_validation.py`: IDW/Kriging usage replaced with new baselines.
+
+**Sanity check (tract 47065000600, 2089 addresses):**
+- Dasymetric: constraint error 2.78e-17, spatial std 0.109, range [0.0, 0.47]
+- Pycnophylactic: constraint error 2.78e-17, spatial std 0.065, range [0.10, 0.36]
+- Both strictly in [0,1], all validation criteria pass.
+
+**Cache invalidation:** none. No feature or routing logic changed.
+
+## 2026-04-18: Add property_value as alternate disaggregation target
+
+**Files changed:** `granite/data/loaders.py`, `granite/disaggregation/pipeline.py`, `granite/scripts/run_granite.py`, `config.yaml`
+
+**What changed and why:**
+- `loaders.py`: added `load_property_value_data()`, `get_tract_target_value()`, `get_address_truth_values()` to DataLoader. Property values loaded from `combined_address_features.csv`, normalized to [0,1] via county-wide min-max of log_appvalue. `hash` column now retained through address loading for property value joins.
+- `pipeline.py _process_single_tract`: reads `config.data.target` (default 'svi') to select target. Uses `get_tract_target_value()` instead of reading RPL_THEMES directly. Logs active feature count. Attaches address-level truth vector to results. Skips IDW/Kriging baselines for non-SVI targets. Skips block group SVI constraints and pairwise ordering for property_value target.
+- `pipeline.py _extract_building_features`: excludes `log_appvalue` and `build_to_land_ratio` when target=property_value to prevent target leakage (class attribute `_PROPERTY_VALUE_EXCLUDED_FEATURES`).
+- `pipeline.py save_results`: writes `address_truth.csv` (predictions + truth) when truth vector is present; includes `target` field in `results_summary.json`.
+- `run_granite.py`: added `--target` CLI argument (choices: svi, property_value).
+- `config.yaml`: added `target: "svi"` under `data:` section.
+
+**Verified:**
+- `--target=svi` reproduces baseline behavior: 73 features, same constraint error and spatial std.
+- `--target=property_value` runs to completion: 71 features (2 excluded), constraint satisfied, truth vector written to disk.
+
+**Cache invalidation:** none. Accessibility caches store base+modal features which are identical across targets. Building features (where exclusion occurs) are recomputed fresh every run.
+
+---
+
 ## 2026-04-17: Dashboard redesign and tract_fips bugfix
 
 **Files changed:** `granite/visualization/plots.py`, `granite/disaggregation/pipeline.py`

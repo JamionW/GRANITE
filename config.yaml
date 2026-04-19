@@ -7,6 +7,7 @@
 data:
   state_fips: "47"
   county_fips: "065"
+  target: "svi"  # disaggregation target: "svi" or "property_value"
   census_year: 2020
   address_file: "chattanooga.geojson"
   address_features_file: "data/raw/address_features/combined_address_features.csv"
@@ -62,7 +63,7 @@ training:
   constraint_weight: 2.0
   variation_weight: 1.5
   early_stopping_patience: 15
-  apply_post_correction: false
+  apply_post_correction: true
   ordering_weight: 0.5
   ordering_min_gap: 0.5
   ordering_margin: 0.02

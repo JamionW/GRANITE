@@ -87,7 +87,7 @@ Examples:
     )
     parser.add_argument(
         '--skip-baselines', action='store_true',
-        help='Skip baseline comparisons (IDW, Kriging)'
+        help='Skip baseline comparisons (Dasymetric, Pycnophylactic)'
     )
     parser.add_argument(
         '--skip-importance', action='store_true',
@@ -96,6 +96,10 @@ Examples:
     parser.add_argument(
         '--architecture', choices=['gcn_gat', 'sage'], default='gcn_gat',
         help='GNN architecture: gcn_gat (default) or sage'
+    )
+    parser.add_argument(
+        '--target', choices=['svi', 'property_value'], default=None,
+        help='Disaggregation target: svi (default) or property_value'
     )
     parser.add_argument(
         '--prune-features', type=str, default=None, metavar='REPORT_PATH',
@@ -150,6 +154,8 @@ def load_config(args):
     config['training']['enforce_constraints'] = not args.no_constraints
     config['validation']['compare_baselines'] = not args.skip_baselines
     config['model']['architecture'] = args.architecture
+    if args.target:
+        config['data']['target'] = args.target
     if args.prune_features:
         config['processing']['prune_features_path'] = args.prune_features
     config['diagnostics'] = args.diagnostics
@@ -189,10 +195,12 @@ def run_single_tract(args, config):
     output_dir = args.output or config.get('output', {}).get('directory', './output')
     os.makedirs(output_dir, exist_ok=True)
     
+    target = config['data'].get('target', 'svi')
     print(f"\n{'='*60}")
     print("GRANITE: Single/Multi-Tract Analysis")
     print(f"{'='*60}")
     print(f"Target FIPS: {args.fips}")
+    print(f"Disaggregation target: {target}")
     if config['data'].get('neighbor_tracts', 0) > 0:
         print(f"Mode: Multi-tract ({config['data']['neighbor_tracts']} neighbors)")
     else:

@@ -8,7 +8,7 @@ Usage:
     python post_training_validation.py --results-dir ./output/global_validation
 
 Runs:
-    1. Block group validation (GRANITE vs IDW vs Kriging)
+    1. Block group validation (GRANITE vs Dasymetric vs Pycnophylactic)
     2. Bootstrap confidence intervals (statistical significance)
     3. Moran's I spatial autocorrelation
     4. Expert routing feature analysis
@@ -150,7 +150,7 @@ def load_test_tract_data(tract_fips_list, data, verbose=True):
 
 def run_block_group_validation(addresses, predictions_dict, data, output_dir):
     """
-    Run block group validation comparing GRANITE, IDW, and Kriging.
+    Run block group validation comparing GRANITE, Dasymetric, and Pycnophylactic.
     
     Args:
         addresses: GeoDataFrame with address points
@@ -284,20 +284,20 @@ def _create_block_group_comparison_plot(results, output_dir):
     if n_methods == 1:
         axes = [axes]
     
-    colors = {'GRANITE': 'steelblue', 'IDW': 'coral', 'Kriging': 'forestgreen'}
-    
+    colors = {'GRANITE': 'steelblue', 'Dasymetric': '#E65100', 'Pycnophylactic': '#1565C0'}
+
     for i, method in enumerate(methods):
         ax = axes[i]
         data = results[method]
         df = data['validation_data']
-        
+
         if 'SVI' not in df.columns:
             ax.text(0.5, 0.5, 'No SVI data', ha='center', va='center', transform=ax.transAxes)
             ax.set_title(method)
             continue
-        
+
         valid = df['SVI'].notna() & df['predicted_svi'].notna()
-        
+
         if valid.sum() > 0:
             ax.scatter(df.loc[valid, 'SVI'], df.loc[valid, 'predicted_svi'],
                       alpha=0.6, color=colors.get(method, 'gray'), s=30)
@@ -391,15 +391,15 @@ def run_bootstrap_analysis(bg_results, output_dir, n_bootstrap=1000, seed=42):
         
         print(f"  {method}: r = {r_obs:.3f} [{ci_lower:.3f}, {ci_upper:.3f}]")
     
-    # Test difference between methods (if GRANITE and IDW present)
-    if 'GRANITE' in results and 'IDW' in results:
-        print("\nTesting GRANITE vs IDW difference...")
-        
+    # Test difference between methods (if GRANITE and Dasymetric present)
+    if 'GRANITE' in results and 'Dasymetric' in results:
+        print("\nTesting GRANITE vs Dasymetric difference...")
+
         granite_dist = results['GRANITE']['bootstrap_dist']
-        idw_dist = results['IDW']['bootstrap_dist']
-        diff_dist = granite_dist - idw_dist
-        
-        diff_obs = results['GRANITE']['r'] - results['IDW']['r']
+        dasy_dist = results['Dasymetric']['bootstrap_dist']
+        diff_dist = granite_dist - dasy_dist
+
+        diff_obs = results['GRANITE']['r'] - results['Dasymetric']['r']
         diff_ci_lower = np.percentile(diff_dist, 2.5)
         diff_ci_upper = np.percentile(diff_dist, 97.5)
         
@@ -442,12 +442,12 @@ def _create_bootstrap_plot(results, output_dir):
     if n_panels == 1:
         axes = [axes]
     
-    colors = {'GRANITE': 'steelblue', 'IDW': 'coral', 'Kriging': 'forestgreen'}
-    
+    colors = {'GRANITE': 'steelblue', 'Dasymetric': '#E65100', 'Pycnophylactic': '#1565C0'}
+
     for i, method in enumerate(methods):
         ax = axes[i]
         data = results[method]
-        
+
         ax.hist(data['bootstrap_dist'], bins=50, color=colors.get(method, 'gray'),
                 alpha=0.7, edgecolor='white')
         ax.axvline(data['r'], color='red', linewidth=2, label=f"r = {data['r']:.3f}")
@@ -463,9 +463,9 @@ def _create_bootstrap_plot(results, output_dir):
         diff = results['difference']
         
         # Need to compute diff distribution
-        if 'GRANITE' in results and 'IDW' in results:
-            diff_dist = results['GRANITE']['bootstrap_dist'] - results['IDW']['bootstrap_dist']
-            
+        if 'GRANITE' in results and 'Dasymetric' in results:
+            diff_dist = results['GRANITE']['bootstrap_dist'] - results['Dasymetric']['bootstrap_dist']
+
             ax.hist(diff_dist, bins=50, color='purple', alpha=0.7, edgecolor='white')
             ax.axvline(diff['diff'], color='red', linewidth=2)
             ax.axvline(0, color='black', linewidth=2, linestyle='--', label='No difference')
@@ -473,9 +473,9 @@ def _create_bootstrap_plot(results, output_dir):
             ax.axvline(diff['ci_upper'], color='red', linestyle='--', linewidth=1)
             ax.set_xlabel('Correlation Difference')
             ax.set_ylabel('Frequency')
-            
+
             sig_text = "SIGNIFICANT" if diff['significant'] else "NOT significant"
-            ax.set_title(f"GRANITE - IDW\nΔ = {diff['diff']:.3f} [{diff['ci_lower']:.3f}, {diff['ci_upper']:.3f}]\n({sig_text})")
+            ax.set_title(f"GRANITE - Dasymetric\n\u0394 = {diff['diff']:.3f} [{diff['ci_lower']:.3f}, {diff['ci_upper']:.3f}]\n({sig_text})")
             ax.legend()
     
     plt.tight_layout()
@@ -891,76 +891,79 @@ def run_expert_routing_analysis(tract_results, tract_features, feature_names, ou
 
 def compute_baseline_predictions(addresses, tract_gdf, tract_results):
     """
-    Compute IDW and Kriging baseline predictions for comparison.
+    Compute Dasymetric and Pycnophylactic baseline predictions for comparison.
     """
     
     print("\n" + "="*70)
     print("COMPUTING BASELINE PREDICTIONS")
     print("="*70)
     
-    from granite.evaluation.baselines import IDWDisaggregation, OrdinaryKrigingDisaggregation
-    
+    from granite.evaluation.baselines import DasymetricDisaggregation, PycnophylacticDisaggregation
+
     n_addresses = len(addresses)
     predictions = {}
-    
-    # IDW
-    print("\nComputing IDW predictions...")
+
+    # Dasymetric
+    print("\nComputing Dasymetric predictions...")
     try:
-        idw = IDWDisaggregation(power=2.0, n_neighbors=8)
-        idw.fit(tract_gdf, svi_column='RPL_THEMES')
-        
-        idw_preds = np.zeros(n_addresses)
-        
+        dasy = DasymetricDisaggregation(ancillary_column='nlcd_impervious_pct')
+        dasy.fit(tract_gdf, svi_column='RPL_THEMES')
+
+        dasy_preds = np.zeros(n_addresses)
+
         for fips, result in tract_results.items():
             mask = addresses['tract_fips'] == fips
             if mask.sum() == 0:
                 continue
-            
+
             addr_coords = np.column_stack([
                 addresses.loc[mask, 'geometry'].apply(lambda g: g.x),
                 addresses.loc[mask, 'geometry'].apply(lambda g: g.y)
             ])
-            
-            tract_preds = idw.disaggregate(addr_coords, fips, result['actual_svi'])
-            idw_preds[mask] = tract_preds
-        
-        predictions['IDW'] = idw_preds
-        print(f"  IDW: mean={np.mean(idw_preds):.3f}, std={np.std(idw_preds):.3f}")
-        
+
+            tract_preds = dasy.disaggregate(
+                addr_coords, fips, result['actual_svi'],
+                address_gdf=addresses.loc[mask]
+            )
+            dasy_preds[mask] = tract_preds
+
+        predictions['Dasymetric'] = dasy_preds
+        print(f"  Dasymetric: mean={np.mean(dasy_preds):.3f}, std={np.std(dasy_preds):.3f}")
+
     except Exception as e:
-        print(f"  IDW failed: {e}")
+        print(f"  Dasymetric failed: {e}")
         import traceback
         traceback.print_exc()
-    
-    # Kriging
-    print("Computing Kriging predictions...")
+
+    # Pycnophylactic
+    print("Computing Pycnophylactic predictions...")
     try:
-        kriging = OrdinaryKrigingDisaggregation()
-        kriging.fit(tract_gdf, svi_column='RPL_THEMES')
-        
-        kriging_preds = np.zeros(n_addresses)
-        
+        pycno = PycnophylacticDisaggregation(n_iterations=50, k_neighbors=8)
+        pycno.fit(tract_gdf, svi_column='RPL_THEMES')
+
+        pycno_preds = np.zeros(n_addresses)
+
         for fips, result in tract_results.items():
             mask = addresses['tract_fips'] == fips
             if mask.sum() == 0:
                 continue
-            
+
             addr_coords = np.column_stack([
                 addresses.loc[mask, 'geometry'].apply(lambda g: g.x),
                 addresses.loc[mask, 'geometry'].apply(lambda g: g.y)
             ])
-            
-            tract_preds = kriging.disaggregate(addr_coords, fips, result['actual_svi'])
-            kriging_preds[mask] = tract_preds
-        
-        predictions['Kriging'] = kriging_preds
-        print(f"  Kriging: mean={np.mean(kriging_preds):.3f}, std={np.std(kriging_preds):.3f}")
-        
+
+            tract_preds = pycno.disaggregate(addr_coords, fips, result['actual_svi'])
+            pycno_preds[mask] = tract_preds
+
+        predictions['Pycnophylactic'] = pycno_preds
+        print(f"  Pycnophylactic: mean={np.mean(pycno_preds):.3f}, std={np.std(pycno_preds):.3f}")
+
     except Exception as e:
-        print(f"  Kriging failed: {e}")
+        print(f"  Pycnophylactic failed: {e}")
         import traceback
         traceback.print_exc()
-    
+
     return predictions
 
 
@@ -1020,7 +1023,7 @@ def generate_validation_report(all_results, output_dir):
             sig = "SIGNIFICANT" if diff['significant'] else "NOT significant"
             lines.extend([
                 "",
-                f"GRANITE - IDW: {diff['diff']:.3f} [{diff['ci_lower']:.3f}, {diff['ci_upper']:.3f}]",
+                f"GRANITE - Dasymetric: {diff['diff']:.3f} [{diff['ci_lower']:.3f}, {diff['ci_upper']:.3f}]",
                 f"p-value: {diff['p_value']:.4f} ({sig})"
             ])
         
@@ -1081,7 +1084,7 @@ def generate_validation_report(all_results, output_dir):
     if 'bootstrap' in all_results and all_results['bootstrap']:
         boot = all_results['bootstrap']
         if 'difference' in boot:
-            checks.append(("GRANITE > IDW significant", boot['difference']['significant']))
+            checks.append(("GRANITE > Dasymetric significant", boot['difference']['significant']))
     
     if 'morans_i' in all_results and all_results['morans_i']:
         moran = all_results['morans_i']
@@ -1213,7 +1216,7 @@ Example:
     parser.add_argument('--output-dir', type=str, default=None,
                         help='Output directory (default: results-dir/validation)')
     parser.add_argument('--skip-baselines', action='store_true',
-                        help='Skip IDW/Kriging baseline computation')
+                        help='Skip Dasymetric/Pycnophylactic baseline computation')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
     

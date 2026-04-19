@@ -1,6 +1,6 @@
 """
 GRANITE Disaggregation Baselines
-Implements IDW, Kriging, and naive baselines for comparison with GNN disaggregation.
+Mass-preserving disaggregation baselines (dasymetric, pycnophylactic, naive uniform).
 
 Key insight: For disaggregation, we're not predicting unknown values - we're
 allocating a KNOWN aggregate (tract SVI) to addresses using spatial patterns.
@@ -9,8 +9,7 @@ allocating a KNOWN aggregate (tract SVI) to addresses using spatial patterns.
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from scipy.spatial import cKDTree
-from scipy.spatial.distance import cdist
+from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from typing import Dict, Tuple, List, Optional
 import warnings
@@ -45,7 +44,7 @@ class DisaggregationBaseline:
         raise NotImplementedError
 
     def disaggregate(self, address_coords: np.ndarray, tract_fips: str,
-                     tract_svi: float) -> np.ndarray:
+                     tract_svi: float, address_gdf: gpd.GeoDataFrame = None) -> np.ndarray:
         """
         Disaggregate tract SVI to address level.
 
@@ -53,6 +52,7 @@ class DisaggregationBaseline:
             address_coords: Nx2 array of (lon, lat) coordinates
             tract_fips: FIPS code of tract being disaggregated
             tract_svi: Known tract-level SVI value
+            address_gdf: optional address GeoDataFrame for ancillary columns
 
         Returns:
             Array of address-level SVI estimates (mean should equal tract_svi)
@@ -76,220 +76,116 @@ class NaiveUniformBaseline(DisaggregationBaseline):
         return self
     
     def disaggregate(self, address_coords: np.ndarray, tract_fips: str,
-                     tract_svi: float) -> np.ndarray:
+                     tract_svi: float, address_gdf: gpd.GeoDataFrame = None) -> np.ndarray:
         n_addresses = len(address_coords)
         return np.full(n_addresses, tract_svi)
 
 
-class IDWDisaggregation(DisaggregationBaseline):
+class DasymetricDisaggregation(DisaggregationBaseline):
     """
-    Inverse Distance Weighting disaggregation.
-    
-    Uses neighboring tract centroids to create spatial gradients within
-    the target tract, then adjusts to satisfy constraint.
-    
-    Constraint-preserving: final predictions are scaled to ensure
-    mean equals known tract SVI.
+    Additive dasymetric disaggregation using an ancillary surface variable.
+
+    Allocates a known tract-level rate (e.g. SVI) to addresses proportional
+    to deviation from the within-tract mean of the ancillary column
+    (default: NLCD impervious surface percentage). Alpha is chosen as the
+    largest multiplier that keeps all predictions in [0, 1].
+
+    Mass preservation: mean(predictions) == tract_svi by construction
+    since mean(dev) == 0.
     """
-    
-    def __init__(self, power: float = 2.0, n_neighbors: int = 8):
-        super().__init__(f'IDW_p{power}')
-        self.power = power
-        self.n_neighbors = n_neighbors
-        self.tract_centroids = None
-        self.tract_svi = None
-        self.tract_fips = None
-        self.kdtree = None
-    
+
+    def __init__(self, ancillary_column: str = 'nlcd_impervious_pct'):
+        super().__init__('Dasymetric')
+        self.ancillary_column = ancillary_column
+
     def fit(self, tract_gdf: gpd.GeoDataFrame, svi_column: str = 'RPL_THEMES'):
-        """Fit IDW using all tract centroids and SVI values."""
-
-        # Store tract data
-        self.tract_fips = tract_gdf['FIPS'].values
-        self.tract_svi = tract_gdf[svi_column].values
-
-        # Compute centroids in lon/lat
-        centroids_lonlat = np.array([
-            [geom.centroid.x, geom.centroid.y]
-            for geom in tract_gdf.geometry
-        ])
-
-        # Convert to approximate meters for isotropic distance computation
-        lat_center = np.mean(centroids_lonlat[:, 1])
-        self._meters_per_deg_lon = 111320 * np.cos(np.radians(lat_center))
-        self._meters_per_deg_lat = 110540
-
-        self.tract_centroids = centroids_lonlat.copy()
-        self.tract_centroids[:, 0] *= self._meters_per_deg_lon
-        self.tract_centroids[:, 1] *= self._meters_per_deg_lat
-
-        # Build KD-tree on meter-scale coordinates
-        self.kdtree = cKDTree(self.tract_centroids)
         self.fitted = True
-
         return self
-    
+
     def disaggregate(self, address_coords: np.ndarray, tract_fips: str,
-                     tract_svi: float) -> np.ndarray:
-        """
-        Disaggregate using IDW interpolation from neighboring tracts.
-        """
-        if not self.fitted:
-            raise ValueError("Model not fitted. Call fit() first.")
+                     tract_svi: float, address_gdf: gpd.GeoDataFrame = None) -> np.ndarray:
+        n = len(address_coords)
 
-        n_addresses = len(address_coords)
+        if address_gdf is None or self.ancillary_column not in address_gdf.columns:
+            # uniform fallback when ancillary data unavailable
+            return np.full(n, tract_svi)
 
-        # Convert address coords to meters (same scale as fitted KD-tree)
-        address_coords_m = address_coords.copy()
-        address_coords_m[:, 0] *= self._meters_per_deg_lon
-        address_coords_m[:, 1] *= self._meters_per_deg_lat
+        a = pd.to_numeric(address_gdf[self.ancillary_column], errors='coerce').fillna(0.0).values
+        dev = a - a.mean()
 
-        # Find target tract index so we can exclude it from neighbors
-        target_idx = np.where(self.tract_fips == tract_fips)[0]
-
-        # Query one extra neighbor to allow filtering out the target tract
-        k_query = min(self.n_neighbors + 1, len(self.tract_svi))
-        distances, indices = self.kdtree.query(address_coords_m, k=k_query)
-
-        # Exclude the target tract from each address's neighbor set
-        if len(target_idx) > 0:
-            filtered_distances = []
-            filtered_indices = []
-            for i in range(n_addresses):
-                mask = ~np.isin(indices[i], target_idx)
-                d = distances[i][mask][:self.n_neighbors]
-                idx = indices[i][mask][:self.n_neighbors]
-                # if filtering removed too many, pad with last valid
-                while len(d) < min(self.n_neighbors, k_query - len(target_idx)):
-                    d = np.append(d, d[-1])
-                    idx = np.append(idx, idx[-1])
-                filtered_distances.append(d)
-                filtered_indices.append(idx)
-            distances = np.array(filtered_distances)
-            indices = np.array(filtered_indices)
-
-        # Handle edge case of point exactly on centroid
-        min_distance = 1e-10
-        distances = np.maximum(distances, min_distance)
-
-        # Compute IDW weights
-        weights = 1.0 / (distances ** self.power)
-        weights = weights / weights.sum(axis=1, keepdims=True)
-
-        # Weighted average of neighbor SVI values
-        raw_predictions = (weights * self.tract_svi[indices]).sum(axis=1)
-        
-        # Constraint enforcement: iteratively adjust so mean == tract_svi
-        # while keeping all values in [0, 1]
-        current_mean = np.mean(raw_predictions)
-        if abs(current_mean) > 1e-8:
-            adjusted_predictions = raw_predictions * (tract_svi / current_mean)
+        if np.ptp(dev) < 1e-9 or a.sum() < 1e-9:
+            predictions = np.full(n, tract_svi)
         else:
-            adjusted_predictions = np.full(n_addresses, tract_svi)
+            max_up = (1.0 - tract_svi) / dev.max() if dev.max() > 0 else np.inf
+            max_down = tract_svi / abs(dev.min()) if dev.min() < 0 else np.inf
+            alpha = min(max_up, max_down)
+            predictions = tract_svi + alpha * dev
 
-        return _enforce_constraint(adjusted_predictions, tract_svi)
+        return np.clip(predictions, 0, 1)
 
 
-class OrdinaryKrigingDisaggregation(DisaggregationBaseline):
+class PycnophylacticDisaggregation(DisaggregationBaseline):
     """
-    Ordinary Kriging disaggregation with exponential variogram.
-    
-    Uses spatial correlation structure from neighboring tracts
-    to create spatially coherent within-tract variation.
+    Pycnophylactic interpolation (Tobler 1979).
+
+    Iterative spatial smoothing under hard aggregate constraint. No features
+    consulted; pure geometric smoothing using k-nearest-neighbor adjacency
+    within the tract. Tract boundaries act as discontinuities.
     """
-    
-    def __init__(self, variogram_range: float = 5000.0, sill: float = 0.1, 
-                 nugget: float = 0.01):
-        super().__init__('Kriging')
-        self.variogram_range = variogram_range  # meters
-        self.sill = sill
-        self.nugget = nugget
-        self.tract_centroids = None
-        self.tract_svi = None
-    
-    def _exponential_variogram(self, h: np.ndarray) -> np.ndarray:
-        """Exponential variogram model."""
-        return self.nugget + self.sill * (1 - np.exp(-3 * h / self.variogram_range))
-    
+
+    def __init__(self, n_iterations: int = 50, k_neighbors: int = 8):
+        super().__init__('Pycnophylactic')
+        self.n_iterations = n_iterations
+        self.k_neighbors = k_neighbors
+
     def fit(self, tract_gdf: gpd.GeoDataFrame, svi_column: str = 'RPL_THEMES'):
-        """Fit kriging model to tract data."""
-        
-        self.tract_centroids = np.array([
-            [geom.centroid.x, geom.centroid.y] 
-            for geom in tract_gdf.geometry
+        # store multi-tract context for seeding spatial gradient (drop NaN SVIs)
+        svi_vals = tract_gdf[svi_column].values.astype(float)
+        valid = ~np.isnan(svi_vals)
+        self._tract_centroids = np.array([
+            [g.centroid.x, g.centroid.y]
+            for g, v in zip(tract_gdf.geometry, valid) if v
         ])
-        self.tract_svi = tract_gdf[svi_column].values
+        self._tract_svi_values = svi_vals[valid]
         self.fitted = True
-        
         return self
-    
-    def disaggregate(self, address_coords: np.ndarray, tract_fips: str,
-                     tract_svi: float) -> np.ndarray:
-        """Disaggregate using ordinary kriging."""
-        
-        if not self.fitted:
-            raise ValueError("Model not fitted. Call fit() first.")
-        
-        n_addresses = len(address_coords)
-        n_tracts = len(self.tract_centroids)
-        
-        # Compute distance matrices
-        # Convert coordinates to approximate meters (rough conversion)
-        lat_center = np.mean(address_coords[:, 1])
-        meters_per_deg_lon = 111320 * np.cos(np.radians(lat_center))
-        meters_per_deg_lat = 110540
-        
-        # Scale coordinates to meters
-        address_coords_m = address_coords.copy()
-        address_coords_m[:, 0] *= meters_per_deg_lon
-        address_coords_m[:, 1] *= meters_per_deg_lat
-        
-        tract_coords_m = self.tract_centroids.copy()
-        tract_coords_m[:, 0] *= meters_per_deg_lon
-        tract_coords_m[:, 1] *= meters_per_deg_lat
-        
-        # Tract-to-tract covariance matrix
-        tract_distances = cdist(tract_coords_m, tract_coords_m)
-        C = self.sill - self._exponential_variogram(tract_distances)
-        
-        # Address-to-tract covariance matrix
-        addr_tract_distances = cdist(address_coords_m, tract_coords_m)
-        c = self.sill - self._exponential_variogram(addr_tract_distances)
-        
-        # Set up kriging system (with Lagrange multiplier for unbiasedness)
-        n = n_tracts
-        K = np.zeros((n + 1, n + 1))
-        K[:n, :n] = C
-        K[n, :n] = 1
-        K[:n, n] = 1
-        K[n, n] = 0
-        
-        # Regularization for numerical stability
-        K[:n, :n] += np.eye(n) * 1e-6
-        
-        predictions = np.zeros(n_addresses)
-        
-        for i in range(n_addresses):
-            k = np.zeros(n + 1)
-            k[:n] = c[i, :]
-            k[n] = 1
-            
-            try:
-                weights = np.linalg.solve(K, k)
-                predictions[i] = np.dot(weights[:n], self.tract_svi)
-            except np.linalg.LinAlgError:
-                # Fallback to IDW-like behavior
-                predictions[i] = tract_svi
-        
-        # Constraint enforcement: iteratively adjust so mean == tract_svi
-        # while keeping all values in [0, 1]
-        current_mean = np.mean(predictions)
-        if abs(current_mean) > 1e-8:
-            predictions = predictions * (tract_svi / current_mean)
-        else:
-            predictions = np.full(n_addresses, tract_svi)
 
-        return _enforce_constraint(predictions, tract_svi)
+    def disaggregate(self, address_coords: np.ndarray, tract_fips: str,
+                     tract_svi: float, address_gdf: gpd.GeoDataFrame = None) -> np.ndarray:
+        n = len(address_coords)
+        if n <= 1:
+            return np.full(n, tract_svi)
+
+        # seed initial surface from neighboring tract gradient
+        if hasattr(self, '_tract_centroids') and len(self._tract_centroids) > 1:
+            diffs = address_coords[:, np.newaxis, :] - self._tract_centroids[np.newaxis, :, :]
+            dists = np.sqrt(np.sum(diffs**2, axis=2))
+            weights = 1.0 / np.maximum(dists, 1e-10) ** 2
+            weights = weights / weights.sum(axis=1, keepdims=True)
+            predictions = (weights * self._tract_svi_values).sum(axis=1)
+            predictions = predictions - predictions.mean() + tract_svi
+        else:
+            predictions = np.full(n, tract_svi)
+
+        # build k-NN adjacency (within-tract only by construction)
+        k = min(self.k_neighbors, n - 1)
+        nn = NearestNeighbors(n_neighbors=k + 1)
+        nn.fit(address_coords)
+        _, indices = nn.kneighbors(address_coords)
+        neighbor_idx = indices[:, 1:]  # exclude self
+
+        for _ in range(self.n_iterations):
+            smoothed = np.mean(predictions[neighbor_idx], axis=1)
+            # re-center to preserve tract aggregate
+            smoothed = smoothed - smoothed.mean() + tract_svi
+            predictions = smoothed
+
+        predictions = np.clip(predictions, 0, 1)
+        # final mean-preservation pass after clipping
+        predictions = predictions - predictions.mean() + tract_svi
+        predictions = np.clip(predictions, 0, 1)
+
+        return predictions
 
 
 class DisaggregationComparison:
@@ -358,8 +254,8 @@ class DisaggregationComparison:
         # Add default baselines if none registered
         if not self.baselines:
             self.add_baseline(NaiveUniformBaseline())
-            self.add_baseline(IDWDisaggregation(power=2.0, n_neighbors=8))
-            self.add_baseline(OrdinaryKrigingDisaggregation())
+            self.add_baseline(DasymetricDisaggregation())
+            self.add_baseline(PycnophylacticDisaggregation())
         
         # Fit all baselines
         for name, baseline in self.baselines.items():
@@ -375,7 +271,7 @@ class DisaggregationComparison:
             if self.verbose:
                 print(f"\n  Running {name}...")
             
-            predictions = baseline.disaggregate(address_coords, tract_fips, tract_svi)
+            predictions = baseline.disaggregate(address_coords, tract_fips, tract_svi, address_gdf=address_gdf)
             results['methods'][name] = self._evaluate_method(
                 name, predictions, tract_svi, accessibility_features
             )
@@ -444,21 +340,21 @@ class DisaggregationComparison:
         # GNN vs baselines improvement
         gnn_results = methods.get('GNN', {})
         naive_results = methods.get('Naive_Uniform', {})
-        idw_results = methods.get('IDW_p2.0', methods.get('IDW_p2', {}))
-        
+        dasymetric_results = methods.get('Dasymetric', {})
+
         comparison = {
             'constraint_ranking': constraint_ranking,
             'variation_ranking': variation_ranking,
             'gnn_variation_vs_naive': gnn_results.get('std', 0) - naive_results.get('std', 0),
-            'gnn_variation_vs_idw': gnn_results.get('std', 0) - idw_results.get('std', 0) if idw_results else None,
+            'gnn_variation_vs_dasymetric': gnn_results.get('std', 0) - dasymetric_results.get('std', 0) if dasymetric_results else None,
         }
-        
+
         # Summary statistics
         gnn_access_corr = gnn_results.get('accessibility_correlation')
-        idw_access_corr = idw_results.get('accessibility_correlation') if idw_results else None
-        
-        if gnn_access_corr is not None and idw_access_corr is not None:
-            comparison['gnn_accessibility_advantage'] = abs(gnn_access_corr) - abs(idw_access_corr)
+        dasy_access_corr = dasymetric_results.get('accessibility_correlation') if dasymetric_results else None
+
+        if gnn_access_corr is not None and dasy_access_corr is not None:
+            comparison['gnn_accessibility_advantage'] = abs(gnn_access_corr) - abs(dasy_access_corr)
         
         return comparison
     
@@ -480,7 +376,7 @@ class DisaggregationComparison:
         print("-" * 60)
         
         methods = self.results['methods']
-        for name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p2', 'Kriging']:
+        for name in ['GNN', 'Naive_Uniform', 'Dasymetric', 'Pycnophylactic']:
             if name in methods:
                 m = methods[name]
                 access_r = f"{m['accessibility_correlation']:.3f}" if m['accessibility_correlation'] else "N/A"
@@ -560,9 +456,8 @@ def run_disaggregation_baselines(
     
     # Register baselines
     comparison.add_baseline(NaiveUniformBaseline())
-    comparison.add_baseline(IDWDisaggregation(power=2.0, n_neighbors=8))
-    comparison.add_baseline(IDWDisaggregation(power=3.0, n_neighbors=8))
-    comparison.add_baseline(OrdinaryKrigingDisaggregation())
+    comparison.add_baseline(DasymetricDisaggregation())
+    comparison.add_baseline(PycnophylacticDisaggregation())
     
     # Run comparison
     results = comparison.run_comparison(

@@ -140,6 +140,8 @@ output/                     # visualizations and raw data output
 
 All parameters live in `config.yaml`. CLI arguments override config values. Key sections: geographic scope, accessibility computation, OSRM routing endpoints, model architecture, training hyperparameters (including constraint weight and enforcement toggle), and validation settings.
 
+`feature_mode` controls feature matrix substitution for ablation experiments. Default `'full'` passes the normalized 73-feature matrix unchanged. Other values: `'coordinates_only'` (z-scored lat/lon only), `'random_noise'` (i.i.d. Gaussian), `'coords_plus_noise'` (coordinates + noise). Used by `scripts/coord_artifact_experiment.py` to test whether coordinate information alone drives GNN predictions.
+
 ## Caching
 
 First runs compute OSRM travel times for all origin/destination pairs (can take 30+ minutes for multi-tract runs). Subsequent runs with the same addresses and destinations hit the cache and complete in under 5 minutes. Address-level features (parcel, building, flood, socioeconomic) are not cached; they are re-extracted on each run. The cache supports version tags for invalidation when destination data changes, and a `cache.invalidate(older_than_days=N)` API for TTL-based cleanup. Cache location: `./granite_cache/`.

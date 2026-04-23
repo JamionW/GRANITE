@@ -1,5 +1,32 @@
 # GRANITE Session Log
 
+## 2026-04-23: Coordinate-artifact experiment infrastructure
+
+**Files changed:** `granite/disaggregation/pipeline.py`, `scripts/coord_artifact_experiment.py` (new), `scripts/coord_artifact_summary.py` (new)
+
+**What changed and why:**
+- `pipeline.py _apply_feature_mode`: new method substitutes the normalized feature matrix before graph construction. Supports four modes: `full` (pass-through), `coordinates_only` (z-scored lat/lon in cols 0-1, zeros elsewhere), `random_noise` (i.i.d. N(0,1) with fixed seed), `coords_plus_noise` (z-scored lat/lon + N(0,1) for remaining columns). Method is called after `normalize_accessibility_features` and reads `feature_mode` from config (default `'full'`, preserving baseline behavior).
+- `pipeline.py _process_single_tract`: added call to `_apply_feature_mode` after normalization. Output shape (N, d) is unchanged so encoder architecture is unaffected.
+- `scripts/coord_artifact_experiment.py`: runs the 4-condition x 5-tract design (Mehdi review tracts, 200 epochs, SAGE, fixed seed=42) and writes per-tract predictions and cross-condition metrics to `output/coord_artifact_test/`.
+- `scripts/coord_artifact_summary.py`: reads experiment outputs and produces a 4-panel dashboard (spatial std, Moran's I, prediction-prediction correlation heatmap, constraint error by mode).
+
+**Purpose:** tests whether GNN prediction quality is driven by coordinate information alone. If `coordinates_only` matches `full`, the 73-feature matrix adds no information beyond lat/lon; if `random_noise` matches, the model is fitting constraint correction only.
+
+**Cache invalidation:** none. `feature_mode='full'` is the default and produces identical normalized features. Cache keys are unchanged.
+
+## 2026-04-19: Stage 4 terminology fix and GIN integration audit
+
+**Files changed:** `scripts/stage4_property_value_proxy_eval.py` (new), `graveyard/stage4_synthetic_eval.py.old` (retired), `gin_integration_audit.md` (new)
+
+**What changed and why:**
+- `scripts/stage4_synthetic_eval.py` renamed to `scripts/stage4_property_value_proxy_eval.py`. "Synthetic" was inaccurate: the evaluation target is log-transformed, min-max-normalized APPVALUE from the Hamilton County Assessor, not a generated signal. No features enter a generative function and no noise is injected.
+- Module docstring updated to define the proxy transformation, document leakage audit (8 parcel-derived features excluded from feature set), rationale for proxy choice (escapes circularity), and add dasymetric citations (Mennis 2003; Maantay & Maroko 2009).
+- OUTPUT_DIR updated from `./output/stage4_synthetic_eval` to `./output/stage4_property_value_proxy_eval`.
+- Old file moved to `graveyard/` per convention.
+- `gin_integration_audit.md` written at repo root: documents current GCN-GAT and GraphSAGE class structures, aggregation primitives, dispatch pattern (4 call sites in pipeline.py), and provides a diff-style plan for adding GIN (arch='gin') and standalone GCN (arch='gcn') as additional options. GINConv confirmed available. Estimated scope: ~245 lines across 2 files.
+
+**Cache invalidation:** none. Rename does not affect pipeline caching logic.
+
 ## 2026-04-19: Fix post-training constraint correction with iterative bounded projection
 
 **Files changed:** `granite/disaggregation/pipeline.py`, `config.yaml`

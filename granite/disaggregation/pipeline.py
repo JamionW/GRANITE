@@ -295,6 +295,12 @@ class GRANITEPipeline:
         # Build graph with context features
         from ..models.gnn import normalize_accessibility_features
         normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
+        normalized_features = self._apply_feature_mode(
+            normalized_features,
+            tract_addresses,
+            mode=self.config.get('feature_mode', 'full'),
+            seed=self.config.get('seed', 42),
+        )
 
         # Store normalized features for feature importance in multi-tract mode
         full_accessibility_features = normalized_features.copy() if n_neighbor_tracts > 0 else None
@@ -1693,6 +1699,50 @@ class GRANITEPipeline:
             import traceback
             self._log(f"Full traceback: {traceback.format_exc()}")
             return None
+
+    def _apply_feature_mode(self, normalized_features, addresses, mode='full', seed=42):
+        """
+        Substitute the normalized feature matrix for the coordinate-artifact
+        experiment. Input matrix must already be z-scored. Output preserves
+        shape (N, d) so the encoder architecture does not change.
+
+        Modes:
+          'full'              : pass through unchanged
+          'coordinates_only'  : z-scored lat, lon in cols 0, 1; zeros elsewhere
+          'random_noise'      : i.i.d. N(0, 1) with fixed seed
+          'coords_plus_noise' : z-scored lat, lon in cols 0, 1; N(0, 1) elsewhere
+        """
+        if mode == 'full':
+            return normalized_features
+
+        n, d = normalized_features.shape
+        rng = np.random.default_rng(seed)
+
+        # addresses is a GeoDataFrame; fall back to lat/lon columns if needed
+        if hasattr(addresses, 'geometry') and addresses.geometry.notna().all():
+            lat = addresses.geometry.y.values
+            lon = addresses.geometry.x.values
+        else:
+            lat = addresses['lat'].values
+            lon = addresses['lon'].values
+
+        lat_z = (lat - lat.mean()) / (lat.std() + 1e-8)
+        lon_z = (lon - lon.mean()) / (lon.std() + 1e-8)
+
+        if mode == 'coordinates_only':
+            features = np.zeros((n, d), dtype=np.float32)
+            features[:, 0] = lat_z
+            features[:, 1] = lon_z
+            return features
+
+        if mode == 'random_noise':
+            return rng.standard_normal((n, d)).astype(np.float32)
+
+        if mode == 'coords_plus_noise':
+            noise = rng.standard_normal((n, d - 2))
+            return np.column_stack([lat_z, lon_z, noise]).astype(np.float32)
+
+        raise ValueError(f"Unknown feature_mode: {mode}")
 
     def _compute_features_batched(self, addresses_df, data, batch_size=3):
         """

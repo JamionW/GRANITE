@@ -1065,29 +1065,30 @@ class GRANITEPipeline:
                 names.append(col_name)
 
         if 'PROPTYPE' in available:
-            # one-hot encode hardcoded property type vocabulary; remainder = all zeros
+            # one-hot encode the full vocabulary; emit all columns even if the
+            # type does not appear in this tract (column of zeros). filtering
+            # to only observed types caused variable column counts across tracts.
             proptype_num = pd.to_numeric(addresses['PROPTYPE'], errors='coerce')
-            top5 = [pt for pt in PROPTYPE_VOCAB if pt in proptype_num.values]
-            for pt in top5:
+            for pt in PROPTYPE_VOCAB:
                 col_vals = (proptype_num == pt).astype(float).values
                 features.append(col_vals.reshape(-1, 1))
                 names.append(f'proptype_{PROPTYPE_LABELS[pt]}')
 
-        # nlcd features
-        if 'nlcd_land_cover' in available:
-            vals = pd.to_numeric(addresses['nlcd_land_cover'], errors='coerce').fillna(-1.0)
+        # nlcd features -- always included regardless of raster coverage;
+        # tracts where the raster does not cover all addresses produce NaN
+        # in the source column (or the column is absent entirely).
+        # fill defaults: land_cover=-1 (no-data sentinel), pct features=0.
+        for nlcd_col, nlcd_fill in [
+            ('nlcd_land_cover', -1.0),
+            ('nlcd_impervious_pct', 0.0),
+            ('nlcd_tree_canopy_pct', 0.0),
+        ]:
+            if nlcd_col in addresses.columns:
+                vals = pd.to_numeric(addresses[nlcd_col], errors='coerce').fillna(nlcd_fill)
+            else:
+                vals = pd.Series(np.full(len(addresses), nlcd_fill))
             features.append(vals.values.reshape(-1, 1))
-            names.append('nlcd_land_cover')
-
-        if 'nlcd_impervious_pct' in available:
-            vals = pd.to_numeric(addresses['nlcd_impervious_pct'], errors='coerce').fillna(0.0)
-            features.append(vals.values.reshape(-1, 1))
-            names.append('nlcd_impervious_pct')
-
-        if 'nlcd_tree_canopy_pct' in available:
-            vals = pd.to_numeric(addresses['nlcd_tree_canopy_pct'], errors='coerce').fillna(0.0)
-            features.append(vals.values.reshape(-1, 1))
-            names.append('nlcd_tree_canopy_pct')
+            names.append(nlcd_col)
 
         arr = np.hstack(features) if features else np.zeros((len(addresses), 0))
         self._building_feature_names = names
@@ -3922,7 +3923,9 @@ ACCESSIBILITY-VULNERABILITY
         # Save accessibility features
         if 'accessibility_features' in results:
             features_path = os.path.join(save_dir, 'accessibility_features.csv')
-            features_df = pd.DataFrame(results['accessibility_features'])
+            feat_arr = results['accessibility_features']
+            feat_cols = self._generate_feature_names(feat_arr.shape[1])
+            features_df = pd.DataFrame(feat_arr, columns=feat_cols)
             features_df.to_csv(features_path, index=False)
 
         # Save address-level truth vector and all method predictions (property_value target)

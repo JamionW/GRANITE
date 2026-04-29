@@ -148,7 +148,7 @@ def main():
     # But we should check what the actual tract SVI is
 
     # Let's try a few plausible tract SVI values
-    # From CLAUDE.md: IDW block-group correlation: r = 0.558
+    # From CLAUDE.md: Dasymetric block-group correlation: r = 0.558
     # The user said shift = -0.1806
     # shift = tract_svi - weighted_mean => tract_svi = weighted_mean + (-0.1806) = weighted_mean - 0.1806
     tract_svi = weighted_mean - 0.1806

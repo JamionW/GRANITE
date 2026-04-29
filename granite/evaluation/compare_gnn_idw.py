@@ -1,7 +1,7 @@
 """
-Quick comparison: Coordinate-based GNN vs IDW for within-tract disaggregation.
+Quick comparison: Coordinate-based GNN vs Dasymetric for within-tract disaggregation.
 
-Question: Does the GNN produce meaningfully different spatial patterns than IDW
+Question: Does the GNN produce meaningfully different spatial patterns than Dasymetric
 when both are constrained to the same tract-level mean?
 """
 
@@ -21,10 +21,10 @@ warnings.filterwarnings('ignore')
 sys.path.insert(0, '/workspaces/GRANITE')
 
 
-def compute_idw_predictions(addresses_coords, tract_svi, neighbor_centroids, neighbor_svis, power=2):
+def compute_dasymetric_predictions(addresses_coords, tract_svi, neighbor_centroids, neighbor_svis, power=2):
     """
-    Compute IDW predictions for addresses within a tract.
-    Uses neighboring tract centroids as anchor points.
+    Compute dasymetric predictions for addresses within a tract.
+    Uses neighboring tract centroids as anchor points with inverse distance weighting.
     """
     n_addresses = len(addresses_coords)
     predictions = np.zeros(n_addresses)
@@ -35,7 +35,7 @@ def compute_idw_predictions(addresses_coords, tract_svi, neighbor_centroids, nei
     neighbor_svis = neighbor_svis[valid_mask]
     
     if len(neighbor_svis) == 0:
-        print("    WARNING: No valid neighbor SVIs for IDW")
+        print("    WARNING: No valid neighbor SVIs for Dasymetric")
         return np.full(n_addresses, np.nan)
     
     for i, coord in enumerate(addresses_coords):
@@ -45,7 +45,7 @@ def compute_idw_predictions(addresses_coords, tract_svi, neighbor_centroids, nei
         # Avoid division by zero
         distances = np.maximum(distances, 1e-10)
         
-        # IDW weights
+        # inverse distance weights
         weights = 1.0 / (distances ** power)
         
         if np.sum(weights) == 0 or np.isinf(np.sum(weights)):
@@ -59,7 +59,7 @@ def compute_idw_predictions(addresses_coords, tract_svi, neighbor_centroids, nei
     
     # Check for NaN
     if np.all(np.isnan(predictions)):
-        print("    WARNING: All IDW predictions are NaN")
+        print("    WARNING: All Dasymetric predictions are NaN")
         return predictions
     
     # Rescale to match tract mean (constraint enforcement)
@@ -185,7 +185,7 @@ def train_constrained_gnn(graph, tract_svi, epochs=150, lr=0.01):
 
 def main():
     print("=" * 70)
-    print("GNN vs IDW: Within-Tract Disaggregation Comparison")
+    print("GNN vs Dasymetric: Within-Tract Disaggregation Comparison")
     print("=" * 70)
     
     # Load data
@@ -203,7 +203,7 @@ def main():
         ('47065001300', 'High SVI (0.873)'),     # High vulnerability
     ]
     
-    # Get neighbor tracts for IDW
+    # get neighbor tracts for dasymetric baseline
     all_centroids = []
     all_svis = []
     tract_lookup = {}
@@ -256,9 +256,9 @@ def main():
         print(f"  Debug: Address coord range: x=[{coords[:, 0].min():.1f}, {coords[:, 0].max():.1f}], y=[{coords[:, 1].min():.1f}, {coords[:, 1].max():.1f}]")
         print(f"  Debug: Centroid coord range: x=[{neighbor_centroids[:, 0].min():.1f}, {neighbor_centroids[:, 0].max():.1f}], y=[{neighbor_centroids[:, 1].min():.1f}, {neighbor_centroids[:, 1].max():.1f}]")
         
-        # --- IDW Predictions ---
-        print("  Running IDW...")
-        idw_preds = compute_idw_predictions(
+        # --- dasymetric predictions ---
+        print("  Running Dasymetric...")
+        dasymetric_preds = compute_dasymetric_predictions(
             coords, tract_svi, neighbor_centroids, neighbor_svis
         )
         
@@ -271,31 +271,31 @@ def main():
         print(f"\n  Results:")
         print(f"  {'Method':<15} {'Mean':>8} {'Std':>8} {'Min':>8} {'Max':>8} {'Range':>8}")
         print(f"  {'-'*55}")
-        print(f"  {'IDW':<15} {idw_preds.mean():>8.3f} {idw_preds.std():>8.3f} {idw_preds.min():>8.3f} {idw_preds.max():>8.3f} {idw_preds.max()-idw_preds.min():>8.3f}")
+        print(f"  {'Dasymetric':<15} {dasymetric_preds.mean():>8.3f} {dasymetric_preds.std():>8.3f} {dasymetric_preds.min():>8.3f} {dasymetric_preds.max():>8.3f} {dasymetric_preds.max()-dasymetric_preds.min():>8.3f}")
         print(f"  {'GNN (coords)':<15} {gnn_preds.mean():>8.3f} {gnn_preds.std():>8.3f} {gnn_preds.min():>8.3f} {gnn_preds.max():>8.3f} {gnn_preds.max()-gnn_preds.min():>8.3f}")
         
         # Correlation between methods
-        corr = np.corrcoef(idw_preds, gnn_preds)[0, 1]
-        print(f"\n  IDW-GNN correlation: r = {corr:.3f}")
+        corr = np.corrcoef(dasymetric_preds, gnn_preds)[0, 1]
+        print(f"\n  Dasymetric-GNN correlation: r = {corr:.3f}")
         
         results.append({
             'fips': fips,
             'label': label,
             'tract_svi': tract_svi,
             'n_addresses': len(coords),
-            'idw_std': idw_preds.std(),
+            'dasymetric_std': dasymetric_preds.std(),
             'gnn_std': gnn_preds.std(),
-            'idw_range': idw_preds.max() - idw_preds.min(),
+            'dasymetric_range': dasymetric_preds.max() - dasymetric_preds.min(),
             'gnn_range': gnn_preds.max() - gnn_preds.min(),
             'correlation': corr
         })
         
         # --- Visualization ---
-        # IDW spatial pattern
+        # dasymetric spatial pattern
         ax1 = axes[t_idx, 0]
-        scatter1 = ax1.scatter(coords[:, 0], coords[:, 1], c=idw_preds, 
+        scatter1 = ax1.scatter(coords[:, 0], coords[:, 1], c=dasymetric_preds,
                                cmap='RdYlGn_r', s=3, vmin=0, vmax=1)
-        ax1.set_title(f'IDW - {label}')
+        ax1.set_title(f'Dasymetric - {label}')
         ax1.set_aspect('equal')
         plt.colorbar(scatter1, ax=ax1, label='SVI')
         
@@ -309,17 +309,17 @@ def main():
         
         # Difference map
         ax3 = axes[t_idx, 2]
-        diff = gnn_preds - idw_preds
+        diff = gnn_preds - dasymetric_preds
         scatter3 = ax3.scatter(coords[:, 0], coords[:, 1], c=diff,
                                cmap='coolwarm', s=3, vmin=-0.2, vmax=0.2)
-        ax3.set_title(f'Difference (GNN - IDW)')
+        ax3.set_title(f'Difference (GNN - Dasymetric)')
         ax3.set_aspect('equal')
         plt.colorbar(scatter3, ax=ax3, label='Δ SVI')
     
     plt.tight_layout()
     
     # Save figure
-    output_dir = Path('./output/gnn_vs_idw')
+    output_dir = Path('./output/gnn_vs_dasymetric')
     output_dir.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_dir / 'comparison.png', dpi=150, bbox_inches='tight')
     print(f"\n\nVisualization saved: {output_dir / 'comparison.png'}")
@@ -329,48 +329,48 @@ def main():
     print("SUMMARY")
     print("=" * 70)
     
-    print(f"\n{'Tract':<20} {'IDW Std':>10} {'GNN Std':>10} {'Correlation':>12}")
+    print(f"\n{'Tract':<20} {'Dasy Std':>10} {'GNN Std':>10} {'Correlation':>12}")
     print("-" * 55)
     for r in results:
-        print(f"{r['label']:<20} {r['idw_std']:>10.3f} {r['gnn_std']:>10.3f} {r['correlation']:>12.3f}")
-    
+        print(f"{r['label']:<20} {r['dasymetric_std']:>10.3f} {r['gnn_std']:>10.3f} {r['correlation']:>12.3f}")
+
     avg_corr = np.mean([r['correlation'] for r in results])
-    avg_idw_std = np.mean([r['idw_std'] for r in results])
+    avg_dasymetric_std = np.mean([r['dasymetric_std'] for r in results])
     avg_gnn_std = np.mean([r['gnn_std'] for r in results])
-    
+
     print("-" * 55)
-    print(f"{'Average':<20} {avg_idw_std:>10.3f} {avg_gnn_std:>10.3f} {avg_corr:>12.3f}")
+    print(f"{'Average':<20} {avg_dasymetric_std:>10.3f} {avg_gnn_std:>10.3f} {avg_corr:>12.3f}")
     
     print("\n" + "-" * 70)
     print("INTERPRETATION")
     print("-" * 70)
     
     if avg_corr > 0.9:
-        print("\nGNN and IDW produce nearly IDENTICAL patterns.")
-        print("=> GNN is learning the same spatial interpolation as IDW.")
-        print("=> No methodological advantage; prefer IDW for simplicity.")
+        print("\nGNN and Dasymetric produce nearly IDENTICAL patterns.")
+        print("=> GNN is learning the same spatial interpolation as Dasymetric.")
+        print("=> No methodological advantage; prefer Dasymetric for simplicity.")
         print("=> RECOMMENDATION: Option 1 (Understanding Contribution)")
     elif avg_corr > 0.7:
-        print("\nGNN and IDW produce SIMILAR patterns with minor differences.")
-        print("=> GNN captures most of IDW's structure but adds some variation.")
+        print("\nGNN and Dasymetric produce SIMILAR patterns with minor differences.")
+        print("=> GNN captures most of Dasymetric's structure but adds some variation.")
         print("=> Marginal improvement may not justify added complexity.")
         print("=> RECOMMENDATION: Likely Option 1, but Option 2 possible with tuning")
     elif avg_corr > 0.4:
-        print("\nGNN and IDW produce MODERATELY DIFFERENT patterns.")
-        print("=> GNN is learning different spatial structure than IDW.")
+        print("\nGNN and Dasymetric produce MODERATELY DIFFERENT patterns.")
+        print("=> GNN is learning different spatial structure than Dasymetric.")
         print("=> Worth investigating whether GNN patterns are more realistic.")
         print("=> RECOMMENDATION: Consider Option 2 with validation")
     else:
-        print("\nGNN and IDW produce SUBSTANTIALLY DIFFERENT patterns.")
+        print("\nGNN and Dasymetric produce SUBSTANTIALLY DIFFERENT patterns.")
         print("=> GNN is capturing fundamentally different spatial relationships.")
-        print("=> Could be better OR worse than IDW - needs ground truth validation.")
+        print("=> Could be better OR worse than Dasymetric - needs ground truth validation.")
         print("=> RECOMMENDATION: Option 2 with careful validation")
-    
-    if avg_gnn_std > avg_idw_std * 1.5:
-        print(f"\nGNN produces {avg_gnn_std/avg_idw_std:.1f}x MORE within-tract variation than IDW.")
+
+    if avg_gnn_std > avg_dasymetric_std * 1.5:
+        print(f"\nGNN produces {avg_gnn_std/avg_dasymetric_std:.1f}x MORE within-tract variation than Dasymetric.")
         print("=> GNN may capture sharper spatial gradients.")
-    elif avg_gnn_std < avg_idw_std * 0.67:
-        print(f"\nGNN produces {avg_idw_std/avg_gnn_std:.1f}x LESS within-tract variation than IDW.")
+    elif avg_gnn_std < avg_dasymetric_std * 0.67:
+        print(f"\nGNN produces {avg_dasymetric_std/avg_gnn_std:.1f}x LESS within-tract variation than Dasymetric.")
         print("=> GNN may be over-smoothing.")
 
 

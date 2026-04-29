@@ -1,10 +1,10 @@
 """
 GRANITE Bootstrap Confidence Intervals
 
-Quantifies whether GRANITE vs IDW difference is statistically significant.
+Quantifies whether GRANITE vs Dasymetric difference is statistically significant.
 Uses 1000-sample bootstrap to compute 95% CI on correlation differences.
 
-Key question: Is the improvement from GRANITE (r=0.924) over IDW (r=0.907)
+Key question: Is the improvement from GRANITE (r=0.924) over Dasymetric (r=0.907)
 statistically significant, or could it arise from sampling variation?
 """
 import os
@@ -74,12 +74,12 @@ def bootstrap_correlation_difference(x, y1, y2, n_bootstrap=1000, ci=0.95, seed=
     Test if correlation(x, y1) - correlation(x, y2) is significantly different from 0.
     
     This is the key test: is GRANITE's correlation with ground truth significantly
-    higher than IDW's correlation?
+    higher than Dasymetric's correlation?
     
     Args:
         x: Ground truth values (e.g., block group SVI)
         y1: Method 1 predictions (e.g., GRANITE)
-        y2: Method 2 predictions (e.g., IDW)
+        y2: Method 2 predictions (e.g., Dasymetric)
         
     Returns:
         dict with difference estimate, CI, and p-value
@@ -135,16 +135,16 @@ def bootstrap_correlation_difference(x, y1, y2, n_bootstrap=1000, ci=0.95, seed=
     }
 
 
-def run_bootstrap_validation(granite_predictions, idw_predictions, ground_truth,
+def run_bootstrap_validation(granite_predictions, dasymetric_predictions, ground_truth,
                              n_bootstrap=1000, seed=42, verbose=True):
     """
-    Run full bootstrap validation comparing GRANITE to IDW.
-    
+    Run full bootstrap validation comparing GRANITE to Dasymetric.
+
     Args:
         granite_predictions: Array of GRANITE block-group mean predictions
-        idw_predictions: Array of IDW block-group mean predictions
+        dasymetric_predictions: Array of Dasymetric block-group mean predictions
         ground_truth: Array of actual block-group SVI values
-        
+
     Returns:
         dict with bootstrap results
     """
@@ -163,30 +163,30 @@ def run_bootstrap_validation(granite_predictions, idw_predictions, ground_truth,
     granite_ci = bootstrap_correlation_ci(
         ground_truth, granite_predictions, n_bootstrap, seed=seed
     )
-    idw_ci = bootstrap_correlation_ci(
-        ground_truth, idw_predictions, n_bootstrap, seed=seed
+    dasymetric_ci = bootstrap_correlation_ci(
+        ground_truth, dasymetric_predictions, n_bootstrap, seed=seed
     )
-    
+
     results['granite'] = granite_ci
-    results['idw'] = idw_ci
-    
+    results['dasymetric'] = dasymetric_ci
+
     if verbose:
         print(f"\nGRANITE: r = {granite_ci['r']:.3f} "
               f"[{granite_ci['ci_lower']:.3f}, {granite_ci['ci_upper']:.3f}] (n={granite_ci['n']})")
-        print(f"IDW:     r = {idw_ci['r']:.3f} "
-              f"[{idw_ci['ci_lower']:.3f}, {idw_ci['ci_upper']:.3f}] (n={idw_ci['n']})")
+        print(f"Dasymetric: r = {dasymetric_ci['r']:.3f} "
+              f"[{dasymetric_ci['ci_lower']:.3f}, {dasymetric_ci['ci_upper']:.3f}] (n={dasymetric_ci['n']})")
     
     # Difference test
     if verbose:
         print("\nTesting correlation difference...")
     
     diff_result = bootstrap_correlation_difference(
-        ground_truth, granite_predictions, idw_predictions, n_bootstrap, seed=seed
+        ground_truth, granite_predictions, dasymetric_predictions, n_bootstrap, seed=seed
     )
     results['difference'] = diff_result
     
     if verbose:
-        print(f"\nDifference (GRANITE - IDW): {diff_result['diff']:.3f}")
+        print(f"\nDifference (GRANITE - Dasymetric): {diff_result['diff']:.3f}")
         print(f"95% CI: [{diff_result['ci_lower']:.3f}, {diff_result['ci_upper']:.3f}]")
         print(f"p-value: {diff_result['p_value']:.4f}")
         
@@ -218,17 +218,17 @@ def create_bootstrap_plot(results, output_path='bootstrap_comparison.png'):
                  f"[{results['granite']['ci_lower']:.3f}, {results['granite']['ci_upper']:.3f}]")
     ax.legend()
     
-    # Panel 2: IDW correlation distribution
+    # Panel 2: Dasymetric correlation distribution
     ax = axes[1]
-    boot_dist = results['idw']['bootstrap_dist']
+    boot_dist = results['dasymetric']['bootstrap_dist']
     ax.hist(boot_dist, bins=50, color='coral', alpha=0.7, edgecolor='white')
-    ax.axvline(results['idw']['r'], color='red', linewidth=2, label='Observed')
-    ax.axvline(results['idw']['ci_lower'], color='red', linestyle='--', linewidth=1)
-    ax.axvline(results['idw']['ci_upper'], color='red', linestyle='--', linewidth=1)
+    ax.axvline(results['dasymetric']['r'], color='red', linewidth=2, label='Observed')
+    ax.axvline(results['dasymetric']['ci_lower'], color='red', linestyle='--', linewidth=1)
+    ax.axvline(results['dasymetric']['ci_upper'], color='red', linestyle='--', linewidth=1)
     ax.set_xlabel('Correlation')
     ax.set_ylabel('Frequency')
-    ax.set_title(f"IDW\nr={results['idw']['r']:.3f} "
-                 f"[{results['idw']['ci_lower']:.3f}, {results['idw']['ci_upper']:.3f}]")
+    ax.set_title(f"Dasymetric\nr={results['dasymetric']['r']:.3f} "
+                 f"[{results['dasymetric']['ci_lower']:.3f}, {results['dasymetric']['ci_upper']:.3f}]")
     ax.legend()
     
     # Panel 3: Difference distribution
@@ -243,7 +243,7 @@ def create_bootstrap_plot(results, output_path='bootstrap_comparison.png'):
     ax.set_ylabel('Frequency')
     
     sig_text = "SIGNIFICANT" if results['difference']['significant'] else "NOT significant"
-    ax.set_title(f"GRANITE - IDW\nΔr={results['difference']['diff']:.3f} "
+    ax.set_title(f"GRANITE - Dasymetric\nΔr={results['difference']['diff']:.3f} "
                  f"[{results['difference']['ci_lower']:.3f}, {results['difference']['ci_upper']:.3f}]\n"
                  f"p={results['difference']['p_value']:.3f} ({sig_text})")
     ax.legend()
@@ -274,13 +274,13 @@ def demo_with_synthetic_data():
     granite = ground_truth + np.random.normal(0, 0.08, n)
     granite = np.clip(granite, 0, 1)
     
-    # IDW: slightly less correlated
-    idw = ground_truth + np.random.normal(0, 0.12, n)
-    idw = np.clip(idw, 0, 1)
-    
+    # Dasymetric: slightly less correlated
+    dasymetric = ground_truth + np.random.normal(0, 0.12, n)
+    dasymetric = np.clip(dasymetric, 0, 1)
+
     # Run analysis
     results = run_bootstrap_validation(
-        granite, idw, ground_truth,
+        granite, dasymetric, ground_truth,
         n_bootstrap=1000, seed=42
     )
     

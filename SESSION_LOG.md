@@ -1,5 +1,15 @@
 # GRANITE Session Log
 
+## 2026-04-27: Disk cleanup
+
+**Files deleted:**
+- `.venv/` (29 MB) — Python virtual environment removed to free disk space. Recreate with `pip install -e .`.
+- `output/coord_artifact_test/`, `output/mehdi_review/`, `output/stage4_synthetic_eval/`, `output/architecture_comparison/`, `output/coord_artifact/`, `output/feature_importance/` (~133 MB total) — old experiment output directories, results already reviewed. `output/rank_consistency_run/` retained (active experiment).
+
+**Cache invalidation:** none. Pipeline cache (`granite_cache/`) untouched.
+
+---
+
 ## 2026-04-23: Coordinate-artifact experiment infrastructure
 
 **Files changed:** `granite/disaggregation/pipeline.py`, `scripts/coord_artifact_experiment.py` (new), `scripts/coord_artifact_summary.py` (new)
@@ -374,3 +384,25 @@ Outputs saved to `output/mehdi_review/<FIPS>/` with figures collated and renamed
 - 47065000600 was a full cache hit (62s); all others required OSRM modal feature recomputation (~1-2 hrs each).
 - Feature count varies 71-73 across tracts due to zero-variance building features; existing behavior, no impact on comparability.
 - No cache keys were invalidated.
+
+## 2026-04-25 - Full rank-consistency experiment (8 tracts × 2 architectures)
+
+**Files changed:**
+- `scripts/run_rank_consistency_experiment.py` (new) - driver script running GRANITEPipeline for both GraphSAGE (`arch=sage`) and GCN-GAT (`arch=gcn_gat`) across all 8 inventory tracts; outputs to `output/rank_consistency_run/{graphsage,gcn_gat}/tract_{fips}/`
+
+**Outputs generated:**
+- `output/rank_consistency_run/graphsage/tract_*/` - 8 tracts, 73 named feature cols, raw_prediction present
+- `output/rank_consistency_run/gcn_gat/tract_*/` - 8 tracts, 73 named feature cols, raw_prediction present
+- `results/rank_consistency_full/summary.txt`, `per_tract_rho.csv`, `feature_summary.csv`
+
+**Experiment parameters:** seed=42, epochs=200, apply_post_correction=True, 8 tracts spanning SVI 0.04-0.89, cv_threshold=0.10, min_tracts=5, min_addresses=50
+
+**Key result:**
+- Section A (SAGE only):    0
+- Section B (GCN-GAT only): 2 features (healthcare_modal_access_gap, healthcare_car_effective_access; median_rho=0.18, n_tracts=6)
+- Section C (both, same sign): 0
+- Section D (sign-flippers): 0
+
+**Interpretation:** No feature is rank-consistent under both architectures. Two healthcare modal features survive under GCN-GAT alone with a small positive correlation (rho~0.18), but no features are architecture-agnostic. The zero Section C/D counts mean there is no cross-architecture signal to report as a positive finding.
+
+**Cache notes:** Runs used existing OSRM cache; no cache invalidation.

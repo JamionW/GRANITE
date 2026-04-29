@@ -3,7 +3,7 @@ GRANITE Validation Suite
 
 Runs all four priority validation analyses:
 1. Ablation study (accessibility-only vs full model)
-2. Bootstrap confidence intervals (GRANITE vs IDW significance)
+2. Bootstrap confidence intervals (GRANITE vs Dasymetric significance)
 3. Moran's I spatial autocorrelation
 4. Expert routing feature analysis
 
@@ -106,7 +106,7 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
     # 2. BOOTSTRAP CONFIDENCE INTERVALS
     # =========================================================================
     print_header("2. BOOTSTRAP CONFIDENCE INTERVALS")
-    print("Testing statistical significance of GRANITE vs IDW improvement")
+    print("Testing statistical significance of GRANITE vs Dasymetric improvement")
     
     try:
         # If ablation study ran, use those predictions
@@ -117,9 +117,9 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
             # Extract block group validation data
             full_bg = results['ablation']['full_model']['bg_validation']
             
-            # For proper comparison, we'd need IDW predictions on same data
+            # for proper comparison, we'd need Dasymetric predictions on same data
             # For now, demonstrate the methodology
-            print("NOTE: Full bootstrap comparison requires IDW predictions on same data")
+            print("NOTE: Full bootstrap comparison requires Dasymetric predictions on same data")
             print("Running demo to demonstrate methodology...")
             bootstrap_demo()
         else:
@@ -213,7 +213,7 @@ def run_full_validation_suite(output_dir='./output/validation_suite',
     if 'bootstrap' in results and 'error' not in results.get('bootstrap', {}):
         if 'difference' in results['bootstrap']:
             sig = results['bootstrap']['difference'].get('significant', False)
-            checks.append(("Bootstrap: GRANITE > IDW significant", sig, 
+            checks.append(("Bootstrap: GRANITE > Dasymetric significant", sig,
                           f"p={results['bootstrap']['difference'].get('p_value', np.nan):.4f}"))
         else:
             checks.append(("Bootstrap analysis completed", True, "Demo"))

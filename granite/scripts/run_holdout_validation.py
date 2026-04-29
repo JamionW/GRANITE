@@ -106,7 +106,7 @@ def aggregate_baseline_results(test_results: dict) -> pd.DataFrame:
         }
         
         # Extract baseline metrics
-        for method_name in ['GNN', 'Naive_Uniform', 'IDW_p2.0', 'IDW_p3.0', 'Kriging']:
+        for method_name in ['GNN', 'Naive_Uniform', 'Dasymetric_p2.0', 'Dasymetric_p3.0', 'Pycnophylactic']:
             method_data = methods.get(method_name, {})
             prefix = method_name.lower().replace('_', '').replace('.', '')
             
@@ -131,22 +131,22 @@ def print_baseline_summary(baseline_df: pd.DataFrame):
     print(f"{'Method':<20} {'Mean Std':<12} {'Median Std':<12}")
     print("-" * 44)
     
-    for method, col in [('GNN', 'gnn_std'), ('Naive Uniform', 'naiveuniform_std'), 
-                        ('IDW (p=2)', 'idwp20_std'), ('Kriging', 'kriging_std')]:
+    for method, col in [('GNN', 'gnn_std'), ('Naive Uniform', 'naiveuniform_std'),
+                        ('Dasymetric (p=2)', 'dasymetricp20_std'), ('Pycnophylactic', 'pycnophylactic_std')]:
         if col in baseline_df.columns:
             mean_val = baseline_df[col].mean()
             median_val = baseline_df[col].median()
             print(f"{method:<20} {mean_val:<12.4f} {median_val:<12.4f}")
     
     # GNN advantage
-    if 'gnn_std' in baseline_df.columns and 'idwp20_std' in baseline_df.columns:
-        gnn_advantage = baseline_df['gnn_std'].mean() - baseline_df['idwp20_std'].mean()
-        print(f"\nGNN variation advantage over IDW: {gnn_advantage:+.4f}")
+    if 'gnn_std' in baseline_df.columns and 'dasymetricp20_std' in baseline_df.columns:
+        gnn_advantage = baseline_df['gnn_std'].mean() - baseline_df['dasymetricp20_std'].mean()
+        print(f"\nGNN variation advantage over Dasymetric: {gnn_advantage:+.4f}")
         
         if gnn_advantage > 0:
             print("  -> GNN produces MORE spatial variation (better disaggregation)")
         else:
-            print("  -> IDW produces more variation (investigate)")
+            print("  -> Dasymetric produces more variation (investigate)")
     
     # Accessibility correlation
     print(f"\n--- Accessibility-SVI Correlation ---")
@@ -159,14 +159,14 @@ def print_baseline_summary(baseline_df: pd.DataFrame):
     
     # Per-tract comparison table
     print(f"\n--- Per-Tract Results ---")
-    cols_to_show = ['fips', 'actual_svi', 'gnn_error_pct', 'gnn_std', 'idwp20_std', 'gnn_access_corr']
+    cols_to_show = ['fips', 'actual_svi', 'gnn_error_pct', 'gnn_std', 'dasymetricp20_std', 'gnn_access_corr']
     available_cols = [c for c in cols_to_show if c in baseline_df.columns]
     
     if available_cols:
         display_df = baseline_df[available_cols].copy()
         display_df = display_df.sort_values('actual_svi')
         
-        print(f"\n{'FIPS':<12} {'SVI':<8} {'Err%':<8} {'GNN_std':<10} {'IDW_std':<10} {'Access_r':<10}")
+        print(f"\n{'FIPS':<12} {'SVI':<8} {'Err%':<8} {'GNN_std':<10} {'Dasy_std':<10} {'Access_r':<10}")
         print("-" * 68)
         
         for _, row in display_df.iterrows():
@@ -174,10 +174,10 @@ def print_baseline_summary(baseline_df: pd.DataFrame):
             svi = row['actual_svi']
             err = row.get('gnn_error_pct', np.nan)
             gnn_std = row.get('gnn_std', np.nan)
-            idw_std = row.get('idwp20_std', np.nan)
+            dasymetric_std = row.get('dasymetricp20_std', np.nan)
             acc_corr = row.get('gnn_access_corr', np.nan)
             
-            print(f"{fips:<12} {svi:<8.3f} {err:<8.1f} {gnn_std:<10.4f} {idw_std:<10.4f} {acc_corr:<10.3f}")
+            print(f"{fips:<12} {svi:<8.3f} {err:<8.1f} {gnn_std:<10.4f} {dasymetric_std:<10.4f} {acc_corr:<10.3f}")
 
 
 def run_global_training_validation(seed=42):
@@ -195,9 +195,9 @@ def run_global_training_validation(seed=42):
     print(f"\n{'='*80}")
     print("GRANITE GLOBAL TRAINING VALIDATION")
     print("Using Manually Curated Diverse Tracts")
-    print("With Baseline Comparisons (IDW, Kriging, Naive)")
+    print("With Baseline Comparisons (Dasymetric, Pycnophylactic, Naive)")
     print(f"{'='*80}")
-    
+
     print_tract_summary(training_tracts, "TRAINING SET", loader)
     print_tract_summary(test_tracts, "TEST SET", loader)
     
@@ -331,8 +331,8 @@ def run_global_training_validation(seed=42):
         
         mean_error = np.mean(errors)
         gnn_std_mean = baseline_df['gnn_std'].mean() if 'gnn_std' in baseline_df.columns else 0
-        idw_std_mean = baseline_df['idwp20_std'].mean() if 'idwp20_std' in baseline_df.columns else 0
-        
+        dasymetric_std_mean = baseline_df['dasymetricp20_std'].mean() if 'dasymetricp20_std' in baseline_df.columns else 0
+
         print(f"\n1. Constraint Satisfaction: {mean_error:.1f}% mean error")
         if mean_error < 10:
             print("   -> EXCELLENT (<10%)")
@@ -340,14 +340,14 @@ def run_global_training_validation(seed=42):
             print("   -> GOOD (<20%)")
         else:
             print("   -> NEEDS IMPROVEMENT")
-        
+
         print(f"\n2. Disaggregation Quality:")
         print(f"   GNN spatial variation: {gnn_std_mean:.4f}")
-        print(f"   IDW spatial variation: {idw_std_mean:.4f}")
-        print(f"   GNN advantage: {gnn_std_mean - idw_std_mean:+.4f}")
-        
-        if gnn_std_mean > idw_std_mean:
-            print("   -> GNN produces finer-grained disaggregation than IDW")
+        print(f"   Dasymetric spatial variation: {dasymetric_std_mean:.4f}")
+        print(f"   GNN advantage: {gnn_std_mean - dasymetric_std_mean:+.4f}")
+
+        if gnn_std_mean > dasymetric_std_mean:
+            print("   -> GNN produces finer-grained disaggregation than Dasymetric")
         
         if 'gnn_access_corr' in baseline_df.columns:
             mean_corr = baseline_df['gnn_access_corr'].mean()
@@ -367,8 +367,8 @@ def _create_aggregate_baseline_plot(baseline_df: pd.DataFrame, output_path: str)
     
     # 1. Spatial variation by method
     ax1 = axes[0, 0]
-    methods = ['gnn_std', 'naiveuniform_std', 'idwp20_std', 'kriging_std']
-    labels = ['GNN', 'Naive', 'IDW', 'Kriging']
+    methods = ['gnn_std', 'naiveuniform_std', 'dasymetricp20_std', 'pycnophylactic_std']
+    labels = ['GNN', 'Naive', 'Dasymetric', 'Pycnophylactic']
     colors = ['green', 'gray', 'blue', 'purple']
     
     means = [baseline_df[m].mean() if m in baseline_df.columns else 0 for m in methods]
@@ -377,19 +377,19 @@ def _create_aggregate_baseline_plot(baseline_df: pd.DataFrame, output_path: str)
     ax1.set_title('Disaggregation Quality by Method')
     ax1.grid(True, alpha=0.3, axis='y')
     
-    # 2. GNN vs IDW scatter
+    # 2. GNN vs Dasymetric scatter
     ax2 = axes[0, 1]
-    if 'gnn_std' in baseline_df.columns and 'idwp20_std' in baseline_df.columns:
-        ax2.scatter(baseline_df['idwp20_std'], baseline_df['gnn_std'], 
+    if 'gnn_std' in baseline_df.columns and 'dasymetricp20_std' in baseline_df.columns:
+        ax2.scatter(baseline_df['dasymetricp20_std'], baseline_df['gnn_std'],
                    s=80, alpha=0.7, c='green', edgecolors='black')
-        
+
         # Diagonal line
-        max_val = max(baseline_df['gnn_std'].max(), baseline_df['idwp20_std'].max())
+        max_val = max(baseline_df['gnn_std'].max(), baseline_df['dasymetricp20_std'].max())
         ax2.plot([0, max_val], [0, max_val], 'k--', alpha=0.5, label='1:1 line')
-        
-        ax2.set_xlabel('IDW Variation (std)')
+
+        ax2.set_xlabel('Dasymetric Variation (std)')
         ax2.set_ylabel('GNN Variation (std)')
-        ax2.set_title('GNN vs IDW Variation')
+        ax2.set_title('GNN vs Dasymetric Variation')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
     
@@ -398,9 +398,9 @@ def _create_aggregate_baseline_plot(baseline_df: pd.DataFrame, output_path: str)
     if 'actual_svi' in baseline_df.columns and 'gnn_std' in baseline_df.columns:
         ax3.scatter(baseline_df['actual_svi'], baseline_df['gnn_std'],
                    s=80, alpha=0.7, c='green', label='GNN', edgecolors='black')
-        if 'idwp20_std' in baseline_df.columns:
-            ax3.scatter(baseline_df['actual_svi'], baseline_df['idwp20_std'],
-                       s=80, alpha=0.7, c='blue', label='IDW', edgecolors='black')
+        if 'dasymetricp20_std' in baseline_df.columns:
+            ax3.scatter(baseline_df['actual_svi'], baseline_df['dasymetricp20_std'],
+                       s=80, alpha=0.7, c='blue', label='Dasymetric', edgecolors='black')
         
         ax3.set_xlabel('Tract SVI')
         ax3.set_ylabel('Spatial Variation (std)')
@@ -414,7 +414,7 @@ def _create_aggregate_baseline_plot(baseline_df: pd.DataFrame, output_path: str)
     
     n_tracts = len(baseline_df)
     gnn_mean = baseline_df['gnn_std'].mean() if 'gnn_std' in baseline_df.columns else 0
-    idw_mean = baseline_df['idwp20_std'].mean() if 'idwp20_std' in baseline_df.columns else 0
+    dasymetric_mean = baseline_df['dasymetricp20_std'].mean() if 'dasymetricp20_std' in baseline_df.columns else 0
     
     summary = f"""Baseline Comparison Summary
 {'='*35}
@@ -422,13 +422,13 @@ def _create_aggregate_baseline_plot(baseline_df: pd.DataFrame, output_path: str)
 Holdout Tracts: {n_tracts}
 
 Mean Spatial Variation:
-  GNN:     {gnn_mean:.4f}
-  IDW:     {idw_mean:.4f}
-  Diff:    {gnn_mean - idw_mean:+.4f}
+  GNN:          {gnn_mean:.4f}
+  Dasymetric:   {dasymetric_mean:.4f}
+  Diff:         {gnn_mean - dasymetric_mean:+.4f}
 
 Interpretation:
-  {'GNN produces more variation' if gnn_mean > idw_mean else 'IDW produces more variation'}
-  {'(Better disaggregation)' if gnn_mean > idw_mean else '(Investigate)'}
+  {'GNN produces more variation' if gnn_mean > dasymetric_mean else 'Dasymetric produces more variation'}
+  {'(Better disaggregation)' if gnn_mean > dasymetric_mean else '(Investigate)'}
 """
     
     ax4.text(0.1, 0.9, summary, transform=ax4.transAxes,
@@ -443,12 +443,12 @@ Interpretation:
 if __name__ == '__main__':
     print("="*80)
     print("GRANITE GLOBAL TRAINING VALIDATION")
-    print("With Baseline Comparisons (IDW, Kriging, Naive)")
+    print("With Baseline Comparisons (Dasymetric, Pycnophylactic, Naive)")
     print("="*80)
     print("\nThis script will:")
     print("1. Train ONE global MoE model on 12 diverse tracts")
     print("2. Test on 10 separate holdout tracts")
-    print("3. Compare GNN disaggregation vs IDW/Kriging/Naive baselines")
+    print("3. Compare GNN disaggregation vs Dasymetric/Pycnophylactic/Naive baselines")
     print("4. Generate performance analysis")
     print("\nEstimated time:")
     print("  - First run: ~60-90 minutes (computing accessibility features)")

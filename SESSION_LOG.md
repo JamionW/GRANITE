@@ -1,5 +1,63 @@
 # GRANITE Session Log
 
+## 2026-05-03: M3 non-graph leakage baselines
+
+**Files changed:**
+- `granite/evaluation/recovery_baselines.py` (new, ~190 lines)
+- `granite/scripts/run_m3_baselines.py` (new, ~280 lines)
+- `output/m3_n20_baselines/` (generated outputs)
+
+**What changed and why:**
+- `recovery_baselines.py`: per-tract ridge (RidgeCV with LOO via hat matrix) and GBM (5-fold OOF) baselines. Uses same `_compute_accessibility_features` per-tract stacking as M2, same global target standardization, per-tract predictor z-score. Zero-variance columns dropped per tract. GBM skipped when n < 50.
+- `run_m3_baselines.py`: driver sweeping 3 targets x 20 tracts. Reads n20 list from M2 output. Writes five summary files: `per_tract_metrics.csv` (60 rows), `baseline_summary_stats.csv` (3 rows), `lift_table.csv` (120 rows joining M2 pivot), `lift_summary.csv` (6 rows), `lift_brief.md`. Wall time 13.1 min (all cache hits; OSRM not re-queried).
+
+**Key finding:** GBM r reaches near 1.0 on employment_walk_effective_access and log_appvalue for most tracts, confirming these targets are strongly feature-predictable without any graph or constraint. GRANITE does not clear the ridge or GBM baseline ceiling on median r for any (target, architecture) cell.
+
+**Cache invalidation:** none. Uses same per-tract cache keys as M2.
+
+---
+
+## 2026-04-29: Recovery harness M1
+
+**Files changed:**
+- `granite/disaggregation/recovery_harness.py` (new, ~290 lines)
+- `granite/scripts/run_granite.py` (+55 lines: `--recover-feature` flag, `run_recovery_workflow`)
+- `config.yaml` (+8 lines: `recovery:` section)
+- `docs/recovery_harness_schema.md` (new)
+
+**What changed and why:**
+- `recovery_harness.py`: implements roadmap M1 held-out feature recovery. Reuses `GRANITEPipeline` data loading and feature methods. Drops `target_feature` from the feature matrix, computes per-tract means of that feature as soft constraints (replacing SVI), trains `MultiTractGNNTrainer` with `bg_constraint_weight=0.0` and `ordering_weight=0.0`, writes `predictions.csv`, `per_tract_metrics.csv`, and `run_meta.json`.
+- `run_granite.py`: `--recover-feature FEATURE_NAME` flag added as a standalone argument (not in the mutually exclusive group); requires `--fips`, incompatible with `--global-training`. Default output path is `./output/recovery/<feature>_<arch>_<fips>_<seed>/`.
+- `config.yaml`: `recovery:` section with `target_feature: null`, `standardize_target: true`, `output_dir: ./output/recovery`.
+- `docs/recovery_harness_schema.md`: documents column meanings, units, standardization procedure, and constraint-replacement logic.
+
+**Cache invalidation:** none. Feature computation and cache keys are unchanged; the harness post-processes the feature matrix after `_compute_accessibility_features` returns.
+
+---
+
+## 2026-05-03: M2 sweep (n20 × 3 targets × 2 architectures)
+
+**Files changed:**
+- `granite/scripts/run_m2_sweep.py` (new, ~760 lines)
+
+**What changed and why:**
+- `run_m2_sweep.py`: M2 sweep driver. Loads 20-tract stratified set from `tract_inventory.csv`, runs recovery harness for 3 targets (`log_appvalue`, `employment_walk_effective_access`, `nlcd_impervious_pct`) × 2 architectures (`sage`, `gcn_gat`), writes per-run outputs, and aggregates into pivot tables and a decision brief.
+- Per-tract feature computation: instead of concatenating all 20 tracts' addresses before calling `_compute_accessibility_features` (which would generate a never-cached combined hash), the driver calls it once per tract and vstacks the arrays. This reuses existing single-tract cache entries and writes new ones per-tract, avoiding multi-hour cold OSRM routing and enabling disconnect resilience between tracts.
+- `gnn.py`: `_compute_overall_constraint_error` and `_compute_per_tract_errors` already had the `|target| < 1e-6` absolute-error guard from a prior session.
+
+**Key results (seed 42, 100 epochs, z-scored targets, n=20 tracts):**
+- Wall-clock: 15.3 min (all 20 per-tract caches warm after first run)
+- Best cell: `employment_walk_effective_access / sage` (median r = 0.509, crosses Branch 1 threshold)
+- `log_appvalue`: median r = 0.039 (sage) / 0.103 (gcn_gat) — low recovery
+- `nlcd_impervious_pct`: median r = 0.144 (sage) / 0.253 (gcn_gat)
+- Architecture: gcn_gat averaged slightly higher median r (0.279 vs 0.231 for sage)
+
+**Outputs:** `output/m2_n20_recovery/{target}_{arch}/` (6 dirs), `output/m2_n20_recovery/summary/` (pivot tables, decision brief)
+
+**Cache invalidation:** none. Per-tract cache entries are written using the same single-tract hash keys the regular pipeline would use.
+
+---
+
 ## 2026-04-27: Disk cleanup
 
 **Files deleted:**

@@ -116,3 +116,14 @@ output:
   save_predictions: true
   save_plots: true
   save_intermediate: false
+
+# =============================================================================
+# Feature Recovery (roadmap M1)
+# =============================================================================
+recovery:
+  # name of the address-level feature to hold out; null means inactive
+  target_feature: null
+  # z-score target values before computing tract means and evaluating recovery
+  standardize_target: true
+  # base directory for recovery outputs (overridden by --output CLI flag)
+  output_dir: "./output/recovery"

@@ -43,6 +43,16 @@ Examples:
         '--global-training', action='store_true',
         help='Run global MoE training with curated train/test split'
     )
+
+    # Feature recovery mode (requires --fips; incompatible with --global-training)
+    parser.add_argument(
+        '--recover-feature', type=str, default=None, metavar='FEATURE_NAME',
+        help=(
+            'Hold out FEATURE_NAME from the input matrix and train with its '
+            'per-tract mean as the constraint. Requires --fips. '
+            'Incompatible with --global-training.'
+        )
+    )
     
     # Configuration
     parser.add_argument(
@@ -570,9 +580,71 @@ def run_multi_fips_experiment(args):
     return 0
 
 
+def run_recovery_workflow(args, config):
+    """Run held-out feature recovery experiment."""
+    from granite.disaggregation.recovery_harness import run_recovery
+
+    target_feature = args.recover_feature
+    arch = args.architecture
+    fips = args.fips
+    seed = args.seed
+
+    default_output = os.path.join(
+        './output/recovery',
+        f'{target_feature}_{arch}_{fips}_{seed}'
+    )
+    output_dir = args.output or default_output
+    os.makedirs(output_dir, exist_ok=True)
+
+    print(f"\n{'='*60}")
+    print("GRANITE: Feature Recovery Experiment")
+    print(f"{'='*60}")
+    print(f"Target FIPS   : {fips}")
+    print(f"Hold-out feat : {target_feature}")
+    print(f"Architecture  : {arch}")
+    print(f"Seed          : {seed}")
+    print(f"Output        : {output_dir}")
+    print(f"{'='*60}\n")
+
+    result = run_recovery(
+        config=config,
+        target_feature=target_feature,
+        output_dir=output_dir,
+        verbose=args.verbose,
+    )
+
+    if result.get('success', False):
+        import pandas as pd
+        print(f"\n{'='*60}")
+        print("Recovery experiment completed")
+        print(f"{'='*60}")
+        print(f"Constraint error: {result['overall_constraint_error']:.2f}%")
+        print(f"Epochs trained  : {result['epochs_trained']}")
+        print(f"Outputs written : {output_dir}")
+
+        metrics_path = os.path.join(output_dir, 'per_tract_metrics.csv')
+        if os.path.exists(metrics_path):
+            metrics = pd.read_csv(metrics_path)
+            print("\nPer-tract metrics:")
+            print(metrics.to_string(index=False))
+        return 0
+    else:
+        print(f"\nRecovery experiment failed: {result.get('error', 'unknown error')}")
+        return 1
+
+
 def main():
     """Main entry point."""
     args = parse_arguments()
+
+    # validate --recover-feature constraints
+    if args.recover_feature:
+        if args.global_training:
+            print("error: --recover-feature is incompatible with --global-training")
+            return 1
+        if not args.fips:
+            print("error: --recover-feature requires --fips")
+            return 1
 
     # comma-separated FIPS triggers the multi-FIPS experiment path
     if args.fips and ',' in args.fips:
@@ -580,7 +652,9 @@ def main():
 
     config = load_config(args)
 
-    if args.global_training:
+    if args.recover_feature:
+        return run_recovery_workflow(args, config)
+    elif args.global_training:
         return run_global_training(args, config)
     else:
         return run_single_tract(args, config)

@@ -1308,11 +1308,11 @@ class MultiTractGNNTrainer:
                 tract_mean = float(tract_predictions.mean())
                 target_val = target_svi.item()
                 
-                if target_val > 0:
-                    error = abs(tract_mean - target_val) / target_val * 100
-                else:
+                if abs(target_val) < 1e-6:
                     error = abs(tract_mean - target_val) * 100
-                
+                else:
+                    error = abs(tract_mean - target_val) / abs(target_val) * 100
+
                 errors.append(error)
                 weights.append(len(tract_predictions))
         
@@ -1335,10 +1335,10 @@ class MultiTractGNNTrainer:
             if len(tract_predictions) > 0:
                 tract_mean = float(tract_predictions.mean())
                 target_val = target_svi.item()
-                if target_val > 0:
-                    error = abs(tract_mean - target_val) / target_val * 100
-                else:
+                if abs(target_val) < 1e-6:
                     error = abs(tract_mean - target_val) * 100
+                else:
+                    error = abs(tract_mean - target_val) / abs(target_val) * 100
                 per_tract_errors[fips] = error
             else:
                 per_tract_errors[fips] = 0.0

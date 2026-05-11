@@ -111,18 +111,30 @@ def _compute_metrics(pred: np.ndarray, true: np.ndarray) -> Dict:
 
 def run_baselines(
     config: dict,
-    target_feature: str,
-    tract_list: List[str],
-    output_dir: str,
+    target_feature: Optional[str] = None,
+    tract_list: Optional[List[str]] = None,
+    output_dir: Optional[str] = None,
     save_predictions: bool = False,
     verbose: bool = False,
     seed: int = 42,
+    external_target_vector: Optional[np.ndarray] = None,
 ) -> List[Dict]:
     """
     Run ridge and GBM baselines for one target across all tracts in tract_list.
 
+    Held-out feature path (target_feature is not None):
+        Feature computation matches M2 exactly. Target is extracted from the
+        feature matrix and the column is dropped before fitting.
+
+    External target path (external_target_vector is not None):
+        The supplied vector is used as the target directly and the full
+        feature matrix is used as predictors (no column dropped).
+        Rows where target is NaN (unmatched addresses) are excluded per tract.
+
+    Exactly one of target_feature or external_target_vector must be provided.
+
     Feature computation matches M2 exactly (same cache path, same per-tract stacking).
-    Target standardization is global across all 20 tracts, matching M2.
+    Target standardization is global across all tracts, matching M2.
     Predictor standardization is per-tract z-score.
     Zero-variance predictor columns are dropped per tract before fitting.
 
@@ -132,6 +144,20 @@ def run_baselines(
       gbm_pearson_r, gbm_spearman_rho, gbm_rmse_native.
     GBM fields are None when n_addresses < MIN_ADDRESSES_GBM.
     """
+    if target_feature is not None and external_target_vector is not None:
+        raise ValueError(
+            "run_baselines: target_feature and external_target_vector are mutually "
+            "exclusive; provide exactly one."
+        )
+    if target_feature is None and external_target_vector is None:
+        raise ValueError(
+            "run_baselines: exactly one of target_feature or external_target_vector "
+            "must be provided."
+        )
+    if tract_list is None:
+        raise ValueError("run_baselines: tract_list is required.")
+    if output_dir is None:
+        raise ValueError("run_baselines: output_dir is required.")
     set_random_seed(seed)
 
     target_fips = config['data']['target_fips']
@@ -187,16 +213,29 @@ def run_baselines(
     accessibility_features = np.vstack(per_tract_arrays)
     feature_names = pipeline._generate_feature_names(accessibility_features.shape[1])
 
-    if target_feature not in feature_names:
-        raise ValueError(
-            f"target_feature '{target_feature}' not in feature matrix "
-            f"({len(feature_names)} features). Available: {feature_names}"
-        )
+    # target materialization: diverges by path
+    if target_feature is not None:
+        if target_feature not in feature_names:
+            raise ValueError(
+                f"target_feature '{target_feature}' not in feature matrix "
+                f"({len(feature_names)} features). Available: {feature_names}"
+            )
+        feat_idx = feature_names.index(target_feature)
+        raw_target_values = accessibility_features[:, feat_idx].copy().astype(float)
+        feat_matrix = np.delete(accessibility_features, feat_idx, axis=1)
+        _t_label = target_feature
+    else:
+        # external target path: validate shape and use full feature matrix
+        if len(external_target_vector) != len(accessibility_features):
+            raise ValueError(
+                f"run_baselines: external_target_vector length {len(external_target_vector)} "
+                f"does not match feature matrix rows {len(accessibility_features)}"
+            )
+        raw_target_values = np.array(external_target_vector, dtype=float)
+        feat_matrix = accessibility_features
+        _t_label = 'external_target'
 
-    feat_idx = feature_names.index(target_feature)
-    raw_target_values = accessibility_features[:, feat_idx].copy().astype(float)
-
-    # standardize target globally across the 20-tract universe (matches M2)
+    # standardize target globally across all tracts (matches M2)
     tgt_mean = float(np.nanmean(raw_target_values))
     tgt_std = float(np.nanstd(raw_target_values))
     if tgt_std < 1e-8:
@@ -204,10 +243,7 @@ def run_baselines(
     target_values_std = (raw_target_values - tgt_mean) / tgt_std
 
     if verbose:
-        print(f'[m3] target "{target_feature}": mean={tgt_mean:.4f}, std={tgt_std:.4f}')
-
-    # drop target column from predictor matrix
-    feat_matrix = np.delete(accessibility_features, feat_idx, axis=1)
+        print(f'[m3] target "{_t_label}": mean={tgt_mean:.4f}, std={tgt_std:.4f}')
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -222,6 +258,17 @@ def run_baselines(
         X_raw = feat_matrix[mask].astype(float)
         y_std = target_values_std[mask]
         y_native = raw_target_values[mask]
+
+        # exclude rows with NaN target (unmatched external addresses)
+        valid_target = np.isfinite(y_std)
+        n_valid = int(valid_target.sum())
+        if n_valid < n:
+            X_raw = X_raw[valid_target]
+            y_std = y_std[valid_target]
+            y_native = y_native[valid_target]
+            n_fit = n_valid
+        else:
+            n_fit = n
 
         # drop zero-variance columns within tract
         col_vars = np.var(X_raw, axis=0)
@@ -246,14 +293,14 @@ def run_baselines(
             ridge_m = _compute_metrics(ridge_preds_native, y_native)
         except Exception as e:
             print(f'[m3]   {fips}: ridge failed: {e}')
-            ridge_preds_native = np.full(n, np.nan)
+            ridge_preds_native = np.full(n_fit, np.nan)
             ridge_m = {'pearson_r': float('nan'), 'spearman_rho': float('nan'), 'rmse_native': float('nan')}
             ridge_alpha = float('nan')
 
         # gbm
-        if n < MIN_ADDRESSES_GBM:
-            gbm_skipped_log.append((fips, n))
-            gbm_preds_native = np.full(n, np.nan)
+        if n_fit < MIN_ADDRESSES_GBM:
+            gbm_skipped_log.append((fips, n_fit))
+            gbm_preds_native = np.full(n_fit, np.nan)
             gbm_m = {'pearson_r': None, 'spearman_rho': None, 'rmse_native': None}
         else:
             try:
@@ -262,7 +309,7 @@ def run_baselines(
                 gbm_m = _compute_metrics(gbm_preds_native, y_native)
             except Exception as e:
                 print(f'[m3]   {fips}: GBM failed: {e}')
-                gbm_preds_native = np.full(n, np.nan)
+                gbm_preds_native = np.full(n_fit, np.nan)
                 gbm_m = {'pearson_r': float('nan'), 'spearman_rho': float('nan'), 'rmse_native': float('nan')}
 
         rows.append({
@@ -280,13 +327,15 @@ def run_baselines(
 
         if save_predictions:
             if 'address_id' in tract_addresses.columns:
-                addr_ids = tract_addresses.loc[mask, 'address_id'].values
+                all_addr_ids = tract_addresses.loc[mask, 'address_id'].values
             else:
-                addr_ids = tract_addresses.index[mask].values
-            for i in range(n):
+                all_addr_ids = tract_addresses.index[mask].values
+            # save only valid-target rows when external path excludes some addresses
+            valid_addr_ids = all_addr_ids[valid_target] if n_valid < n else all_addr_ids
+            for i in range(n_fit):
                 all_pred_rows.append({
                     'tract_fips': fips,
-                    'address_id': addr_ids[i],
+                    'address_id': valid_addr_ids[i],
                     'true_value': y_native[i],
                     'ridge_pred': ridge_preds_native[i],
                     'gbm_pred': gbm_preds_native[i],
@@ -305,7 +354,7 @@ def run_baselines(
         )
 
     meta = {
-        'target_feature': target_feature,
+        'target_feature': _t_label,
         'seed': seed,
         'n_tracts': len(valid_fips),
         'skipped_loading': skipped,

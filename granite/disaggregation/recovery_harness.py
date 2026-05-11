@@ -19,6 +19,7 @@ import pandas as pd
 from scipy import stats
 from typing import Dict, Optional, Tuple
 
+from granite.data.external_targets import load_external_target
 from granite.disaggregation.pipeline import GRANITEPipeline
 from granite.models.gnn import (
     AccessibilitySVIGNN,
@@ -108,6 +109,11 @@ def _write_outputs(
     config: dict,
     n_features_after_drop: int,
     standardize: bool,
+    target_mode: str = 'held_out_feature',
+    target_name: Optional[str] = None,
+    target_source: Optional[str] = None,
+    n_addresses_matched: Optional[int] = None,
+    n_addresses_missing: Optional[int] = None,
 ) -> None:
     """Write predictions.csv, per_tract_metrics.csv, and run_meta.json."""
     os.makedirs(output_dir, exist_ok=True)
@@ -151,6 +157,11 @@ def _write_outputs(
     # run metadata
     meta = {
         'target_feature': target_feature,
+        'target_mode': target_mode,
+        'target_name': target_name if target_name is not None else target_feature,
+        'target_source': target_source,
+        'n_addresses_matched': n_addresses_matched,
+        'n_addresses_missing': n_addresses_missing,
         'architecture': arch,
         'seed': seed,
         'n_features_after_drop': n_features_after_drop,
@@ -166,34 +177,56 @@ def _write_outputs(
 
 def run_recovery(
     config: dict,
-    target_feature: str,
-    output_dir: str,
+    target_feature: Optional[str] = None,
+    output_dir: Optional[str] = None,
     verbose: bool = False,
+    external_target_path: Optional[str] = None,
 ) -> dict:
     """
-    Run held-out feature recovery experiment.
+    Run held-out feature recovery or external target experiment.
 
-    Drops target_feature from the input feature matrix, computes
-    per-tract means of that feature as constraints, trains the GNN,
-    and records address-level recovery metrics.
+    Held-out feature path (target_feature is not None):
+        Drops target_feature from the input feature matrix, computes
+        per-tract means as constraints, trains the GNN, and records
+        address-level recovery metrics.
+
+    External target path (external_target_path is not None):
+        Loads an externally-supplied CSV as the target, uses the full
+        73-feature matrix as input (no column dropped), and proceeds
+        through the identical downstream pipeline.
+
+    Exactly one of target_feature or external_target_path must be non-None.
 
     Parameters
     ----------
     config : dict
         Full GRANITE config dict. Must include data.target_fips.
-    target_feature : str
-        Name of the feature column to hold out. Must match a column
-        in the computed feature matrix (e.g. 'log_appvalue',
-        'nlcd_impervious_pct').
-    output_dir : str
+    target_feature : str, optional
+        Name of the feature column to hold out.
+    output_dir : str, optional
         Directory for output files.
     verbose : bool
         Enable progress logging.
+    external_target_path : str, optional
+        Path to CSV with columns address_id, target_value (and optionally
+        tract_fips). Gzipped CSV is supported.
 
     Returns
     -------
     dict with keys: success, output_dir, per_tract_errors, error (on failure)
     """
+    if target_feature is not None and external_target_path is not None:
+        raise ValueError(
+            "run_recovery: target_feature and external_target_path are mutually "
+            "exclusive; provide exactly one."
+        )
+    if target_feature is None and external_target_path is None:
+        raise ValueError(
+            "run_recovery: exactly one of target_feature or external_target_path "
+            "must be provided."
+        )
+    if output_dir is None:
+        raise ValueError("run_recovery: output_dir is required.")
     seed = config.get('processing', {}).get('random_seed', 42)
     set_random_seed(seed)
 
@@ -260,27 +293,76 @@ def run_recovery(
 
     feature_names = pipeline._generate_feature_names(accessibility_features.shape[1])
 
-    # validate target feature name against computed matrix
-    if target_feature not in feature_names:
-        return {
-            'success': False,
-            'error': (
-                f"target_feature '{target_feature}' not found in computed feature matrix "
-                f"({len(feature_names)} features). "
-                f"Available: {feature_names}"
-            ),
-        }
+    # --- target materialization: diverges by path, converges below ---
 
-    # extract target column values before dropping (pre-normalization raw values)
-    feat_idx = feature_names.index(target_feature)
-    raw_target_values = accessibility_features[:, feat_idx].copy().astype(float)
+    ext_meta: Optional[dict] = None
+
+    if target_feature is not None:
+        # held-out feature path: validate, extract, drop
+        if target_feature not in feature_names:
+            return {
+                'success': False,
+                'error': (
+                    f"target_feature '{target_feature}' not found in computed feature matrix "
+                    f"({len(feature_names)} features). "
+                    f"Available: {feature_names}"
+                ),
+            }
+
+        feat_idx = feature_names.index(target_feature)
+        raw_target_values = accessibility_features[:, feat_idx].copy().astype(float)
+
+        feat_matrix = np.delete(accessibility_features, feat_idx, axis=1)
+        feat_names_reduced = [n for i, n in enumerate(feature_names) if i != feat_idx]
+
+        if verbose:
+            print(f'[recovery] feature matrix: {accessibility_features.shape[1]} -> '
+                  f'{feat_matrix.shape[1]} (dropped "{target_feature}")')
+
+        _t_mode = 'held_out_feature'
+        _t_name = target_feature
+        _t_source = None
+        _n_matched = len(tract_addresses)
+        _n_missing = 0
+
+    else:
+        # external target path: load CSV, use full feature matrix
+        if 'address_id' in tract_addresses.columns:
+            addr_index = pd.Index(tract_addresses['address_id'].values)
+        else:
+            addr_index = tract_addresses.index
+
+        try:
+            raw_target_values, ext_meta = load_external_target(
+                path=external_target_path,
+                address_index=addr_index,
+            )
+        except Exception as e:
+            return {'success': False, 'error': f'load_external_target failed: {e}'}
+
+        feat_matrix = accessibility_features
+        feat_names_reduced = feature_names
+
+        if verbose:
+            print(
+                f'[recovery] external target "{ext_meta["target_name"]}": '
+                f'matched {ext_meta["n_matched"]}/{len(tract_addresses)} addresses, '
+                f'missing {ext_meta["n_missing"]}'
+            )
+
+        _t_mode = 'external'
+        _t_name = ext_meta['target_name']
+        _t_source = external_target_path
+        _n_matched = ext_meta['n_matched']
+        _n_missing = ext_meta['n_missing']
+
+    # --- convergence point: identical downstream from here ---
 
     # standardize across all addresses in the run
     standardize = config.get('recovery', {}).get('standardize_target', True)
     if standardize:
         tgt_mean = float(np.nanmean(raw_target_values))
         tgt_std = float(np.nanstd(raw_target_values))
-        # guard against zero-variance features
         if tgt_std < 1e-8:
             tgt_std = 1.0
         target_values_std = (raw_target_values - tgt_mean) / tgt_std
@@ -290,27 +372,23 @@ def run_recovery(
         target_values_std = raw_target_values.copy()
 
     if verbose:
-        print(f'[recovery] target "{target_feature}": '
+        tname = target_feature if target_feature else _t_name
+        print(f'[recovery] target "{tname}": '
               f'mean={tgt_mean:.4f}, std={tgt_std:.4f}, standardize={standardize}')
 
     # compute per-tract means on the standardized target (these become the constraints)
+    # for external targets, NaN entries (unmatched addresses) are excluded from the mean
     tract_target_means_std: Dict[str, float] = {}
     for fips in valid_fips_list:
         mask = (tract_addresses['tract_fips'] == fips).values
-        if mask.sum() > 0:
-            tract_target_means_std[fips] = float(np.nanmean(target_values_std[mask]))
+        vals = target_values_std[mask]
+        finite_vals = vals[np.isfinite(vals)]
+        if len(finite_vals) > 0:
+            tract_target_means_std[fips] = float(np.mean(finite_vals))
 
     if verbose:
         for fips, v in tract_target_means_std.items():
             print(f'[recovery]   tract {fips} target mean (std): {v:.4f}')
-
-    # drop target feature from matrix and names
-    feat_matrix = np.delete(accessibility_features, feat_idx, axis=1)
-    feat_names_reduced = [n for i, n in enumerate(feature_names) if i != feat_idx]
-
-    if verbose:
-        print(f'[recovery] feature matrix: {accessibility_features.shape[1]} -> '
-              f'{feat_matrix.shape[1]} (dropped "{target_feature}")')
 
     # normalize (first pass - matches pipeline._process_single_tract behavior)
     normalized_features, _ = normalize_accessibility_features(feat_matrix)
@@ -408,7 +486,7 @@ def run_recovery(
     _write_outputs(
         output_dir=output_dir,
         tract_addresses=tract_addresses,
-        target_feature=target_feature,
+        target_feature=target_feature or _t_name,
         arch=arch,
         seed=seed,
         preds_std=raw_preds,
@@ -420,6 +498,11 @@ def run_recovery(
         config=config,
         n_features_after_drop=feat_matrix.shape[1],
         standardize=standardize,
+        target_mode=_t_mode,
+        target_name=_t_name,
+        target_source=_t_source,
+        n_addresses_matched=_n_matched,
+        n_addresses_missing=_n_missing,
     )
 
     if verbose:

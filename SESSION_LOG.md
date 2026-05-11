@@ -1,5 +1,45 @@
 # GRANITE Session Log
 
+## 2026-05-09: M0 parity run (n20 SVI, GraphSAGE vs Dasymetric vs Pycnophylactic)
+
+**Files changed:**
+- `granite/scripts/run_m0_parity.py` (new, ~380 lines)
+- `data/results/m0_n20_svi_parity/per_tract.csv` (60 rows: 20 tracts x 3 methods)
+- `data/results/m0_n20_svi_parity/aggregate.csv` (pooled and per-tract bootstrap CIs)
+- `data/results/m0_n20_svi_parity/pairwise_diffs.csv` (3 method pairs)
+- `data/results/m0_n20_svi_parity/RESULTS.md` (decision summary)
+- `Research_Status.md` (created; M0 entry appended)
+- `data/results/m0_discovery_report.md` (Phase 1 discovery, pre-existing from same session)
+
+**What changed and why:**
+- M0 driver: loops n20 stratified tracts, runs `GRANITEPipeline._process_single_tract()` in
+  single-tract SVI mode with GraphSAGE (arch=sage, 100 epochs, seed=42). Dasymetric and
+  Pycnophylactic predictions extracted from pipeline's existing `_run_disaggregation_baselines`
+  (called automatically for target=svi). BG validation uses `BlockGroupValidator` with nationally-
+  ranked ACS SVI from `data/processed/national_bg_svi.csv`. Bootstrap CIs (1000 resamples) on
+  pooled BG r by resampling BGs; pairwise difference CIs on per-tract bg_r paired by fips.
+
+**Key results:**
+- GRANITE pooled BG r = 0.769 (CI: 0.660-0.853, n_bgs=69)
+- Dasymetric pooled BG r = 0.802 (CI: 0.712-0.871, n_bgs=69)
+- Pycnophylactic pooled BG r = 0.768 (CI: 0.652-0.858, n_bgs=69)
+- All three methods not statistically separable (GRANITE vs Dasymetric and vs Pycnophylactic);
+  parity holds; Narrative-A footnote survives.
+- Dasymetric IS separable from Pycnophylactic at per-tract level (CI: 0.04-0.64).
+- Constraint error = 0% for all methods (GRANITE post-correction enforces constraint exactly).
+- Wall-clock: 13.2 min (warm OSRM cache, single-tract mode, 20 separate GNN training runs).
+
+**Discrepancy note vs CLAUDE.md reference values:**
+- CLAUDE.md reports r=0.469 (GRANITE) and r=0.558 (IDW/old naming). M0 reports r=0.769/0.802.
+  This discrepancy is expected: M0 uses national SVI ranking (not county), single-tract mode
+  (not multi-tract), and the n20 stratified subset (not a general validation set). Do not
+  update CLAUDE.md reference values from M0 -- those reflect different validation setups
+  (M8/M10 scope).
+
+**Cache invalidation:** none -- cache keys unchanged; read-only access to OSRM granite_cache.
+
+---
+
 ## 2026-05-03: M3 non-graph leakage baselines
 
 **Files changed:**
@@ -464,3 +504,24 @@ Outputs saved to `output/mehdi_review/<FIPS>/` with figures collated and renamed
 **Interpretation:** No feature is rank-consistent under both architectures. Two healthcare modal features survive under GCN-GAT alone with a small positive correlation (rho~0.18), but no features are architecture-agnostic. The zero Section C/D counts mean there is no cross-architecture signal to report as a positive finding.
 
 **Cache notes:** Runs used existing OSRM cache; no cache invalidation.
+
+## 2026-05-04 — M3.6 Framework Patch for External Targets
+
+**Files created:**
+- `granite/data/external_targets.py` (142 lines): `load_external_target()` — reads address-aligned CSV (plain or gzipped), returns numpy array + metadata dict, raises ValueError on zero matches, warns to stderr if matched fraction < 0.80
+- `granite/evaluation/redundancy_filter.py` (229 lines): `run_redundancy_filter()` — per-tract ridge+GBM reconstruction test, `REDUNDANCY_THRESHOLD=0.5`, `RedundancyFilterResult` dataclass with `is_admissible`/`is_redundant` semantics, writes `redundancy_filter.json` + `redundancy_filter_per_tract.csv`
+- `granite/evaluation/README.md` (56 lines): documents gate semantics, threshold, n5 default, rationale
+
+**Files modified:**
+- `granite/disaggregation/recovery_harness.py` (+82 lines): added `external_target_path=None` to `run_recovery()`; mutual exclusivity validation; external path loads target via `load_external_target`, uses full feature matrix (no drop); `_write_outputs` extended with `target_mode`, `target_name`, `target_source`, `n_addresses_matched`, `n_addresses_missing`
+- `granite/evaluation/recovery_baselines.py` (+48 lines): added `external_target_vector=None` to `run_baselines()`; external path uses full feature matrix; NaN exclusion per-tract for unmatched addresses
+- `granite/scripts/run_m2_sweep.py` (+90 lines): added `--external-targets JSON_PATH` flag; `_run_external_sweep()` function runs all ARCHITECTURES for each external target entry
+- `granite/scripts/run_granite.py` (+130 lines): added `--recover-external PATH`, `--filter-only` flags; `run_external_recovery_workflow()` runs filter gate then GRANITE training if admissible
+
+**Cache invalidation:** none — new code paths do not touch existing feature cache keys
+
+**Acceptance checks:**
+- M1 regression (log_appvalue, sage, seed 42, 50 epochs, single tract): r=0.267, RMSE=0.921, constraint_error=1.75% — within 0.001 of reference
+- Synthetic noise filter smoke: median_ridge_r=0.065, median_gbm_r=0.025, is_admissible=True, is_redundant=False, exit 0
+- M3 column schema: byte-identical to reference; values differ only due to single-tract vs 20-tract global standardization (expected)
+- `run_meta.json` records target_mode, target_name, target_source, n_addresses_matched, n_addresses_missing on both paths

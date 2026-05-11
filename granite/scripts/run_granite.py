@@ -50,7 +50,22 @@ Examples:
         help=(
             'Hold out FEATURE_NAME from the input matrix and train with its '
             'per-tract mean as the constraint. Requires --fips. '
-            'Incompatible with --global-training.'
+            'Incompatible with --global-training and --recover-external.'
+        )
+    )
+    parser.add_argument(
+        '--recover-external', type=str, default=None, metavar='PATH',
+        help=(
+            'Path to external target CSV (address_id, target_value, optional tract_fips). '
+            'Uses the full 73-feature matrix. Runs redundancy filter before training. '
+            'Requires --fips. Mutually exclusive with --recover-feature.'
+        )
+    )
+    parser.add_argument(
+        '--filter-only', action='store_true',
+        help=(
+            'Run the redundancy filter and exit without GRANITE training. '
+            'Requires --recover-external.'
         )
     )
     
@@ -633,17 +648,203 @@ def run_recovery_workflow(args, config):
         return 1
 
 
+def run_external_recovery_workflow(args, config):
+    """
+    Run external target recovery experiment with redundancy filter gate.
+
+    Loads data and features via the pipeline, loads the external target CSV,
+    runs the redundancy filter, and (unless --filter-only) proceeds to GRANITE
+    training only if the target is admissible.
+    """
+    import traceback
+    import numpy as np
+    import pandas as pd
+    from granite.data.external_targets import load_external_target
+    from granite.evaluation.redundancy_filter import run_redundancy_filter
+    from granite.disaggregation.recovery_harness import run_recovery
+    from granite.disaggregation.pipeline import GRANITEPipeline
+    from granite.models.gnn import set_random_seed
+
+    ext_path = args.recover_external
+    filter_only = args.filter_only
+    fips = args.fips
+    seed = args.seed
+
+    default_output = os.path.join(
+        './output/recovery_external',
+        f'{os.path.splitext(os.path.basename(ext_path))[0]}_{args.architecture}_{fips}_{seed}'
+    )
+    output_dir = args.output or default_output
+    os.makedirs(output_dir, exist_ok=True)
+
+    print(f"\n{'='*60}")
+    print("GRANITE: External Target Recovery")
+    print(f"{'='*60}")
+    print(f"Target FIPS     : {fips}")
+    print(f"External target : {ext_path}")
+    print(f"Architecture    : {args.architecture}")
+    print(f"Seed            : {seed}")
+    print(f"Filter-only     : {filter_only}")
+    print(f"Output          : {output_dir}")
+    print(f"{'='*60}\n")
+
+    set_random_seed(seed)
+
+    # load data and feature matrix via pipeline (same as run_recovery internals)
+    pipeline = GRANITEPipeline(config, output_dir=output_dir)
+    pipeline.verbose = args.verbose
+
+    try:
+        data = pipeline._load_spatial_data()
+    except Exception as e:
+        print(f"error: data loading failed: {e}")
+        return 1
+
+    target_fips = config['data']['target_fips']
+    n_neighbors = config['data'].get('neighbor_tracts', 0)
+
+    if n_neighbors > 0:
+        try:
+            tract_list = pipeline.data_loader.get_neighboring_tracts(target_fips, n_neighbors)
+        except Exception as e:
+            print(f"error: get_neighboring_tracts failed: {e}")
+            return 1
+    else:
+        tract_list = [target_fips]
+
+    all_addresses = []
+    for t in tract_list:
+        t = str(t).strip()
+        if len(data['tracts'][data['tracts']['FIPS'] == t]) == 0:
+            continue
+        addrs = pipeline.data_loader.get_addresses_for_tract(t)
+        if len(addrs) == 0:
+            continue
+        addrs['tract_fips'] = t
+        all_addresses.append(addrs)
+
+    if not all_addresses:
+        print("error: no addresses loaded for any tract")
+        return 1
+
+    tract_addresses = pd.concat(all_addresses, ignore_index=True)
+
+    try:
+        accessibility_features = pipeline._compute_accessibility_features(tract_addresses, data)
+    except Exception as e:
+        print(f"error: feature computation failed: {e}\n{traceback.format_exc()}")
+        return 1
+
+    if accessibility_features is None:
+        print("error: feature computation returned None")
+        return 1
+
+    # load external target aligned to address_index
+    if 'address_id' in tract_addresses.columns:
+        addr_index = pd.Index(tract_addresses['address_id'].values)
+    else:
+        addr_index = tract_addresses.index
+
+    try:
+        target_vector, ext_meta = load_external_target(
+            path=ext_path,
+            address_index=addr_index,
+        )
+    except Exception as e:
+        print(f"error: load_external_target failed: {e}")
+        return 1
+
+    print(f"external target loaded: '{ext_meta['target_name']}' "
+          f"({ext_meta['n_matched']}/{len(tract_addresses)} addresses matched, "
+          f"{ext_meta['n_missing']} missing)")
+    print(f"  value range: min={ext_meta['value_range']['min']:.4f}, "
+          f"max={ext_meta['value_range']['max']:.4f}, "
+          f"mean={ext_meta['value_range']['mean']:.4f}")
+
+    # run redundancy filter (tract subset is selected deterministically; same
+    # selection applies if training proceeds, preventing filter/training leakage)
+    tract_ids = tract_addresses['tract_fips'].values
+    filter_result = run_redundancy_filter(
+        target_vector=target_vector,
+        feature_matrix=accessibility_features,
+        tract_ids=tract_ids,
+        output_dir=output_dir,
+    )
+
+    print(f"\nredundancy filter result:")
+    print(f"  median_ridge_r : {filter_result.median_ridge_r:.4f}")
+    print(f"  median_gbm_r   : {filter_result.median_gbm_r:.4f}")
+    print(f"  threshold      : {filter_result.threshold}")
+    print(f"  is_admissible  : {filter_result.is_admissible}")
+    print(f"  is_redundant   : {filter_result.is_redundant}")
+    print(f"  tracts used    : {filter_result.tract_ids_used}")
+
+    if filter_only:
+        print("\n[filter-only] filter complete; skipping training (--filter-only)")
+        return 0
+
+    if filter_result.is_redundant:
+        print(
+            f"\nfilter rejection: target '{ext_meta['target_name']}' is redundant "
+            f"(max median r={max(filter_result.median_ridge_r, filter_result.median_gbm_r):.4f} "
+            f">= threshold {filter_result.threshold}). "
+            "Door 2 closed for this target."
+        )
+        return 0
+
+    # target is admissible: proceed to GRANITE training
+    print(f"\ntarget is admissible -- proceeding to GRANITE training")
+
+    result = run_recovery(
+        config=config,
+        output_dir=output_dir,
+        verbose=args.verbose,
+        external_target_path=ext_path,
+    )
+
+    if result.get('success', False):
+        print(f"\n{'='*60}")
+        print("External recovery experiment completed")
+        print(f"{'='*60}")
+        print(f"Constraint error: {result['overall_constraint_error']:.2f}%")
+        print(f"Epochs trained  : {result['epochs_trained']}")
+        print(f"Outputs written : {output_dir}")
+
+        metrics_path = os.path.join(output_dir, 'per_tract_metrics.csv')
+        if os.path.exists(metrics_path):
+            metrics = pd.read_csv(metrics_path)
+            print("\nPer-tract metrics:")
+            print(metrics.to_string(index=False))
+        return 0
+    else:
+        print(f"\nExternal recovery experiment failed: {result.get('error', 'unknown error')}")
+        return 1
+
+
 def main():
     """Main entry point."""
     args = parse_arguments()
 
-    # validate --recover-feature constraints
+    # validate recovery mode constraints
+    if args.recover_feature and getattr(args, 'recover_external', None):
+        print("error: --recover-feature and --recover-external are mutually exclusive")
+        return 1
+    if getattr(args, 'filter_only', False) and not getattr(args, 'recover_external', None):
+        print("error: --filter-only requires --recover-external")
+        return 1
     if args.recover_feature:
         if args.global_training:
             print("error: --recover-feature is incompatible with --global-training")
             return 1
         if not args.fips:
             print("error: --recover-feature requires --fips")
+            return 1
+    if getattr(args, 'recover_external', None):
+        if args.global_training:
+            print("error: --recover-external is incompatible with --global-training")
+            return 1
+        if not args.fips:
+            print("error: --recover-external requires --fips")
             return 1
 
     # comma-separated FIPS triggers the multi-FIPS experiment path
@@ -654,6 +855,8 @@ def main():
 
     if args.recover_feature:
         return run_recovery_workflow(args, config)
+    elif getattr(args, 'recover_external', None):
+        return run_external_recovery_workflow(args, config)
     elif args.global_training:
         return run_global_training(args, config)
     else:

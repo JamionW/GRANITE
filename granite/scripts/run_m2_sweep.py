@@ -635,12 +635,138 @@ def write_decision_brief(summary_dir, stats_df, pivot_r, run_frames, run_results
     return brief_path
 
 
+def _run_external_sweep(args):
+    """
+    External target sweep: for each {name, path, tract_subset_csv} entry in
+    the JSON config, run recovery across ARCHITECTURES and write results to
+    runs/m2_external_<timestamp>/.
+
+    Schema: list of {name: str, path: str, tract_subset_csv: str (optional)}
+    """
+    import datetime
+    import json as _json
+    from granite.disaggregation.recovery_harness import run_recovery
+
+    wall_start = time.time()
+
+    with open(args.external_targets) as fh:
+        ext_targets = _json.load(fh)
+
+    if not isinstance(ext_targets, list):
+        print('[m2-ext] --external-targets JSON must be a list of objects')
+        sys.exit(1)
+
+    config = load_config(args.config)
+    config['processing']['random_seed'] = SEED
+    config['processing']['enable_caching'] = True
+    config['data']['target_fips'] = REFERENCE_FIPS
+    config['data']['state_fips'] = REFERENCE_FIPS[:2]
+    config['data']['county_fips'] = REFERENCE_FIPS[2:5]
+    config['recovery']['standardize_target'] = True
+
+    # load default tract list for targets without tract_subset_csv
+    inventory_path = INVENTORY_PATH
+    if not os.path.exists(inventory_path):
+        inventory_path = os.path.join('docs', 'tract_inventory.csv')
+    n20_fips = load_n20_tracts(inventory_path)
+
+    ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    sweep_base = os.path.join('runs', f'm2_external_{ts}')
+    os.makedirs(sweep_base, exist_ok=True)
+
+    print(f'[m2-ext] external sweep: {len(ext_targets)} targets x {len(ARCHITECTURES)} architectures')
+    print(f'[m2-ext] output base: {sweep_base}')
+
+    run_results = {}
+
+    for entry in ext_targets:
+        name = entry.get('name') or os.path.splitext(os.path.basename(entry['path']))[0]
+        ext_path = entry['path']
+        subset_csv = entry.get('tract_subset_csv')
+
+        if subset_csv and os.path.exists(subset_csv):
+            tract_list = load_n20_tracts(subset_csv)
+        else:
+            tract_list = n20_fips
+
+        if not os.path.exists(ext_path):
+            print(f'[m2-ext] skipping "{name}": path not found: {ext_path}')
+            continue
+
+        for arch in ARCHITECTURES:
+            run_key = f'{name}__{arch}'
+            run_dir = os.path.join(sweep_base, f'{name}_{arch}')
+            print(f'\n[m2-ext] starting run: target={name}, arch={arch}')
+            print(f'[m2-ext]   output: {run_dir}')
+
+            run_cfg = {
+                **config,
+                'data': {
+                    **config.get('data', {}),
+                    'target_fips': REFERENCE_FIPS,
+                    'neighbor_tracts': len(tract_list) - 1,
+                },
+                'model': {
+                    **config.get('model', {}),
+                    'architecture': arch,
+                },
+                'training': {
+                    **config.get('training', {}),
+                    'epochs': EPOCHS,
+                },
+                'processing': {
+                    **config.get('processing', {}),
+                    'random_seed': SEED,
+                },
+            }
+
+            t0 = time.time()
+            try:
+                result = run_recovery(
+                    config=run_cfg,
+                    output_dir=run_dir,
+                    verbose=args.verbose,
+                    external_target_path=ext_path,
+                )
+            except Exception as exc:
+                result = {'success': False, 'error': str(exc)}
+
+            elapsed = time.time() - t0
+            run_results[run_key] = result
+
+            if result.get('success'):
+                ce = result.get('overall_constraint_error', float('nan'))
+                print(f'[m2-ext]   done in {elapsed:.1f}s, '
+                      f'constraint_err={ce:.2f}%, '
+                      f'epochs={result.get("epochs_trained")}')
+            else:
+                print(f'[m2-ext]   FAILED: {result.get("error", "unknown")}')
+
+    wall_elapsed = time.time() - wall_start
+    print(f'\n[m2-ext] external sweep complete in {wall_elapsed:.1f}s')
+
+    ok = sum(1 for r in run_results.values() if r.get('success'))
+    print(f'[m2-ext] {ok}/{len(run_results)} runs succeeded')
+
+
 def main():
     parser = argparse.ArgumentParser(description='M2 sweep driver')
     parser.add_argument('--config', default='config.yaml')
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--skip-preflight', action='store_true')
+    parser.add_argument(
+        '--external-targets', type=str, default=None, metavar='JSON_PATH',
+        help=(
+            'Path to JSON config for external target sweep. '
+            'Schema: list of {name, path, tract_subset_csv (optional)}. '
+            'Mutually exclusive with the built-in held-out-feature target list.'
+        ),
+    )
     args = parser.parse_args()
+
+    if args.external_targets is not None:
+        _run_external_sweep(args)
+        return
 
     wall_start = time.time()
 

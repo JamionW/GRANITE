@@ -1,0 +1,53 @@
+{
+  "timestamp": "20260512_002154",
+  "seed": 42,
+  "params": {
+    "signal_source": "features",
+    "feature_indices": [
+      0,
+      1,
+      2
+    ],
+    "signal_type": "linear",
+    "spatial_autocorrelation": "weak",
+    "snr": "low",
+    "tract_list_source": "auto"
+  },
+  "diagnostics": {
+    "morans_i_achieved": 0.17659486660745286,
+    "morans_i_target": 0.1,
+    "within_tract_variance_ratio": 0.9761717213848317,
+    "signal_variance": 1.0,
+    "residual_variance": 1.0,
+    "noise_variance": 3.0,
+    "length_scale_per_tract": {
+      "47065000600": 50.0,
+      "47065000700": 50.0,
+      "47065001200": 50.0,
+      "47065001800": 50.0,
+      "47065001900": 50.0,
+      "47065002400": 50.0,
+      "47065003400": 50.0,
+      "47065010431": 50.0,
+      "47065010433": 50.0,
+      "47065010435": 50.0,
+      "47065011311": 63.4765625,
+      "47065011321": 50.0,
+      "47065011324": 3222.65625,
+      "47065011325": 50.0,
+      "47065011326": 50.0,
+      "47065011402": 50.0,
+      "47065011413": 50.0,
+      "47065011444": 50.0,
+      "47065011447": 50.0,
+      "47065011900": 50.0
+    },
+    "n_addresses": 39535,
+    "n_tracts": 20
+  },
+  "address_id_column": "address_hash",
+  "raw_address_id_column": "hash",
+  "feature_cache_path": "data/raw/address_features/combined_address_features.csv",
+  "proj_crs": "EPSG:32616",
+  "n20_tract_list_source": "output/m2_n20_recovery/summary/n20_tract_list.txt"
+}

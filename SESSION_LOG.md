@@ -1,5 +1,34 @@
 # GRANITE Session Log
 
+## 2026-05-12: M5 synthetic target generator (Phase 2 build)
+
+**Files created:**
+- `granite/synthetic/__init__.py` (package init, exports SyntheticTargetGenerator)
+- `granite/synthetic/generator.py` (530 lines): full M5 generator with per-tract GP autocorrelation injection, latent/feature signal sources, SNR mixing, and Moran's I diagnostics
+- `granite/scripts/run_m5_smoke.py` (156 lines): three-configuration smoke driver
+
+**What changed and why:**
+- M5 implements the synthetic boundary-surface testbed needed to generate ground-truth targets for M6 GRANITE recovery experiments
+- signal_source='latent' draws z ~ N(0,1) per address independent of the 73-feature matrix; signal_source='features' loads numeric features from `data/raw/address_features/combined_address_features.csv`
+- spatial autocorrelation injected per-tract via Matern nu=1.5 GP; length scales binary-searched per tract using the FULL tract addresses (no subsampling) to avoid density mismatch between calibration and production
+- critical bug discovered and fixed during calibration: GP samples have non-zero within-tract mean; failing to subtract it before normalization creates spurious between-tract contrast that inflates global Moran's I far beyond per-tract targets
+- morans_i_achieved is computed on the GP residuals r (the calibrated component), not y_true; SNR noise would always reduce y_true MI below target, making the calibration warning meaningless
+- dynamic NaN filter drops feature columns with >99% NaN (district, region are 100% NaN in combined_address_features.csv); hardcoded exclusion list updated accordingly
+
+**Smoke driver results (seed=42):**
+
+| Run | signal | autocorr | snr | achieved MI | target MI | in-band | WTVR |
+|-----|--------|----------|-----|-------------|-----------|---------|------|
+| 1 | latent/linear | medium | medium | 0.3940 | 0.4000 | YES | 0.9994 |
+| 2 | latent/nonlinear | strong | high | 0.6972 | 0.7000 | YES | 0.9996 |
+| 3 | features/linear | weak | low | 0.1191 | 0.1000 | YES | 0.9925 |
+
+No calibration warning fired. All runs within Moran's I target band (+/- 0.05). metadata.json matches input params on all three runs. Runtime: ~4 minutes for three runs (dominated by per-tract GP calibration via Cholesky, O(n^3) per tract with n=1000-4000).
+
+**Output paths:** `data/synthetic/run_{timestamp}/` with addresses.csv, metadata.json, figures/{scatter_signal_vs_truth.png, spatial_heatmap.png, morans_i_validation.txt}
+
+**Cache invalidation notes:** none -- no changes to existing feature extraction or OSRM cache keys.
+
 ## 2026-05-09: M0 parity run (n20 SVI, GraphSAGE vs Dasymetric vs Pycnophylactic)
 
 **Files changed:**

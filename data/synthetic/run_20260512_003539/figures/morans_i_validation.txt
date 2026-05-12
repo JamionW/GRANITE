@@ -1,0 +1,6 @@
+Moran's I validation
+========================================
+achieved : 0.2921
+target   : 0.1000
+tolerance: +/- 0.05
+in_band  : NO

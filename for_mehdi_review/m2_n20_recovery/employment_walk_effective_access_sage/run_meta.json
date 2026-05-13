@@ -1,0 +1,113 @@
+{
+  "target_feature": "employment_walk_effective_access",
+  "architecture": "sage",
+  "seed": 42,
+  "n_features_after_drop": 72,
+  "standardize_target": true,
+  "target_mean_native": 194.93018844062223,
+  "target_std_native": 144.83958927892897,
+  "git_sha": "8eb7f04",
+  "config": {
+    "data": {
+      "state_fips": "47",
+      "county_fips": "065",
+      "target": "svi",
+      "census_year": 2020,
+      "address_file": "chattanooga.geojson",
+      "address_features_file": "data/raw/address_features/combined_address_features.csv",
+      "svi_file": "data/raw/SVI_2020_US.csv",
+      "roads_file": "data/raw/tl_2023_47065_roads.shp",
+      "census_tracts_file": "data/raw/tl_2020_47_tract.shp",
+      "target_fips": "47065000600"
+    },
+    "accessibility": {
+      "enabled": true,
+      "max_addresses_per_tract": 10,
+      "destinations": {
+        "employment": true,
+        "healthcare": true,
+        "grocery": true
+      },
+      "timeout_minutes": 2
+    },
+    "transit": {
+      "source": "gtfs",
+      "local_file": "carta_gtfs.zip"
+    },
+    "routing": {
+      "driving_url": "http://localhost:5000",
+      "walking_url": "http://localhost:5001",
+      "batch_size": 100
+    },
+    "model": {
+      "hidden_dim": 64,
+      "dropout": 0.3,
+      "attention_heads": 4,
+      "use_context_gating": true,
+      "use_multitask": true,
+      "architecture": "sage"
+    },
+    "training": {
+      "epochs": 100,
+      "learning_rate": 0.001,
+      "weight_decay": 0.0001,
+      "enforce_constraints": true,
+      "constraint_weight": 2.0,
+      "variation_weight": 1.5,
+      "early_stopping_patience": 15,
+      "apply_post_correction": true,
+      "ordering_weight": 0.5,
+      "ordering_min_gap": 0.5,
+      "ordering_margin": 0.02
+    },
+    "mixture": {
+      "enabled": false,
+      "gate_epochs": 100,
+      "finetune_epochs": 50,
+      "svi_boundaries": {
+        "low": [
+          0.01,
+          0.4
+        ],
+        "medium": [
+          0.3,
+          0.7
+        ],
+        "high": [
+          0.55,
+          1.0
+        ]
+      },
+      "expert_hidden_dim": 64,
+      "gate_hidden_dim": 32
+    },
+    "features": {
+      "type": "nlcd",
+      "nlcd_path": "./data/nlcd_hamilton_county.tif",
+      "scaling": "robust"
+    },
+    "processing": {
+      "verbose": true,
+      "random_seed": 42,
+      "enable_caching": true,
+      "cache_dir": "./granite_cache"
+    },
+    "validation": {
+      "mode": null,
+      "compare_baselines": true,
+      "compute_spatial_diagnostics": true,
+      "correction_mode": "global"
+    },
+    "output": {
+      "directory": "./output",
+      "save_predictions": true,
+      "save_plots": true,
+      "save_intermediate": false
+    },
+    "recovery": {
+      "target_feature": null,
+      "standardize_target": true,
+      "output_dir": "./output/recovery"
+    }
+  }
+}

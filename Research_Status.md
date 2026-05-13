@@ -4,7 +4,9 @@
 
 **Codename:** GRANITE
 
-**Last updated:** 2026-05-11
+**Last updated:** 2026-05-12
+
+**Active branch:** `main` (HEAD: `6e5173c`)
 
 ---
 
@@ -14,7 +16,7 @@
 
 **Empirical complement (not headline):** Door 2 external-target recovery; tax delinquency in acquisition.
 
-**Scaffolding (closed):** traditional-method parity check (M0) complete. Pooled BG r demonstrates constraint-preserving parity; per-tract BG r reveals Dasymetric's within-tract ancillary-variable advantage. Both readings are dissertation material.
+**Scaffolding (closed):** traditional-method parity check (M0) complete. Pooled BG r demonstrates constraint-preserving parity; per-tract BG r reveals Dasymetric's within-tract ancillary-variable advantage.
 
 ---
 
@@ -24,13 +26,27 @@
 
 2. **Ecological fallacy at address scale.** Tract-level SVI correlates do not carry within-tract signal. The 30-feature accessibility set hits r=0.033 at address level; raw x,y coordinates hit r=0.671.
 
-3. **Within-tract feature redundancy (M3.5).** The 73-feature stack is internally redundant. GBM hit r ~0.976 to 1.000 across all three engineered held-out targets via functional proxy reconstruction. Exhibit: `employment_count_10min` reconstructed `employment_walk_effective_access` at GBM importance 0.9997. Killed Phase A on engineered features.
+3. **Within-tract feature redundancy (M3.5).** The 73-feature stack is internally redundant. GBM hit r approximately 0.957 to 1.000 across all three engineered held-out targets via functional proxy reconstruction. Exhibit: `employment_count_10min` reconstructed `employment_walk_effective_access` at GBM importance 0.9997. Killed feature engineering prospects for a positive outcome.
 
-4. **Constraint-vs-feature-signal tug-of-war.** Under strong feature-target coupling, the soft constraint becomes a tax the trainer partially escapes. M2 exhibit: r=0.509 with 43% constraint error on `employment_walk_effective_access`. Methods-chapter material.
+4. **Constraint-vs-feature-signal tug-of-war.** Under strong feature-target coupling, the soft constraint becomes a tax the trainer partially escapes. M2 exhibit: r=0.509 with 43.5% constraint error on `employment_walk_effective_access`. Methods-chapter material.
 
 5. **Mechanism honesty (April 2026 audit).** Training uses multi-objective soft loss including a constraint term. Inference applies an additive mean-centering correction equal to the closed-form Euclidean projection onto the tract-mean constraint, also the base case of hierarchical forecast reconciliation. "Hard aggregate constraint enforcement acting as implicit regularizer" framing has been retired.
 
-6. **Pooled-versus-per-tract metric divergence (M0, May 2026).** Pooled BG r compresses between-tract and within-tract performance; tract-mean preservation drives most of the pooled signal. Per-tract BG r isolates within-tract allocation skill and reveals different method behavior. Methodological contribution on its own: pooled BG r is a misleading validation metric for disaggregation methods that preserve aggregate constraints.
+6. **Pooled-versus-per-tract metric divergence (M0, May 2026).** Pooled BG r compresses between-tract and within-tract performance; tract-mean preservation drives most of the pooled signal. Per-tract BG r isolates within-tract allocation skill and reveals different method behavior. 
+
+---
+
+## Mechanism reference
+
+**Constraint enforcement.** Soft MSE constraint term in the training loss (weight 2.0 in single-tract `_compute_losses` at `granite/models/gnn.py:562`; same weight in multi-tract `_compute_multi_tract_losses` at `granite/models/gnn.py:1149`). Inference applies iterative bounded projection in `granite/disaggregation/pipeline.py:_finalize_predictions` (max_iter=50, tol=1e-8), gated by `apply_post_correction: true` in `config.yaml`.
+
+**Graph construction.** Dual edge set in `granite/data/loaders.py:_create_road_network_graph`. Road-network edges: 500 m road snap, candidate pairs filtered to less than 1000 m Euclidean and less than 1500 m road-network shortest-path, weight `1 / (1 + path_length / 500)`. Geographic edges: k=6, less than 1000 m Euclidean filter, weight `exp(-distance_m / 300)`. Symmetric, deduplicated. No feature-similarity edges.
+
+**Normalization.** `LayerNorm` at GNN input. `BatchNorm` after each graph convolution layer. `RobustScaler` on raw input features (`normalize_accessibility_features` in `granite/models/gnn.py`), fit globally across all addresses in the batch. Per-tract feature standardization is not in the GNN path; the M3 baselines do apply per-tract z-score at `granite/evaluation/recovery_baselines.py:139`.
+
+**Cross-tract smoothness loss.** Active in the constrained multi-tract path at weight 0.1 (`granite/models/gnn.py:1198`). Weight is hardcoded; no config flag currently disables it.
+
+**Features.** 73 address-level features. 30 base accessibility features. 15 modal features computed per-address from OSRM drive and walk times (tract-level fallback exists for cache-cold OSRM-unreachable cases and is not the active path under normal operation). 9 socioeconomic features broadcast as tract-level constants by design. 19 address-level attributes from parcel records, Microsoft Building Footprints, FEMA NFHL flood zones, and NLCD 2021. See docs/FEATURES.md for full list.
 
 ---
 
@@ -38,22 +54,27 @@
 
 ### Closed
 
-- **M0** (2026-05-09): n20 stratified SVI parity check against Dasymetric and Pycnophylactic at BG resolution. See M0 entry below.
-- **M1 through M3** (Q1 2026): Phase A recovery harness, three-target run, non-graph leakage baseline. GBM established the within-tract redundancy ceiling.
-- **M3.5** (2026-04): Redundancy filter applied; engineered-feature recovery collapsed. Phase A reframed as empirical complement.
+- **M0** (2026-05-09): Traditional-method parity check on the n20 stratified subset against Dasymetric and Pycnophylactic at block-group resolution; established pooled BG parity and per-tract divergence. See M0 entry below.
+- **M1** (2026-04-29): Built the held-out feature recovery harness inside `granite/`, with one config switch to select a target feature, drop it from inputs, and use its tract aggregate as the soft constraint.
+- **M2** (2026-05-03): Ran the recovery harness across three engineered targets (`log_appvalue`, `employment_walk_effective_access`, `nlcd_impervious_pct`) on n20 with both architectures; produced per-tract Pearson r, RMSE, and constraint error. See M2 entry below.
+- **M3** (2026-05-03): Ran per-address ridge and gradient-boosted regression on the same retained features with no graph and no constraint, to measure how much recovery comes from feature correlations alone and compute GRANITE's lift over a non-graph baseline. See M3 entry below.
+- **M3.5** (2026-04): Applied a redundancy filter to the 73-feature stack and confirmed within-tract functional proxy redundancy; GBM ceiling at r approximately 0.957 to 1.000 across all three engineered targets, with GRANITE never clearing ridge. Killed Phase A on engineered features.
 
 ### Active
 
-- **M5** (next): synthetic generator implementation. Prompt creation is the next conversation's task.
-- **M3.6 through M3.8**: Door 2 tax delinquency acquisition in parallel.
+- **M5** (in progress): Implementing the synthetic target generator that produces address-level "true" targets from controlled mechanisms (signal type, signal-to-noise ratio, spatial autocorrelation) over the real tract assignments, address coordinates, and k-NN graph topology. Smoke driver at `granite/scripts/run_m5_smoke.py`; generator at `granite/synthetic/generator.py`.
+- **M3.6 through M3.8** (parallel track): Door 2 acquisition of an external target (tax delinquency) absent from the feature stack, with the redundancy filter gating whether it proceeds to GRANITE training.
 
 ### Pending
 
-- **M6**: synthetic parameter grid.
-- **M7**: boundary characterization.
-- **M8, M10**: documentation alignment (post-direction-lock).
-- **M9**: validator bug `name 'count_5' is not defined`.
-- **M11 through M13**: figure suite, cross-experiment synthesis, reproducibility audit.
+- **M6**: Run the synthetic parameter grid across 4 to 6 mechanisms x 3 SNR levels x 3 autocorrelation levels on both architectures, logging recovery r and constraint error per cell. Estimated 72 to 108 runs.
+- **M7**: Characterize the boundary in (signal type, SNR, autocorrelation) space where constrained GNN disaggregation succeeds versus collapses toward proximity allocation, and cross-reference with Phase A real-data results.
+- **M8**: Document mathematically why block-group r tests SVI's scale-decomposability rather than GRANITE's signal extraction, repositioning the BG result as a diagnostic on the index.
+- **M9**: Fix the `name 'count_5' is not defined` validator bug that blocks downstream tooling.
+- **M10**: Update `CLAUDE.md`, `README.md`, and remaining documentation to match the recovery-framework framing and retire residual "hard constraint as regularizer" language.
+- **M11**: Produce a five-figure canonical suite: held-out recovery panel, boundary surface, architecture-dependent feature survival heatmap, ecological-fallacy bar, BG scale-decomposability diagnostic.
+- **M12**: Build cross-experiment synthesis tables showing synthetic results predict real-data results and that architecture-dependent feature survival holds across both phases.
+- **M13**: Pre-writing reproducibility audit; reproduce headline numbers from a clean checkout, lock seeds and configs, generate the chapter-ready artifact bundle.
 
 ### Retired or demoted
 
@@ -114,10 +135,106 @@
 
 ---
 
-## Reference artifacts in project knowledge
+### M2: held-out engineered feature recovery, n20 (2026-05-03)
 
-- `granite_roadmap.md`: milestone definitions and sequencing.
-- `CONVERSATION_PROTOCOL.md`: Claude operating contract.
-- `DEFENSE_FRAMING.md`: dissertation defense framing.
-- `Ecological_Fallacy_Finding.md`: detailed exhibit for finding 2.
-- `tract_inventory.csv`: 85-tract roster with SVI values.
+**Status:** complete.
+
+**Setup.** Three engineered targets (`log_appvalue`, `employment_walk_effective_access`, `nlcd_impervious_pct`) across both architectures (GraphSAGE, GCN-GAT) on the n20 stratified subset. Target column dropped from inputs; per-tract mean of the held-out target replaces SVI as the soft training constraint. Entry point: `granite/disaggregation/recovery_harness.py:run_recovery`.
+
+**Median per-tract Pearson r at address level:**
+
+| Target | SAGE r | GCN-GAT r | SAGE constraint err |
+|---|---|---|---|
+| log_appvalue | 0.0387 | 0.1027 | 3.1% |
+| employment_walk_effective_access | 0.5090 | 0.4819 | 43.5% |
+| nlcd_impervious_pct | [fill from file] | [fill from file] | [fill from file] |
+
+**Reading.** The `employment_walk_effective_access` cell is the constraint-vs-feature-signal tug-of-war exhibit (locked-in finding 4): nontrivial recovery r purchased by violating the constraint by 43.5%. `log_appvalue` near zero across both architectures; `nlcd_impervious_pct` to be filled in.
+
+**Source.** `output/m2_n20_recovery/summary/summary_stats.csv` and per-target subdirectories `output/m2_n20_recovery/{target}_{architecture}/`.
+
+---
+
+### M3: non-graph leakage baselines, n20 (2026-05-03)
+
+**Status:** complete.
+
+**Setup.** Per-address ridge regression and gradient-boosted regression on the same three M2 targets with no graph and no constraint. Same retained features as the GNN path with target column dropped. Predictors per-tract z-scored. Entry point: `granite/evaluation/recovery_baselines.py:run_baselines`.
+
+**Median per-tract Pearson r at address level:**
+
+| Target | Ridge r | GBM r |
+|---|---|---|
+| log_appvalue | 0.8678 | 0.9759 |
+| employment_walk_effective_access | 0.5870 | 0.9999 |
+| nlcd_impervious_pct | 0.8245 | 0.9574 |
+
+**Reading.** GBM ceiling at r approximately 0.957 to 1.000 across all three targets. Ridge clears 0.58 on the worst target. GRANITE never cleared ridge on any target. M3.5 then explained this mechanistically as within-tract feature redundancy (locked-in finding 3).
+
+**Source.** `output/m3_n20_baselines/summary/baseline_summary_stats.csv` and per-target subdirectories `output/m3_n20_baselines/{target}/`. Lift table at `output/m3_n20_baselines/summary/lift_table.csv`.
+
+---
+
+## Where to find things
+
+**Code.**
+
+```
+granite/
+  models/gnn.py                          # GNN architectures, trainers, losses
+  disaggregation/
+    pipeline.py                          # Main pipeline; _finalize_predictions
+    recovery_harness.py                  # M2 held-out feature recovery
+  features/
+    enhanced_accessibility.py            # 30 base accessibility features
+    modal_accessibility.py               # 15 modal features (per-address path)
+    osrm_router.py                       # OSRM interface
+  data/loaders.py                        # Graph construction, address joins
+  evaluation/
+    recovery_baselines.py                # M3 ridge and GBM baselines
+    redundancy_filter.py                 # M3.5 admissibility check
+    run_ablation_study.py                # Feature-replacement ablations
+  scripts/
+    run_granite.py                       # CLI entry point
+    run_m0_parity.py                     # M0 parity driver
+    run_m5_smoke.py                      # M5 synthetic generator smoke driver
+  synthetic/generator.py                 # M5 synthetic target generator
+```
+
+**Configuration.**
+
+```
+config.yaml                              # Constraint weights, scaling, seeds
+CLAUDE.md                                # Working notes for Claude Code sessions
+README.md                                # CLI usage and flags
+```
+
+**Results.**
+
+```
+data/results/m0_n20_svi_parity/
+  aggregate.csv                          # Pooled and per-tract medians
+  per_tract.csv                          # Per-tract per-method BG r
+  pairwise_diffs.csv                     # Bootstrap pairwise separability
+  RESULTS.md                             # Narrative summary
+
+output/m2_n20_recovery/
+  {target}_{architecture}/
+    predictions.csv
+    per_tract_metrics.csv
+    run_meta.json
+  summary/
+    summary_stats.csv
+    pivot_pearson_r.csv
+    pivot_rmse.csv
+
+output/m3_n20_baselines/
+  {target}/
+    per_tract_metrics.csv
+    run_meta.json
+  summary/
+    baseline_summary_stats.csv
+    lift_table.csv
+    lift_summary.csv
+    per_tract_metrics.csv
+```

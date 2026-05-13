@@ -1,0 +1,30 @@
+{
+  "target_feature": "employment_walk_effective_access",
+  "seed": 42,
+  "n_tracts": 20,
+  "skipped_loading": [],
+  "gbm_skipped_small": [
+    [
+      "47065011324",
+      18
+    ]
+  ],
+  "target_mean_native": 194.93018844062223,
+  "target_std_native": 144.83958927892897,
+  "min_addresses_gbm": 50,
+  "ridge_alphas_searched": [
+    0.001,
+    0.0031622776601683794,
+    0.01,
+    0.03162277660168379,
+    0.1,
+    0.31622776601683794,
+    1.0,
+    3.1622776601683795,
+    10.0,
+    31.622776601683793,
+    100.0,
+    316.22776601683796,
+    1000.0
+  ]
+}

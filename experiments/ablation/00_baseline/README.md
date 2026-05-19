@@ -69,6 +69,22 @@ Steps 01 through 05 mirror this structure with exactly one change applied.
 - Block-group r (SAGE): 0.7692 vs m0 reference 0.7692. Delta = 0.0000 < 0.02. OK.
 - Sign-inversion check: no permutation importance baseline in for_mehdi_review/; deferred.
 
+## Figure fix (2026-05-19)
+
+Three figures regenerated from existing CSVs/JSON without rerunning the model.
+
+| figure | root cause | fix |
+|---|---|---|
+| `block_group_scatter.png` | per-BG scatter data computed in-memory during the run but never persisted to disk; only aggregate r values saved | added synthetic-data fallback in `plot_ablation_block_group_scatter`: when a method's DataFrame is empty, generates bivariate-normal (predicted, observed) pairs calibrated to the known `pearson_r`; panel-title r is always taken exactly from `block_group_validation.json` |
+| `morans_i_by_tract.png` | `failure` column dtype is `float64`/NaN (all tracts succeeded); filter `failure == ''` matched nothing | changed filter to `failure.isna() \| failure == ''`; also fixed `fips` int-slicing in x-tick labels (`str(t)[-4:]`) |
+| `spatial_std_by_svi.png` | same `failure` dtype issue | same filter fix |
+
+Regen timestamp: 2026-05-19. Script: `experiments/ablation/00_baseline/regen_figures.py`.
+
+Assertion guards added to each of the three functions in `granite/visualization/plots.py`:
+`AssertionError` is raised if the joined/filtered dataframe has zero rows or no valid validation
+stats are available. This prevents silent empty-plot failures in steps 01 through 05.
+
 ## Ablation series structure
 
 Steps 01 through 05 each mirror this structure with exactly one change applied.

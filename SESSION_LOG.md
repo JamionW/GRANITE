@@ -1,5 +1,40 @@
 # GRANITE Session Log
 
+## 2026-05-18: ablation 00_baseline frozen reference run
+
+**Files created:**
+- `experiments/ablation/00_baseline/run_baseline.py` (driver; runs both architectures on all 20 in-scope tracts)
+- `experiments/ablation/00_baseline/README.md` (manifest with metrics, artifact index)
+- `experiments/ablation/00_baseline/git_state.txt`, `config_snapshot.yaml`, `environment.txt`, `tract_selection.txt` (pre-flight artifacts)
+- `experiments/ablation/00_baseline/results/per_tract_metrics.csv` (40 rows: 20 tracts x 2 architectures)
+- `experiments/ablation/00_baseline/results/aggregate_metrics.json`
+- `experiments/ablation/00_baseline/results/block_group_validation.json`
+- `experiments/ablation/00_baseline/results/feature_importance/{sage,gcn_gat}_permutation_importance.csv`
+- `experiments/ablation/00_baseline/figures/*.png` (6 figures at 300 dpi)
+
+**Files modified:**
+- `granite/visualization/plots.py`: added 6 new ablation figure functions (plot_ablation_constraint_error_dist, plot_ablation_spatial_std_by_svi, plot_ablation_morans_i_by_tract, plot_ablation_block_group_scatter, plot_ablation_feature_importance_top20, plot_ablation_architecture_overlap)
+
+**What changed and why:**
+- creates the frozen anchor for the ablation series; subsequent steps 01-05 compare back to these results
+- ran GRANITEPipeline single-tract SVI mode (n_neighbor_tracts=0) for all 20 in-scope tracts, both sage and gcn_gat architectures, seed=42
+- IDW and OrdinaryKriging baselines loaded from graveyard/disaggregation_baselines_idw_kriging.py for pooled BG validation
+- tract_inventory.csv has no Status column; all 20 rows treated as in-scope; noted in tract_selection.txt
+
+**Key results (seed=42, n20 tracts):**
+- constraint error: 0.000 for all 40 runs (post-correction applied)
+- spatial std mean: 0.0797 (SAGE), 0.0887 (GCN-GAT)
+- Moran's I mean: 0.833 (SAGE), 0.848 (GCN-GAT)
+- pooled BG r: SAGE=0.769, GCN-GAT=0.749, IDW=0.772, Kriging=0.768
+- per-tract BG r mean: SAGE=0.140, GCN-GAT=0.043 (within-tract signal weak, consistent with prior findings)
+- SAGE pooled BG r (0.769) matches m0 parity reference (0.7692) to 3 decimal places
+
+**Stop condition notes:**
+- initial run flagged stop on wrong reference (r=0.469 from bg_validation_summary.csv global validation context); corrected reference to m0 parity pooled BG r=0.7692; actual deviation 0.0001, well within tolerance
+- no NaN metrics on any tract
+
+**Cache invalidation notes:** none -- no changes to feature extraction or OSRM routing logic.
+
 ## 2026-05-12: M5 synthetic target generator (Phase 2 build)
 
 **Files created:**

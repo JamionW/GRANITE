@@ -1,0 +1,4650 @@
+[baseline] start: 2026-05-18 23:21:34
+[baseline] in-scope tracts: 20
+[baseline] loading BG geodataframe...
+Hamilton County: 278 block groups with national SVI, 269 complete
+[baseline] loading spatial data...
+[baseline] fitting IDW and kriging baselines...
+
+[baseline] === architecture: GRANITE-SAGE ===
+[baseline] [1/40] GRANITE-SAGE | tract 1/20: 47065011324
+20 features have zero variance; proceeding
+20 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 18
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.0374
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 216
+   Distance-time correlations:
+     employment: r=-0.775 
+     healthcare: r=0.905 
+     grocery: r=0.174 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 25
+   Extremely high counts: 18
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.952 
+     healthcare: r=-0.922 
+     grocery: r=-0.846 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: B (89.9%)
+   Realistic Values: 97.3%
+   Feature Completeness: 72.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 20 features have zero variation
+     • 121 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: -0.0544
+   Interpretation: Weak spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.0281
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Weak
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1318
+   Std: 0.0447
+   Range: [0.0744, 0.2468]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.1740
+     Accessibility corr: 0.2902
+   Linear:
+     Spatial autocorr: 0.1445
+     Accessibility corr: -0.4208
+   Spatial:
+     Spatial autocorr: 0.3371
+     Accessibility corr: -0.0465
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: POOR
+   Learning quality score: 0.60
+   Has spatial structure: True
+   Meaningful accessibility relationship: False
+   Mean bias: 252.49%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+     Model learning is weak but present
+   -> Investigate training stability and feature engineering
+   -> Mean adjustment may be appropriate but monitor closely
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [2/40] GRANITE-SAGE | tract 2/20: 47065000700
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,784
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.1141
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 20251
+   Distance-time correlations:
+     employment: r=0.562 
+     healthcare: r=0.646 
+     grocery: r=0.768 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1243
+   Extremely high counts: 4008
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.559 
+     healthcare: r=-0.425 
+     grocery: r=-0.701 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.8%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 36 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.7774
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.0240
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Weak
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1041
+   Std: 0.0390
+   Range: [0.0512, 0.4145]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0132
+     Accessibility corr: 0.0195
+   Linear:
+     Spatial autocorr: 0.6514
+     Accessibility corr: 0.1041
+   Spatial:
+     Spatial autocorr: 0.9913
+     Accessibility corr: -0.1106
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: False
+   Mean bias: 8.75%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [3/40] GRANITE-SAGE | tract 3/20: 47065011447
+15 features have zero variance; proceeding
+15 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 853
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.1650
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 2
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 9936
+   Distance-time correlations:
+     employment: r=0.675 
+     healthcare: r=-0.744 
+     grocery: r=-0.243 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 3667
+   Extremely high counts: 309
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.702 
+     healthcare: r=-0.254 
+     grocery: r=-0.661 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: B (89.0%)
+   Realistic Values: 97.3%
+   Feature Completeness: 79.5%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 15 features have zero variation
+     • 37 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9385
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.3748
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1391
+   Std: 0.0494
+   Range: [0.0536, 0.2840]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0125
+     Accessibility corr: -0.0020
+   Linear:
+     Spatial autocorr: 0.4836
+     Accessibility corr: 0.1406
+   Spatial:
+     Spatial autocorr: 0.9942
+     Accessibility corr: -0.1497
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 15.71%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [4/40] GRANITE-SAGE | tract 4/20: 47065011325
+17 features have zero variance; proceeding
+17 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,099
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.1713
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 1
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 12917
+   Distance-time correlations:
+     employment: r=0.647 
+     healthcare: r=0.871 
+     grocery: r=0.319 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1469
+   Extremely high counts: 1123
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.377 
+     healthcare: r=-0.783 
+     grocery: r=-0.652 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (90.6%)
+   Realistic Values: 97.3%
+   Feature Completeness: 76.7%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 17 features have zero variation
+     • 43 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.8629
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.0822
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Weak
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1474
+   Std: 0.0689
+   Range: [0.0520, 0.3725]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0325
+     Accessibility corr: -0.0038
+   Linear:
+     Spatial autocorr: 0.6528
+     Accessibility corr: 0.0692
+   Spatial:
+     Spatial autocorr: 0.9917
+     Accessibility corr: 0.2557
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: False
+   Mean bias: 13.95%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 7
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [5/40] GRANITE-SAGE | tract 5/20: 47065000600
+11 features have zero variance; proceeding
+11 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,089
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.2235
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 6
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 23584
+   Distance-time correlations:
+     employment: r=0.667 
+     healthcare: r=0.670 
+     grocery: r=0.588 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 792
+   Extremely high counts: 5441
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.489 
+     healthcare: r=-0.617 
+     grocery: r=-0.714 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.1%)
+   Realistic Values: 97.3%
+   Feature Completeness: 84.9%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 11 features have zero variation
+     • 42 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9415
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.3349
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1941
+   Std: 0.0771
+   Range: [0.0606, 0.4720]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0083
+     Accessibility corr: -0.0308
+   Linear:
+     Spatial autocorr: 0.6807
+     Accessibility corr: 0.0321
+   Spatial:
+     Spatial autocorr: 0.9951
+     Accessibility corr: -0.3675
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 13.16%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 11
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [6/40] GRANITE-SAGE | tract 6/20: 47065011413
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,442
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.2735
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 3
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 17113
+   Distance-time correlations:
+     employment: r=0.383 
+     healthcare: r=0.813 
+     grocery: r=0.895 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1764
+   Extremely high counts: 1106
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.382 
+     healthcare: r=-0.739 
+     grocery: r=-0.680 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.3%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 46 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9200
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.4323
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.2298
+   Std: 0.1040
+   Range: [0.0755, 0.5114]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0144
+     Accessibility corr: 0.0064
+   Linear:
+     Spatial autocorr: 0.6306
+     Accessibility corr: 0.0866
+   Spatial:
+     Spatial autocorr: 0.9942
+     Accessibility corr: 0.1192
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 15.97%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [7/40] GRANITE-SAGE | tract 7/20: 47065011900
+15 features have zero variance; proceeding
+15 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 348
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.2822
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 4038
+   Distance-time correlations:
+     employment: r=0.499 
+     healthcare: r=0.923 
+     grocery: r=-0.227 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 322
+   Extremely high counts: 1048
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.173 
+     healthcare: r=-0.202 
+     grocery: r=-0.699 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: B (88.4%)
+   Realistic Values: 98.6%
+   Feature Completeness: 79.5%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 15 features have zero variation
+     • 29 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.7153
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.4031
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.2399
+   Std: 0.0915
+   Range: [0.1051, 0.4467]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0262
+     Accessibility corr: -0.0099
+   Linear:
+     Spatial autocorr: 0.4070
+     Accessibility corr: -0.1304
+   Spatial:
+     Spatial autocorr: 1.0204
+     Accessibility corr: 0.3655
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 15.00%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 13
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [8/40] GRANITE-SAGE | tract 8/20: 47065010431
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 3,394
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.3848
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 17
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 39158
+   Distance-time correlations:
+     employment: r=0.662 
+     healthcare: r=0.842 
+     grocery: r=0.616 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 6910
+   Extremely high counts: 4241
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.512 
+     healthcare: r=-0.848 
+     grocery: r=-0.900 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.1%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 38 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9768
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.5244
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.3754
+   Std: 0.1554
+   Range: [0.1032, 0.7300]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0106
+     Accessibility corr: -0.0263
+   Linear:
+     Spatial autocorr: 0.6752
+     Accessibility corr: 0.0589
+   Spatial:
+     Spatial autocorr: 0.9972
+     Accessibility corr: 0.1111
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 2.45%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [9/40] GRANITE-SAGE | tract 9/20: 47065010433
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,307
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.4540
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 7
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 26754
+   Distance-time correlations:
+     employment: r=0.528 
+     healthcare: r=0.761 
+     grocery: r=0.841 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1895
+   Extremely high counts: 4481
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.645 
+     healthcare: r=-0.478 
+     grocery: r=-0.845 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.1%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 40 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.7853
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.2138
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.4688
+   Std: 0.1640
+   Range: [0.1486, 0.9415]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0146
+     Accessibility corr: 0.0126
+   Linear:
+     Spatial autocorr: 0.6838
+     Accessibility corr: 0.2641
+   Spatial:
+     Spatial autocorr: 1.0212
+     Accessibility corr: 0.0048
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 3.27%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 12
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [10/40] GRANITE-SAGE | tract 10/20: 47065011326
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,738
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.5102
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 5
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 31875
+   Distance-time correlations:
+     employment: r=0.563 
+     healthcare: r=0.942 
+     grocery: r=0.723 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2639
+   Extremely high counts: 4867
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.566 
+     healthcare: r=-0.725 
+     grocery: r=-0.691 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.6%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 80 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9029
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.1234
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.5139
+   Std: 0.0673
+   Range: [0.1404, 0.6763]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0128
+     Accessibility corr: 0.0243
+   Linear:
+     Spatial autocorr: 0.6574
+     Accessibility corr: -0.1898
+   Spatial:
+     Spatial autocorr: 0.9968
+     Accessibility corr: -0.3147
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 0.72%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 12
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [11/40] GRANITE-SAGE | tract 11/20: 47065001800
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,411
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.5471
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 16304
+   Distance-time correlations:
+     employment: r=0.696 
+     healthcare: r=0.855 
+     grocery: r=0.868 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1923
+   Extremely high counts: 2781
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.243 
+     healthcare: r=-0.889 
+     grocery: r=-0.926 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.5%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 40 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.8933
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.7039
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.5295
+   Std: 0.0830
+   Range: [0.1240, 0.7546]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0289
+     Accessibility corr: -0.0152
+   Linear:
+     Spatial autocorr: 0.5327
+     Accessibility corr: -0.1387
+   Spatial:
+     Spatial autocorr: 0.9890
+     Accessibility corr: -0.1459
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 3.22%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [12/40] GRANITE-SAGE | tract 12/20: 47065011402
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,858
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.5759
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 33601
+   Distance-time correlations:
+     employment: r=0.680 
+     healthcare: r=0.135 
+     grocery: r=0.897 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2870
+   Extremely high counts: 4972
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.382 
+     healthcare: r=-0.673 
+     grocery: r=-0.072 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.4%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 34 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9102
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.3500
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.5508
+   Std: 0.0733
+   Range: [0.3129, 0.7365]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0026
+     Accessibility corr: -0.0321
+   Linear:
+     Spatial autocorr: 0.6978
+     Accessibility corr: -0.0718
+   Spatial:
+     Spatial autocorr: 1.0038
+     Accessibility corr: 0.1851
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 4.36%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [13/40] GRANITE-SAGE | tract 13/20: 47065011321
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 3,756
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.6955
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 5
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 44044
+   Distance-time correlations:
+     employment: r=0.452 
+     healthcare: r=0.889 
+     grocery: r=0.660 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2487
+   Extremely high counts: 6360
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.332 
+     healthcare: r=-0.233 
+     grocery: r=-0.666 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.9%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 42 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9272
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.2305
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.7087
+   Std: 0.1058
+   Range: [0.4877, 0.9858]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0084
+     Accessibility corr: 0.0012
+   Linear:
+     Spatial autocorr: 0.5336
+     Accessibility corr: 0.1019
+   Spatial:
+     Spatial autocorr: 1.0548
+     Accessibility corr: 0.3521
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 1.90%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [14/40] GRANITE-SAGE | tract 14/20: 47065011444
+10 features have zero variance; proceeding
+10 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,934
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.7088
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 6
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 22769
+   Distance-time correlations:
+     employment: r=0.534 
+     healthcare: r=0.829 
+     grocery: r=0.793 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1937
+   Extremely high counts: 4795
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.021 
+     healthcare: r=-0.695 
+     grocery: r=-0.501 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.9%)
+   Realistic Values: 97.3%
+   Feature Completeness: 86.3%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 10 features have zero variation
+     • 23 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9794
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.6834
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.7099
+   Std: 0.1327
+   Range: [0.5026, 0.9809]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0039
+     Accessibility corr: 0.0051
+   Linear:
+     Spatial autocorr: 0.5859
+     Accessibility corr: 0.1340
+   Spatial:
+     Spatial autocorr: 0.9963
+     Accessibility corr: 0.2425
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 0.16%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 11
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [15/40] GRANITE-SAGE | tract 15/20: 47065010435
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,780
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.7153
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 3
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 32080
+   Distance-time correlations:
+     employment: r=0.569 
+     healthcare: r=0.603 
+     grocery: r=0.719 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 4821
+   Extremely high counts: 4101
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.516 
+     healthcare: r=-0.843 
+     grocery: r=-0.797 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.4%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 45 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9499
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.1048
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.7328
+   Std: 0.1286
+   Range: [0.3738, 0.9983]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0070
+     Accessibility corr: 0.0295
+   Linear:
+     Spatial autocorr: 0.5714
+     Accessibility corr: -0.1374
+   Spatial:
+     Spatial autocorr: 0.9981
+     Accessibility corr: 0.2865
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 2.45%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 13
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [16/40] GRANITE-SAGE | tract 16/20: 47065011311
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,358
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.7464
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 27
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 27949
+   Distance-time correlations:
+     employment: r=0.642 
+     healthcare: r=0.680 
+     grocery: r=0.738 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 4104
+   Extremely high counts: 2573
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.700 
+     healthcare: r=-0.805 
+     grocery: r=-0.717 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.8%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 31 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9774
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.5295
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.7833
+   Std: 0.1066
+   Range: [0.5967, 0.9980]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0057
+     Accessibility corr: -0.0159
+   Linear:
+     Spatial autocorr: 0.6676
+     Accessibility corr: -0.2672
+   Spatial:
+     Spatial autocorr: 0.9979
+     Accessibility corr: 0.2976
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 4.94%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 11
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [17/40] GRANITE-SAGE | tract 17/20: 47065003400
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,559
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.8797
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 2
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 29728
+   Distance-time correlations:
+     employment: r=0.559 
+     healthcare: r=0.257 
+     grocery: r=0.824 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2559
+   Extremely high counts: 7677
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.782 
+     healthcare: r=-0.496 
+     grocery: r=-0.563 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.7%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 34 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9129
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.0169
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Weak
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.9133
+   Std: 0.0351
+   Range: [0.6879, 0.9804]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0124
+     Accessibility corr: -0.0107
+   Linear:
+     Spatial autocorr: 0.6575
+     Accessibility corr: 0.0250
+   Spatial:
+     Spatial autocorr: 0.9282
+     Accessibility corr: 0.1164
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: False
+   Mean bias: 3.81%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 11
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [18/40] GRANITE-SAGE | tract 18/20: 47065002400
+14 features have zero variance; proceeding
+14 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,918
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.8912
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 2
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 20910
+   Distance-time correlations:
+     employment: r=0.970 
+     healthcare: r=0.571 
+     grocery: r=0.885 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2191
+   Extremely high counts: 5813
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.805 
+     healthcare: r=-0.836 
+     grocery: r=-0.211 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.2%)
+   Realistic Values: 97.3%
+   Feature Completeness: 80.8%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 14 features have zero variation
+     • 47 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.8241
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.1880
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.9232
+   Std: 0.0354
+   Range: [0.5846, 0.9804]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0093
+     Accessibility corr: -0.0066
+   Linear:
+     Spatial autocorr: 0.4196
+     Accessibility corr: 0.0382
+   Spatial:
+     Spatial autocorr: 0.9954
+     Accessibility corr: -0.0305
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 3.59%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 11
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [19/40] GRANITE-SAGE | tract 19/20: 47065001200
+14 features have zero variance; proceeding
+14 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,420
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.9066
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 2
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 16428
+   Distance-time correlations:
+     employment: r=0.596 
+     healthcare: r=-0.577 
+     grocery: r=0.788 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1346
+   Extremely high counts: 4635
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.741 
+     healthcare: r=-0.368 
+     grocery: r=-0.878 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.1%)
+   Realistic Values: 97.3%
+   Feature Completeness: 80.8%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 14 features have zero variation
+     • 31 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.7856
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.1445
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.9381
+   Std: 0.0218
+   Range: [0.8397, 0.9740]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0048
+     Accessibility corr: -0.0608
+   Linear:
+     Spatial autocorr: 0.6216
+     Accessibility corr: 0.1584
+   Spatial:
+     Spatial autocorr: 0.9998
+     Accessibility corr: 0.0710
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 3.47%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 12
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [20/40] GRANITE-SAGE | tract 20/20: 47065001900
+11 features have zero variance; proceeding
+11 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,469
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.9804
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 7
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 26841
+   Distance-time correlations:
+     employment: r=0.757 
+     healthcare: r=0.948 
+     grocery: r=0.906 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 3108
+   Extremely high counts: 5534
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.356 
+     healthcare: r=-0.936 
+     grocery: r=-0.885 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.9%)
+   Realistic Values: 97.3%
+   Feature Completeness: 84.9%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 11 features have zero variation
+     • 29 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.7412
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.2109
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.9681
+   Std: 0.0141
+   Range: [0.8407, 0.9907]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0129
+     Accessibility corr: 0.0127
+   Linear:
+     Spatial autocorr: 0.7215
+     Accessibility corr: 0.0630
+   Spatial:
+     Spatial autocorr: 0.9966
+     Accessibility corr: -0.5539
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 1.25%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+
+[baseline] === architecture: GRANITE-GCNGAT ===
+[baseline] [21/40] GRANITE-GCNGAT | tract 1/20: 47065011324
+20 features have zero variance; proceeding
+20 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 18
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.0374
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 216
+   Distance-time correlations:
+     employment: r=-0.775 
+     healthcare: r=0.905 
+     grocery: r=0.174 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 25
+   Extremely high counts: 18
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.952 
+     healthcare: r=-0.922 
+     grocery: r=-0.846 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: B (89.9%)
+   Realistic Values: 97.3%
+   Feature Completeness: 72.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 20 features have zero variation
+     • 121 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.0472
+   Interpretation: Weak spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.1416
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1803
+   Std: 0.0733
+   Range: [0.1050, 0.3033]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.1740
+     Accessibility corr: 0.2902
+   Linear:
+     Spatial autocorr: 0.1445
+     Accessibility corr: -0.4208
+   Spatial:
+     Spatial autocorr: 0.3371
+     Accessibility corr: -0.0465
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 382.05%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [22/40] GRANITE-GCNGAT | tract 2/20: 47065000700
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,784
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.1141
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 20251
+   Distance-time correlations:
+     employment: r=0.562 
+     healthcare: r=0.646 
+     grocery: r=0.768 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1243
+   Extremely high counts: 4008
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.559 
+     healthcare: r=-0.425 
+     grocery: r=-0.701 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.8%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 36 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.7818
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.2387
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1109
+   Std: 0.0513
+   Range: [0.0344, 0.4570]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0132
+     Accessibility corr: 0.0195
+   Linear:
+     Spatial autocorr: 0.6514
+     Accessibility corr: 0.1041
+   Spatial:
+     Spatial autocorr: 0.9913
+     Accessibility corr: -0.1106
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 2.79%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 8
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [23/40] GRANITE-GCNGAT | tract 3/20: 47065011447
+15 features have zero variance; proceeding
+15 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 853
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.1650
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 2
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 9936
+   Distance-time correlations:
+     employment: r=0.675 
+     healthcare: r=-0.744 
+     grocery: r=-0.243 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 3667
+   Extremely high counts: 309
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.702 
+     healthcare: r=-0.254 
+     grocery: r=-0.661 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: B (89.0%)
+   Realistic Values: 97.3%
+   Feature Completeness: 79.5%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 15 features have zero variation
+     • 37 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.8347
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.1251
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1417
+   Std: 0.0520
+   Range: [0.0347, 0.3738]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0125
+     Accessibility corr: -0.0020
+   Linear:
+     Spatial autocorr: 0.4836
+     Accessibility corr: 0.1406
+   Spatial:
+     Spatial autocorr: 0.9942
+     Accessibility corr: -0.1497
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 14.14%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [24/40] GRANITE-GCNGAT | tract 4/20: 47065011325
+17 features have zero variance; proceeding
+17 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,099
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.1713
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 1
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 12917
+   Distance-time correlations:
+     employment: r=0.647 
+     healthcare: r=0.871 
+     grocery: r=0.319 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1469
+   Extremely high counts: 1123
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.377 
+     healthcare: r=-0.783 
+     grocery: r=-0.652 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (90.6%)
+   Realistic Values: 97.3%
+   Feature Completeness: 76.7%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 17 features have zero variation
+     • 43 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.8395
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.5833
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1526
+   Std: 0.0765
+   Range: [0.0338, 0.4120]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0325
+     Accessibility corr: -0.0038
+   Linear:
+     Spatial autocorr: 0.6528
+     Accessibility corr: 0.0692
+   Spatial:
+     Spatial autocorr: 0.9917
+     Accessibility corr: 0.2557
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 10.92%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 11
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [25/40] GRANITE-GCNGAT | tract 5/20: 47065000600
+11 features have zero variance; proceeding
+11 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,089
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.2235
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 6
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 23584
+   Distance-time correlations:
+     employment: r=0.667 
+     healthcare: r=0.670 
+     grocery: r=0.588 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 792
+   Extremely high counts: 5441
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.489 
+     healthcare: r=-0.617 
+     grocery: r=-0.714 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.1%)
+   Realistic Values: 97.3%
+   Feature Completeness: 84.9%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 11 features have zero variation
+     • 42 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.8667
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.1450
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.1967
+   Std: 0.0724
+   Range: [0.0417, 0.4549]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0083
+     Accessibility corr: -0.0308
+   Linear:
+     Spatial autocorr: 0.6807
+     Accessibility corr: 0.0321
+   Spatial:
+     Spatial autocorr: 0.9951
+     Accessibility corr: -0.3675
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 11.97%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [26/40] GRANITE-GCNGAT | tract 6/20: 47065011413
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,442
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.2735
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 3
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 17113
+   Distance-time correlations:
+     employment: r=0.383 
+     healthcare: r=0.813 
+     grocery: r=0.895 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1764
+   Extremely high counts: 1106
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.382 
+     healthcare: r=-0.739 
+     grocery: r=-0.680 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.3%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 46 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9569
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.5923
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.2557
+   Std: 0.1147
+   Range: [0.0659, 0.5108]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0144
+     Accessibility corr: 0.0064
+   Linear:
+     Spatial autocorr: 0.6306
+     Accessibility corr: 0.0866
+   Spatial:
+     Spatial autocorr: 0.9942
+     Accessibility corr: 0.1192
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 6.50%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 12
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [27/40] GRANITE-GCNGAT | tract 7/20: 47065011900
+15 features have zero variance; proceeding
+15 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 348
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.2822
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 4038
+   Distance-time correlations:
+     employment: r=0.499 
+     healthcare: r=0.923 
+     grocery: r=-0.227 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 322
+   Extremely high counts: 1048
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.173 
+     healthcare: r=-0.202 
+     grocery: r=-0.699 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: B (88.4%)
+   Realistic Values: 98.6%
+   Feature Completeness: 79.5%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 15 features have zero variation
+     • 29 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9290
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.2512
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.2711
+   Std: 0.0853
+   Range: [0.0964, 0.4181]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0262
+     Accessibility corr: -0.0099
+   Linear:
+     Spatial autocorr: 0.4070
+     Accessibility corr: -0.1304
+   Spatial:
+     Spatial autocorr: 1.0204
+     Accessibility corr: 0.3655
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 3.93%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 12
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [28/40] GRANITE-GCNGAT | tract 8/20: 47065010431
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 3,394
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.3848
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 17
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 39158
+   Distance-time correlations:
+     employment: r=0.662 
+     healthcare: r=0.842 
+     grocery: r=0.616 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 6910
+   Extremely high counts: 4241
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.512 
+     healthcare: r=-0.848 
+     grocery: r=-0.900 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.1%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 38 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9503
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.1612
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.4169
+   Std: 0.0765
+   Range: [0.1548, 0.6136]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0106
+     Accessibility corr: -0.0263
+   Linear:
+     Spatial autocorr: 0.6752
+     Accessibility corr: 0.0589
+   Spatial:
+     Spatial autocorr: 0.9972
+     Accessibility corr: 0.1111
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 8.33%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [29/40] GRANITE-GCNGAT | tract 9/20: 47065010433
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,307
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.4540
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 7
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 26754
+   Distance-time correlations:
+     employment: r=0.528 
+     healthcare: r=0.761 
+     grocery: r=0.841 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1895
+   Extremely high counts: 4481
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.645 
+     healthcare: r=-0.478 
+     grocery: r=-0.845 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.1%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 40 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.8547
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: 0.1000
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Weak
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.4545
+   Std: 0.1132
+   Range: [0.2222, 0.8993]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0146
+     Accessibility corr: 0.0126
+   Linear:
+     Spatial autocorr: 0.6838
+     Accessibility corr: 0.2641
+   Spatial:
+     Spatial autocorr: 1.0212
+     Accessibility corr: 0.0048
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: False
+   Mean bias: 0.10%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 7
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [30/40] GRANITE-GCNGAT | tract 10/20: 47065011326
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,738
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.5102
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 5
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 31875
+   Distance-time correlations:
+     employment: r=0.563 
+     healthcare: r=0.942 
+     grocery: r=0.723 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2639
+   Extremely high counts: 4867
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.566 
+     healthcare: r=-0.725 
+     grocery: r=-0.691 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.6%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 80 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9763
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.3901
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.5245
+   Std: 0.1681
+   Range: [0.1409, 0.8954]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0128
+     Accessibility corr: 0.0243
+   Linear:
+     Spatial autocorr: 0.6574
+     Accessibility corr: -0.1898
+   Spatial:
+     Spatial autocorr: 0.9968
+     Accessibility corr: -0.3147
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 2.80%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [31/40] GRANITE-GCNGAT | tract 11/20: 47065001800
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,411
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.5471
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 16304
+   Distance-time correlations:
+     employment: r=0.696 
+     healthcare: r=0.855 
+     grocery: r=0.868 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1923
+   Extremely high counts: 2781
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.243 
+     healthcare: r=-0.889 
+     grocery: r=-0.926 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.5%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 40 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9375
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.5410
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.5481
+   Std: 0.1426
+   Range: [0.0731, 0.9378]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0289
+     Accessibility corr: -0.0152
+   Linear:
+     Spatial autocorr: 0.5327
+     Accessibility corr: -0.1387
+   Spatial:
+     Spatial autocorr: 0.9890
+     Accessibility corr: -0.1459
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 0.19%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [32/40] GRANITE-GCNGAT | tract 12/20: 47065011402
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,858
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.5759
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 0
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 33601
+   Distance-time correlations:
+     employment: r=0.680 
+     healthcare: r=0.135 
+     grocery: r=0.897 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2870
+   Extremely high counts: 4972
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.382 
+     healthcare: r=-0.673 
+     grocery: r=-0.072 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.4%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 34 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9860
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.4075
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.5726
+   Std: 0.1587
+   Range: [0.1038, 0.9128]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0026
+     Accessibility corr: -0.0321
+   Linear:
+     Spatial autocorr: 0.6978
+     Accessibility corr: -0.0718
+   Spatial:
+     Spatial autocorr: 1.0038
+     Accessibility corr: 0.1851
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 0.58%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [33/40] GRANITE-GCNGAT | tract 13/20: 47065011321
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 3,756
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.6955
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 5
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 44044
+   Distance-time correlations:
+     employment: r=0.452 
+     healthcare: r=0.889 
+     grocery: r=0.660 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2487
+   Extremely high counts: 6360
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.332 
+     healthcare: r=-0.233 
+     grocery: r=-0.666 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.9%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 42 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9967
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.4881
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.6642
+   Std: 0.1032
+   Range: [0.4766, 0.9160]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0084
+     Accessibility corr: 0.0012
+   Linear:
+     Spatial autocorr: 0.5336
+     Accessibility corr: 0.1019
+   Spatial:
+     Spatial autocorr: 1.0548
+     Accessibility corr: 0.3521
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 4.50%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [34/40] GRANITE-GCNGAT | tract 14/20: 47065011444
+10 features have zero variance; proceeding
+10 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,934
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.7088
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 6
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 22769
+   Distance-time correlations:
+     employment: r=0.534 
+     healthcare: r=0.829 
+     grocery: r=0.793 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1937
+   Extremely high counts: 4795
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.021 
+     healthcare: r=-0.695 
+     grocery: r=-0.501 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.9%)
+   Realistic Values: 97.3%
+   Feature Completeness: 86.3%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 10 features have zero variation
+     • 23 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9422
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.0322
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Weak
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.7283
+   Std: 0.1145
+   Range: [0.4125, 0.9585]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: 0.0039
+     Accessibility corr: 0.0051
+   Linear:
+     Spatial autocorr: 0.5859
+     Accessibility corr: 0.1340
+   Spatial:
+     Spatial autocorr: 0.9963
+     Accessibility corr: 0.2425
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: False
+   Mean bias: 2.75%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 14
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [35/40] GRANITE-GCNGAT | tract 15/20: 47065010435
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,780
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.7153
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 3
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 32080
+   Distance-time correlations:
+     employment: r=0.569 
+     healthcare: r=0.603 
+     grocery: r=0.719 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 4821
+   Extremely high counts: 4101
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.516 
+     healthcare: r=-0.843 
+     grocery: r=-0.797 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.4%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 45 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9686
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.6319
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.6985
+   Std: 0.1388
+   Range: [0.4231, 0.9347]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0070
+     Accessibility corr: 0.0295
+   Linear:
+     Spatial autocorr: 0.5714
+     Accessibility corr: -0.1374
+   Spatial:
+     Spatial autocorr: 0.9981
+     Accessibility corr: 0.2865
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 2.34%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [36/40] GRANITE-GCNGAT | tract 16/20: 47065011311
+12 features have zero variance; proceeding
+12 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,358
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.7464
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 27
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 27949
+   Distance-time correlations:
+     employment: r=0.642 
+     healthcare: r=0.680 
+     grocery: r=0.738 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 4104
+   Extremely high counts: 2573
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.700 
+     healthcare: r=-0.805 
+     grocery: r=-0.717 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.8%)
+   Realistic Values: 97.3%
+   Feature Completeness: 83.6%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 12 features have zero variation
+     • 31 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.9507
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.5901
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.7481
+   Std: 0.0958
+   Range: [0.5420, 0.9263]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0057
+     Accessibility corr: -0.0159
+   Linear:
+     Spatial autocorr: 0.6676
+     Accessibility corr: -0.2672
+   Spatial:
+     Spatial autocorr: 0.9979
+     Accessibility corr: 0.2976
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 0.23%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [37/40] GRANITE-GCNGAT | tract 17/20: 47065003400
+13 features have zero variance; proceeding
+13 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,559
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.8797
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 2
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 29728
+   Distance-time correlations:
+     employment: r=0.559 
+     healthcare: r=0.257 
+     grocery: r=0.824 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2559
+   Extremely high counts: 7677
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.782 
+     healthcare: r=-0.496 
+     grocery: r=-0.563 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.7%)
+   Realistic Values: 97.3%
+   Feature Completeness: 82.2%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 13 features have zero variation
+     • 34 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.7807
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.0879
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Weak
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.9087
+   Std: 0.0439
+   Range: [0.7262, 0.9857]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0124
+     Accessibility corr: -0.0107
+   Linear:
+     Spatial autocorr: 0.6575
+     Accessibility corr: 0.0250
+   Spatial:
+     Spatial autocorr: 0.9282
+     Accessibility corr: 0.1164
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: GOOD
+   Learning quality score: 0.80
+   Has spatial structure: True
+   Meaningful accessibility relationship: False
+   Mean bias: 3.29%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [38/40] GRANITE-GCNGAT | tract 18/20: 47065002400
+14 features have zero variance; proceeding
+14 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,918
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.8912
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 2
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 20910
+   Distance-time correlations:
+     employment: r=0.970 
+     healthcare: r=0.571 
+     grocery: r=0.885 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 2191
+   Extremely high counts: 5813
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.805 
+     healthcare: r=-0.836 
+     grocery: r=-0.211 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (92.2%)
+   Realistic Values: 97.3%
+   Feature Completeness: 80.8%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 14 features have zero variation
+     • 47 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.8275
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.6540
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.9182
+   Std: 0.0378
+   Range: [0.7562, 0.9842]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0093
+     Accessibility corr: -0.0066
+   Linear:
+     Spatial autocorr: 0.4196
+     Accessibility corr: 0.0382
+   Spatial:
+     Spatial autocorr: 0.9954
+     Accessibility corr: -0.0305
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 3.03%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 9
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [39/40] GRANITE-GCNGAT | tract 19/20: 47065001200
+14 features have zero variance; proceeding
+14 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 1,420
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.9066
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 2
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 16428
+   Distance-time correlations:
+     employment: r=0.596 
+     healthcare: r=-0.577 
+     grocery: r=0.788 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 1346
+   Extremely high counts: 4635
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.741 
+     healthcare: r=-0.368 
+     grocery: r=-0.878 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (91.1%)
+   Realistic Values: 97.3%
+   Feature Completeness: 80.8%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 14 features have zero variation
+     • 31 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Distance-time relationship broken
+   Priority Fixes:
+     MEDIUM: Distance-time relationship broken (confidence: 80.0%)
+
+6. RECOMMENDED ACTIONS
+   -> Debug distance calculation (geodesic vs projected)
+   -> Verify speed assumptions for different modes
+   -> Check for unit conversion errors (degrees vs km vs miles)
+   -> Validate geographic coordinate systems
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.8949
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.2814
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Moderate
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.9307
+   Std: 0.0500
+   Range: [0.6964, 0.9872]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0048
+     Accessibility corr: -0.0608
+   Linear:
+     Spatial autocorr: 0.6216
+     Accessibility corr: 0.1584
+   Spatial:
+     Spatial autocorr: 0.9998
+     Accessibility corr: 0.0710
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 2.66%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 7
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+7. ENHANCED RECOMMENDATIONS
+   -> HIGH: Limit k-NN to 4-6 neighbors, add accessibility-based edges
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+[baseline] [40/40] GRANITE-GCNGAT | tract 20/20: 47065001900
+11 features have zero variance; proceeding
+11 features have zero variance; proceeding
+[AccessValidator] Starting accessibility feature validation...
+[AccessValidator] 1. Validating travel time computations...
+[AccessValidator] 2. Validating destination accessibility logic...
+[AccessValidator] 3. Validating feature engineering...
+[AccessValidator] 4. Validating theoretical consistency...
+[AccessValidator] 5. Validating geographic patterns...
+[AccessValidator] 6. Assessing data quality...
+[AccessValidator] 7. Performing root cause analysis...
+
+================================================================================
+ACCESSIBILITY FEATURE VALIDATION REPORT
+================================================================================
+
+DATA OVERVIEW
+  Addresses: 2,469
+  Features: 73
+  Destinations: 1530
+  Target SVI: 0.9804
+
+1. TRAVEL TIME VALIDATION
+   Negative times: 0
+   Zero times: 7
+   Unrealistic times (>5hrs): 0
+   Reasonable times (1min-2hrs): 26841
+   Distance-time correlations:
+     employment: r=0.757 
+     healthcare: r=0.948 
+     grocery: r=0.906 
+
+2. DESTINATION ACCESSIBILITY VALIDATION
+   Negative counts: 0
+   Zero counts: 3108
+   Extremely high counts: 5534
+   Count progression validity:
+     employment: 100.0% 
+     healthcare: 100.0% 
+     grocery: 100.0% 
+
+3. THEORETICAL CONSISTENCY VALIDATION
+   Time-Count correlations (should be negative):
+     employment: r=-0.356 
+     healthcare: r=-0.936 
+     grocery: r=-0.885 
+
+4. DATA QUALITY ASSESSMENT
+   Overall Quality: A (93.9%)
+   Realistic Values: 97.3%
+   Feature Completeness: 84.9%
+   Specific Issues:
+     • Extremely high travel times detected (>8 hours)
+     • 11 features have zero variation
+     • 29 pairs of features are perfectly correlated
+
+5. ROOT CAUSE ANALYSIS
+   Primary Diagnosis: Unknown
+   Priority Fixes:
+
+6. RECOMMENDED ACTIONS
+
+================================================================================
+
+============================================================
+SPATIAL LEARNING DIAGNOSTIC REPORT
+============================================================
+
+1. SPATIAL AUTOCORRELATION
+   Moran's I: 0.6442
+   Interpretation: Strong spatial clustering
+
+2. ACCESSIBILITY-VULNERABILITY RELATIONSHIP
+   Overall correlation: -0.3020
+   Expected: Negative correlation (better access -> lower vulnerability)
+   Strength: Strong
+
+3. PREDICTION CHARACTERISTICS
+   Mean: 0.9702
+   Std: 0.0189
+   Range: [0.8118, 0.9952]
+
+4. BASELINE COMPARISONS
+   Random:
+     Spatial autocorr: -0.0129
+     Accessibility corr: 0.0127
+   Linear:
+     Spatial autocorr: 0.7215
+     Accessibility corr: 0.0630
+   Spatial:
+     Spatial autocorr: 0.9966
+     Accessibility corr: -0.5539
+
+5. LEARNING QUALITY ASSESSMENT
+   Overall verdict: EXCELLENT
+   Learning quality score: 1.00
+   Has spatial structure: True
+   Meaningful accessibility relationship: True
+   Mean bias: 1.04%
+
+--- ENHANCED DIAGNOSTIC ANALYSIS ---
+   Feature quality issues detected: 1
+   Features with wrong correlation direction: 10
+   Primary root cause: Unknown
+
+6. RECOMMENDATIONS
+    Model appears to be learning meaningful patterns
+   -> Mean adjustment is likely correcting systematic bias
+   -> Continue monitoring spatial and accessibility relationships
+
+============================================================
+Saved: /workspaces/GRANITE/output/ablation_baseline_scratch/disaggregation_comparison.png
+
+[baseline] per_tract_metrics.csv written (40 rows)
+[baseline] aggregate_metrics.json written
+[baseline] computing pooled BG validation...
+[baseline] block_group_validation.json written
+[baseline] STOP: SAGE pooled BG r=0.769 deviates from reference 0.469 by 0.300 > 0.02
+[baseline] Investigate before proceeding to ablation steps 01-05.
+[baseline] feature_importance/sage_permutation_importance.csv written
+[baseline] feature_importance/gcn_gat_permutation_importance.csv written
+[baseline] NOTE: sign-inversion check vs for_mehdi_review: no permutation importance baseline available in for_mehdi_review/; skipped. Run manually if needed.

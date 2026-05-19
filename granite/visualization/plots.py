@@ -1348,3 +1348,329 @@ def create_disaggregation_visualizations(comparison_results: Dict,
     
     print(f"\nVisualizations saved to {output_dir}")
     return outputs
+
+
+# =============================================================================
+# ablation baseline figures (00_baseline and subsequent steps)
+# =============================================================================
+
+def plot_ablation_constraint_error_dist(df: pd.DataFrame, output_path: str) -> None:
+    """Per-architecture histograms of constraint_error, shared x-axis.
+
+    Args:
+        df: per_tract_metrics DataFrame with columns architecture, constraint_error.
+        output_path: PNG save path.
+    """
+    archs = sorted(df['architecture'].unique())
+    n = len(archs)
+    fig, axes = plt.subplots(1, n, figsize=(5 * n, 4), sharey=False)
+    if n == 1:
+        axes = [axes]
+
+    colors = {'sage': '#2196F3', 'gcn_gat': '#FF5722'}
+    labels = {'sage': 'GRANITE-SAGE', 'gcn_gat': 'GRANITE-GCNGAT'}
+
+    all_vals = df['constraint_error'].dropna().values
+    x_max = np.percentile(all_vals, 99) * 1.1 if len(all_vals) > 0 else 0.1
+
+    for ax, arch in zip(axes, archs):
+        vals = df[df['architecture'] == arch]['constraint_error'].dropna().values
+        ax.hist(vals, bins=15, color=colors.get(arch, '#888888'),
+                alpha=0.8, edgecolor='white', linewidth=0.5)
+        ax.axvline(np.mean(vals), color='black', linestyle='--', linewidth=1.2,
+                   label=f'mean={np.mean(vals):.4f}')
+        ax.set_xlim(0, x_max)
+        ax.set_xlabel('constraint error (absolute)', fontsize=10)
+        ax.set_ylabel('count', fontsize=10)
+        ax.set_title(labels.get(arch, arch), fontsize=11)
+        ax.legend(fontsize=9)
+        ax.tick_params(labelsize=9)
+
+    fig.suptitle('Constraint Error Distribution by Architecture', fontsize=12, y=1.02)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_ablation_spatial_std_by_svi(df: pd.DataFrame, output_path: str) -> None:
+    """Scatter of within-tract std versus tract SVI, one series per architecture.
+
+    Args:
+        df: per_tract_metrics DataFrame.
+        output_path: PNG save path.
+    """
+    fig, ax = plt.subplots(figsize=(7, 5))
+
+    arch_styles = {
+        'sage':    {'color': '#2196F3', 'marker': 'o', 'label': 'GRANITE-SAGE'},
+        'gcn_gat': {'color': '#FF5722', 'marker': 's', 'label': 'GRANITE-GCNGAT'},
+    }
+
+    for arch, style in arch_styles.items():
+        sub = df[(df['architecture'] == arch) & (df['failure'] == '')].copy()
+        if len(sub) == 0:
+            continue
+        ax.scatter(sub['tract_svi'], sub['spatial_std'],
+                   color=style['color'], marker=style['marker'],
+                   alpha=0.7, s=50, label=style['label'])
+        # trend line
+        if len(sub) > 2:
+            z = np.polyfit(sub['tract_svi'].values, sub['spatial_std'].values, 1)
+            x_line = np.linspace(sub['tract_svi'].min(), sub['tract_svi'].max(), 100)
+            ax.plot(x_line, np.polyval(z, x_line),
+                    color=style['color'], linestyle='--', linewidth=1, alpha=0.6)
+
+    ax.set_xlabel('tract SVI', fontsize=11)
+    ax.set_ylabel('spatial std (within-tract)', fontsize=11)
+    ax.set_title('Within-Tract Prediction Std vs Tract SVI', fontsize=12)
+    ax.legend(fontsize=10)
+    ax.tick_params(labelsize=9)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_ablation_morans_i_by_tract(df: pd.DataFrame, output_path: str) -> None:
+    """Strip plot of Moran's I per architecture, tracts sorted by SVI.
+
+    Args:
+        df: per_tract_metrics DataFrame.
+        output_path: PNG save path.
+    """
+    sub = df[df['failure'] == ''].copy()
+    if len(sub) == 0:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.text(0.5, 0.5, 'no data', ha='center', va='center', transform=ax.transAxes)
+        fig.savefig(output_path, dpi=300)
+        plt.close(fig)
+        return
+
+    # sort tracts by svi for x-axis ordering
+    tract_order = (
+        sub.groupby('fips')['tract_svi'].first()
+        .sort_values()
+        .index.tolist()
+    )
+
+    fig, ax = plt.subplots(figsize=(max(10, len(tract_order) * 0.5), 5))
+
+    arch_styles = {
+        'sage':    {'color': '#2196F3', 'marker': 'o', 'label': 'GRANITE-SAGE', 'offset': -0.12},
+        'gcn_gat': {'color': '#FF5722', 'marker': 's', 'label': 'GRANITE-GCNGAT', 'offset': 0.12},
+    }
+
+    x_positions = {fips: i for i, fips in enumerate(tract_order)}
+
+    for arch, style in arch_styles.items():
+        arch_sub = sub[sub['architecture'] == arch].copy()
+        xs = [x_positions[f] + style['offset'] for f in arch_sub['fips'] if f in x_positions]
+        ys = [arch_sub.loc[arch_sub['fips'] == f, 'morans_i'].values[0]
+              for f in arch_sub['fips'] if f in x_positions]
+        ax.scatter(xs, ys, color=style['color'], marker=style['marker'],
+                   alpha=0.8, s=60, label=style['label'])
+
+    ax.axhline(0, color='gray', linestyle='-', linewidth=0.8, alpha=0.5)
+    ax.set_xticks(range(len(tract_order)))
+    ax.set_xticklabels(
+        [f'{t[-4:]}\n({sub.loc[sub["fips"]==t, "tract_svi"].values[0]:.2f})' if len(sub[sub['fips']==t]) > 0 else t[-4:] for t in tract_order],
+        fontsize=8, rotation=0
+    )
+    ax.set_xlabel('tract (sorted by SVI)', fontsize=11)
+    ax.set_ylabel("Moran's I", fontsize=11)
+    ax.set_title("Moran's I by Tract (sorted by SVI)", fontsize=12)
+    ax.legend(fontsize=10)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_ablation_block_group_scatter(
+    per_tract_bg: dict,
+    bg_validation: dict,
+    output_path: str
+) -> None:
+    """Predicted vs observed block-group SVI with 1:1 line, four panels.
+
+    Args:
+        per_tract_bg: dict mapping label -> DataFrame with predicted_svi, SVI columns.
+        bg_validation: dict mapping label -> {pearson_r, ...}.
+        output_path: PNG save path.
+    """
+    panel_order = ['sage', 'gcn_gat', 'IDW', 'kriging']
+    panel_labels = {
+        'sage':    'GRANITE-SAGE',
+        'gcn_gat': 'GRANITE-GCNGAT',
+        'IDW':     'IDW',
+        'kriging': 'Kriging',
+    }
+    colors = {
+        'sage':    '#2196F3',
+        'gcn_gat': '#FF5722',
+        'IDW':     '#4CAF50',
+        'kriging': '#9C27B0',
+    }
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    axes = axes.flatten()
+
+    for ax, key in zip(axes, panel_order):
+        df_bg = per_tract_bg.get(key, pd.DataFrame())
+        r = bg_validation.get(key, {}).get('pearson_r', float('nan'))
+        label = panel_labels.get(key, key)
+        color = colors.get(key, '#888888')
+
+        if df_bg is None or len(df_bg) == 0 or 'predicted_svi' not in df_bg.columns:
+            ax.text(0.5, 0.5, 'no data', ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f'{label}\nr = n/a', fontsize=11)
+            continue
+
+        p = df_bg['predicted_svi'].values.astype(float)
+        t = df_bg['SVI'].values.astype(float)
+        mask = np.isfinite(p) & np.isfinite(t)
+        p, t = p[mask], t[mask]
+
+        ax.scatter(t, p, alpha=0.5, s=25, color=color)
+        lo, hi = min(np.min(t), np.min(p)), max(np.max(t), np.max(p))
+        ax.plot([lo, hi], [lo, hi], 'k--', linewidth=1, alpha=0.6, label='1:1')
+        r_str = f'{r:.3f}' if isinstance(r, float) and not np.isnan(r) else 'n/a'
+        ax.set_title(f'{label}\nr = {r_str}', fontsize=11)
+        ax.set_xlabel('observed BG SVI', fontsize=10)
+        ax.set_ylabel('predicted BG SVI', fontsize=10)
+        ax.tick_params(labelsize=9)
+
+    fig.suptitle('Block-Group Validation: Predicted vs Observed SVI', fontsize=13, y=1.01)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_ablation_feature_importance_top20(
+    sage_imp: pd.DataFrame,
+    gcngat_imp: pd.DataFrame,
+    output_path: str
+) -> None:
+    """Top-20 features per architecture, side-by-side horizontal bar charts.
+
+    Args:
+        sage_imp: aggregated importance DataFrame for SAGE (columns: feature, mean_drop).
+        gcngat_imp: aggregated importance DataFrame for GCN-GAT.
+        output_path: PNG save path.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(14, 8))
+
+    for ax, imp_df, arch_label, color in [
+        (axes[0], sage_imp, 'GRANITE-SAGE', '#2196F3'),
+        (axes[1], gcngat_imp, 'GRANITE-GCNGAT', '#FF5722'),
+    ]:
+        if imp_df is None or len(imp_df) == 0:
+            ax.text(0.5, 0.5, 'no data', ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(arch_label)
+            continue
+
+        top = imp_df.head(20).copy()
+        top = top.sort_values('mean_drop', ascending=True)  # ascending for horizontal bar
+
+        ax.barh(range(len(top)), top['mean_drop'].values,
+                color=color, alpha=0.8, edgecolor='white')
+        ax.set_yticks(range(len(top)))
+        ax.set_yticklabels(top['feature'].values, fontsize=8)
+        ax.set_xlabel('mean drop in performance', fontsize=10)
+        ax.set_title(f'{arch_label}\n(top 20 by mean drop)', fontsize=11)
+        ax.tick_params(labelsize=9)
+
+    fig.suptitle('Permutation Feature Importance - Top 20 Features', fontsize=13)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_ablation_architecture_overlap(
+    sage_imp: pd.DataFrame,
+    gcngat_imp: pd.DataFrame,
+    output_path: str
+) -> None:
+    """Spearman rank correlation of feature importance between SAGE and GCN-GAT.
+
+    Left panel: rank-rank scatter. Right panel: text summary with Spearman rho.
+
+    Args:
+        sage_imp: aggregated importance DataFrame for SAGE.
+        gcngat_imp: aggregated importance DataFrame for GCN-GAT.
+        output_path: PNG save path.
+    """
+    from scipy.stats import spearmanr
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    ax_scatter, ax_text = axes
+
+    if (sage_imp is None or len(sage_imp) == 0 or
+            gcngat_imp is None or len(gcngat_imp) == 0):
+        ax_scatter.text(0.5, 0.5, 'no data', ha='center', va='center',
+                        transform=ax_scatter.transAxes)
+        ax_text.axis('off')
+        fig.savefig(output_path, dpi=300)
+        plt.close(fig)
+        return
+
+    # align on common features
+    merged = pd.merge(
+        sage_imp[['feature', 'mean_drop']].rename(columns={'mean_drop': 'sage'}),
+        gcngat_imp[['feature', 'mean_drop']].rename(columns={'mean_drop': 'gcngat'}),
+        on='feature', how='inner'
+    )
+
+    # assign ranks (higher importance = rank 1)
+    merged['sage_rank'] = merged['sage'].rank(ascending=False)
+    merged['gcngat_rank'] = merged['gcngat'].rank(ascending=False)
+
+    if len(merged) < 3:
+        ax_scatter.text(0.5, 0.5, 'insufficient overlap',
+                        ha='center', va='center', transform=ax_scatter.transAxes)
+        ax_text.axis('off')
+        fig.savefig(output_path, dpi=300)
+        plt.close(fig)
+        return
+
+    rho, p_val = spearmanr(merged['sage_rank'], merged['gcngat_rank'])
+
+    ax_scatter.scatter(merged['sage_rank'], merged['gcngat_rank'],
+                       alpha=0.6, s=40, color='#607D8B')
+    # 1:1 diagonal
+    max_rank = max(merged['sage_rank'].max(), merged['gcngat_rank'].max())
+    ax_scatter.plot([1, max_rank], [1, max_rank], 'r--', linewidth=1, alpha=0.5)
+    ax_scatter.set_xlabel('SAGE rank', fontsize=11)
+    ax_scatter.set_ylabel('GCN-GAT rank', fontsize=11)
+    ax_scatter.set_title(f'Feature Rank-Rank Scatter\nSpearman rho = {rho:.3f} (p = {p_val:.3g})',
+                         fontsize=11)
+    ax_scatter.tick_params(labelsize=9)
+
+    # text summary panel
+    ax_text.axis('off')
+    n_common = len(merged)
+    top10_sage = set(merged.nsmallest(10, 'sage_rank')['feature'])
+    top10_gcn = set(merged.nsmallest(10, 'gcngat_rank')['feature'])
+    overlap_top10 = top10_sage & top10_gcn
+
+    summary_lines = [
+        f'Spearman rho: {rho:.3f}',
+        f'p-value: {p_val:.3g}',
+        f'common features: {n_common}',
+        '',
+        f'top-10 overlap: {len(overlap_top10)}/10',
+        '',
+        'overlapping top-10 features:',
+    ]
+    for feat in sorted(overlap_top10):
+        summary_lines.append(f'  {feat}')
+
+    ax_text.text(0.05, 0.95, '\n'.join(summary_lines),
+                 va='top', ha='left', transform=ax_text.transAxes,
+                 fontsize=9, family='monospace',
+                 bbox=dict(boxstyle='round', facecolor='#f5f5f5', alpha=0.8))
+    ax_text.set_title('Architecture Overlap Summary', fontsize=11)
+
+    fig.suptitle('Feature Importance Agreement: SAGE vs GCN-GAT', fontsize=13)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)

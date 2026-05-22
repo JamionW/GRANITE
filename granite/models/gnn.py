@@ -716,6 +716,14 @@ class MultiTractGNNTrainer:
         self.ordering_min_gap = config.get('ordering_min_gap', 0.5)
         self.ordering_margin = config.get('ordering_margin', 0.02)
 
+        # fail-fast: smoothness_weight was removed (see experiments/ablation/03_smoothness/INSPECTION_FINDING.md)
+        if 'smoothness_weight' in config:
+            raise ValueError(
+                "smoothness_weight is no longer a valid config key. "
+                "The term was removed after ablation step 3 confirmed it is behaviorally inert. "
+                "See experiments/ablation/03_smoothness/INSPECTION_FINDING.md."
+            )
+
         # Set seed for optimizer initialization
         set_random_seed(seed)
 
@@ -1220,9 +1228,6 @@ class MultiTractGNNTrainer:
         # 3. Bounds enforcement (always active)
         bounds_loss = torch.mean(F.relu(predictions - 1.0)) + torch.mean(F.relu(-predictions))
 
-        # 4. Cross-tract smoothness
-        smoothness_loss = self._compute_cross_tract_smoothness(predictions, tract_masks)
-
         # 5. Block group constraint losses
         bg_constraint_loss = torch.tensor(0.0, device=predictions.device)
         if block_group_targets is not None and block_group_masks is not None:
@@ -1251,8 +1256,7 @@ class MultiTractGNNTrainer:
             total_loss = (
                 self.constraint_weight * constraint_loss +
                 0.8 * variation_loss +
-                1.0 * bounds_loss +
-                0.1 * smoothness_loss
+                1.0 * bounds_loss
             )
             # add block group constraint if provided
             if block_group_targets is not None:
@@ -1265,8 +1269,7 @@ class MultiTractGNNTrainer:
             total_loss = (
                 0.0 * constraint_loss +     # No constraint pressure
                 2.0 * variation_loss +      # Strong variation encouragement
-                1.0 * bounds_loss +         # Keep valid range
-                0.5 * smoothness_loss       # Spatial structure
+                1.0 * bounds_loss           # Keep valid range
             )
 
         return {
@@ -1274,7 +1277,6 @@ class MultiTractGNNTrainer:
             'constraint': constraint_loss,
             'variation': variation_loss,
             'bounds': bounds_loss,
-            'smoothness': smoothness_loss,
             'bg_constraint': bg_constraint_loss,
             'ordering': ordering_loss
         }
@@ -1304,21 +1306,6 @@ class MultiTractGNNTrainer:
             'predictions': predictions.detach().numpy(),
             'learned_accessibility': learned_accessibility.detach().numpy()
         }
-    
-    def _compute_cross_tract_smoothness(self, predictions, tract_masks):
-        """Gentle smoothness penalty for extreme tract differences"""
-        
-        tract_means = []
-        for mask in tract_masks.values():
-            if mask.sum() > 0:
-                tract_means.append(predictions[mask].mean())
-        
-        if len(tract_means) > 1:
-            tract_means_tensor = torch.stack(tract_means)
-            range_penalty = (tract_means_tensor.max() - tract_means_tensor.min()) * 0.05
-            return range_penalty
-        else:
-            return torch.tensor(0.0, device=predictions.device)
     
     def _compute_overall_constraint_error(self, predictions, tract_targets, tract_masks):
         """Compute weighted average constraint error across tracts"""

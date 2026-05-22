@@ -32,7 +32,9 @@
 
 5. **Mechanism honesty (April 2026 audit).** Training uses multi-objective soft loss including a constraint term. Inference applies an additive mean-centering correction equal to the closed-form Euclidean projection onto the tract-mean constraint, also the base case of hierarchical forecast reconciliation. "Hard aggregate constraint enforcement acting as implicit regularizer" framing has been retired.
 
-6. **Pooled-versus-per-tract metric divergence (M0, May 2026).** Pooled BG r compresses between-tract and within-tract performance; tract-mean preservation drives most of the pooled signal. Per-tract BG r isolates within-tract allocation skill and reveals different method behavior. 
+6. **Pooled-versus-per-tract metric divergence (M0, May 2026).** Pooled BG r compresses between-tract and within-tract performance; tract-mean preservation drives most of the pooled signal. Per-tract BG r isolates within-tract allocation skill and reveals different method behavior.
+
+7. **Loss term audit: misnamed smoothness penalty (Step 3, May 2026).** `_compute_cross_tract_smoothness` computed a range penalty on tract-mean predictions with no graph structure; effective gradient coefficient was 0.005 at default config. A five-weight sweep (0.0 to 0.5, both architectures, 20 tracts) showed zero measurable effect on any metric -- the constraint loss swamps the smoothness gradient before it can reshape the prediction surface. The term has been removed from the production code. This is a dissertation-relevant finding: it demonstrates that the loss-term audit methodology can detect behaviorally inert components that persist in codebases without surfacing in standard evaluation. See `experiments/ablation/03_smoothness/INSPECTION_FINDING.md` for the full audit record.
 
 ---
 

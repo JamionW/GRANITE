@@ -1,5 +1,22 @@
 # GRANITE Session Log
 
+## 2026-05-22: ablation Step 3 cleanup -- remove misnamed smoothness loss
+
+**Files modified:**
+- `granite/models/gnn.py`: removed `_compute_cross_tract_smoothness` method; removed `smoothness_loss` computation and both call sites (constrained and unconstrained branches of `_compute_multi_tract_losses`); removed `'smoothness'` key from returned loss dict; replaced `self.smoothness_weight` init with a fail-fast guard that raises `ValueError` if `smoothness_weight` appears in any loaded config.
+- `config.yaml`: removed `smoothness_weight: 0.1` key.
+
+**Files created:**
+- `experiments/ablation/03_smoothness/INSPECTION_FINDING.md`: complete pre-deletion record including verbatim function body, weight chain, results summary, extreme-tract collapse finding, and deletion manifest.
+- `tests/test_loss_terms.py`: six regression tests -- expected loss dict keys present, `smoothness` key absent, total loss finite, fail-fast fires on `smoothness_weight` in config (including zero weight), clean config passes.
+
+**What changed and why:**
+- `_compute_cross_tract_smoothness` was misnamed: it computed `(max_tract_mean - min_tract_mean) * 0.05` with no graph structure. Effective gradient coefficient at default config was `smoothness_weight * 0.05 = 0.005`. The five-weight sweep (0.0 to 0.5) confirmed zero measurable effect on any metric (max absolute diff = 0.0 to machine precision across 40 tract-architecture rows). The constraint loss drives tract means to distinct SVI targets and dominates; the smoothness gradient is swamped. Removal changes nothing measurable.
+- Fail-fast added to prevent reinstatement via config without reading the ablation record.
+- See `experiments/ablation/03_smoothness/INSPECTION_FINDING.md` for full audit trail.
+
+**Cache invalidation:** none. Feature and routing logic unchanged.
+
 ## 2026-05-18: ablation 00_baseline frozen reference run
 
 **Files created:**

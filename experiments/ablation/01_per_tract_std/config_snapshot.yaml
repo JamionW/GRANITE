@@ -92,13 +92,6 @@ features:
   feature_standardization: "global"  # 'global' (RobustScaler) or 'per_tract' (z-score per tract)
 
 # =============================================================================
-# Normalization Layers (ablation 02b)
-# =============================================================================
-norm_layers:
-  input_layernorm: true        # false -> nn.Identity (ablation 2b-i)
-  conv_norm_type: "batchnorm"  # batchnorm | layernorm | identity (ablation 2b-ii/iii)
-
-# =============================================================================
 # Processing
 # =============================================================================
 processing:

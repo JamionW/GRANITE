@@ -1,0 +1,107 @@
+{
+  "2b_i": {
+    "label": "2b-i (no input LN)",
+    "norm_layers": {
+      "input_layernorm": false,
+      "conv_norm_type": "batchnorm"
+    },
+    "sage": {
+      "mean_spatial_std": 0.0243966,
+      "mean_spatial_std_delta": -0.057924,
+      "mean_morans_i": 0.8539999500000001,
+      "mean_morans_i_delta": -0.02359,
+      "block_group_r": 0.7713012808228822,
+      "block_group_r_delta": 0.017605,
+      "spatial_std_slope_vs_svi": -0.03179275502043457,
+      "spatial_std_slope_delta": -0.017414
+    },
+    "gcngat": {
+      "mean_spatial_std": 0.034848750000000005,
+      "mean_spatial_std_delta": -0.046576,
+      "mean_morans_i": 0.7206718000000001,
+      "mean_morans_i_delta": -0.128373,
+      "block_group_r": 0.7701565314474054,
+      "block_group_r_delta": 0.003725,
+      "spatial_std_slope_vs_svi": -0.03472426328269504,
+      "spatial_std_slope_delta": -0.028281
+    },
+    "feature_importance_spearman_vs_other_arch": {
+      "value": 0.945,
+      "delta_vs_2a": 0.828681
+    },
+    "top10_overlap": {
+      "value": 10,
+      "delta_vs_2a": 7
+    }
+  },
+  "2b_ii": {
+    "label": "2b-ii (Identity conv norm)",
+    "norm_layers": {
+      "input_layernorm": true,
+      "conv_norm_type": "identity"
+    },
+    "sage": {
+      "mean_spatial_std": 0.018669900000000003,
+      "mean_spatial_std_delta": -0.063651,
+      "mean_morans_i": 0.87597795,
+      "mean_morans_i_delta": -0.001612,
+      "block_group_r": 0.7671160160338493,
+      "block_group_r_delta": 0.01342,
+      "spatial_std_slope_vs_svi": -0.005773046457335891,
+      "spatial_std_slope_delta": 0.008606
+    },
+    "gcngat": {
+      "mean_spatial_std": 0.0256775,
+      "mean_spatial_std_delta": -0.055747,
+      "mean_morans_i": 0.6942657999999999,
+      "mean_morans_i_delta": -0.154779,
+      "block_group_r": 0.7597605501990674,
+      "block_group_r_delta": -0.006671,
+      "spatial_std_slope_vs_svi": 0.007676758507175938,
+      "spatial_std_slope_delta": 0.01412
+    },
+    "feature_importance_spearman_vs_other_arch": {
+      "value": -0.206,
+      "delta_vs_2a": -0.321726
+    },
+    "top10_overlap": {
+      "value": 1,
+      "delta_vs_2a": -2
+    }
+  },
+  "2b_iii": {
+    "label": "2b-iii (LayerNorm conv norm)",
+    "norm_layers": {
+      "input_layernorm": true,
+      "conv_norm_type": "layernorm"
+    },
+    "sage": {
+      "mean_spatial_std": 0.016477899999999997,
+      "mean_spatial_std_delta": -0.065843,
+      "mean_morans_i": 0.8482575000000001,
+      "mean_morans_i_delta": -0.029332,
+      "block_group_r": 0.7593129759376623,
+      "block_group_r_delta": 0.005616,
+      "spatial_std_slope_vs_svi": 0.0020765678098792154,
+      "spatial_std_slope_delta": 0.016456
+    },
+    "gcngat": {
+      "mean_spatial_std": 0.021501600000000003,
+      "mean_spatial_std_delta": -0.059923,
+      "mean_morans_i": 0.9532056499999999,
+      "mean_morans_i_delta": 0.10416,
+      "block_group_r": 0.7736665763580161,
+      "block_group_r_delta": 0.007235,
+      "spatial_std_slope_vs_svi": 0.018519769114471125,
+      "spatial_std_slope_delta": 0.024963
+    },
+    "feature_importance_spearman_vs_other_arch": {
+      "value": 0.122,
+      "delta_vs_2a": 0.0063
+    },
+    "top10_overlap": {
+      "value": 5,
+      "delta_vs_2a": 2
+    }
+  }
+}

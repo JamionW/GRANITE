@@ -33,27 +33,43 @@ def set_random_seed(seed=42):
     torch.use_deterministic_algorithms(True, warn_only=True)
 
 
+def _make_conv_norm(norm_type: str, dim: int) -> nn.Module:
+    """Return a normalization module for a conv layer output of size dim.
+
+    norm_type: 'batchnorm' | 'layernorm' | 'identity'
+    All three are shape-compatible with [N, dim] node-feature tensors.
+    """
+    if norm_type == 'batchnorm':
+        return BatchNorm(dim)
+    elif norm_type == 'layernorm':
+        return nn.LayerNorm(dim)
+    elif norm_type == 'identity':
+        return nn.Identity()
+    else:
+        raise ValueError(f"unknown conv_norm_type '{norm_type}'; expected batchnorm|layernorm|identity")
+
+
 class AccessibilitySVIGNN(nn.Module):
     """
     Context-aware GNN for accessibility-vulnerability prediction.
-    
+
     Supports context-gated feature modulation and multi-task learning.
     """
-    def __init__(self, accessibility_features_dim, context_features_dim=5, 
+    def __init__(self, accessibility_features_dim, context_features_dim=5,
              hidden_dim=64, dropout=0.3, seed=42, use_context_gating=True,
-             use_multitask=True):
+             use_multitask=True, input_layernorm=True, conv_norm_type='batchnorm'):
 
         super(AccessibilitySVIGNN, self).__init__()
-        
+
         # Set seed for reproducible initialization
         set_random_seed(seed)
-        
+
         self.accessibility_features_dim = accessibility_features_dim
         self.context_features_dim = context_features_dim
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout
-        self.use_context_gating = use_context_gating  
-        
+        self.use_context_gating = use_context_gating
+
         if use_context_gating:
             self.context_gate = ContextGatedFeatureModulator(
                 accessibility_dim=accessibility_features_dim,
@@ -62,10 +78,15 @@ class AccessibilitySVIGNN(nn.Module):
             )
 
         self.use_multitask = use_multitask
-        
+
         # Input normalization (applied to potentially modulated features)
-        self.input_norm = nn.LayerNorm(accessibility_features_dim)
-        
+        self.input_norm = (nn.LayerNorm(accessibility_features_dim)
+                           if input_layernorm else nn.Identity())
+
+        # log norm configuration for audit
+        print(f"[GNN init] AccessibilitySVIGNN: input_norm={type(self.input_norm).__name__} "
+              f"conv_norm_type={conv_norm_type}")
+
         # Feature encoding
         self.feature_encoder = nn.Sequential(
             nn.Linear(accessibility_features_dim, hidden_dim),
@@ -74,16 +95,16 @@ class AccessibilitySVIGNN(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
         )
-        
+
         # Graph convolution layers
         self.spatial_conv1 = GCNConv(hidden_dim, hidden_dim)
-        self.spatial_norm1 = BatchNorm(hidden_dim)
-        
+        self.spatial_norm1 = _make_conv_norm(conv_norm_type, hidden_dim)
+
         self.attention_conv = GATConv(hidden_dim, hidden_dim//2, heads=2, concat=True, dropout=dropout*0.5)
-        self.attention_norm = BatchNorm(hidden_dim)
-        
+        self.attention_norm = _make_conv_norm(conv_norm_type, hidden_dim)
+
         self.spatial_conv2 = GCNConv(hidden_dim, hidden_dim//2)
-        self.spatial_norm2 = BatchNorm(hidden_dim//2)
+        self.spatial_norm2 = _make_conv_norm(conv_norm_type, hidden_dim//2)
         
         # Accessibility learning layer
         self.accessibility_learner = nn.Sequential(
@@ -221,7 +242,7 @@ class GraphSAGEAccessibilitySVIGNN(nn.Module):
     """
     def __init__(self, accessibility_features_dim, context_features_dim=5,
                  hidden_dim=64, dropout=0.3, seed=42, use_context_gating=True,
-                 use_multitask=True):
+                 use_multitask=True, input_layernorm=True, conv_norm_type='batchnorm'):
 
         super(GraphSAGEAccessibilitySVIGNN, self).__init__()
 
@@ -242,7 +263,12 @@ class GraphSAGEAccessibilitySVIGNN(nn.Module):
 
         self.use_multitask = use_multitask
 
-        self.input_norm = nn.LayerNorm(accessibility_features_dim)
+        self.input_norm = (nn.LayerNorm(accessibility_features_dim)
+                           if input_layernorm else nn.Identity())
+
+        # log norm configuration for audit
+        print(f"[GNN init] GraphSAGEAccessibilitySVIGNN: input_norm={type(self.input_norm).__name__} "
+              f"conv_norm_type={conv_norm_type}")
 
         self.feature_encoder = nn.Sequential(
             nn.Linear(accessibility_features_dim, hidden_dim),
@@ -254,13 +280,13 @@ class GraphSAGEAccessibilitySVIGNN(nn.Module):
 
         # three SAGEConv layers replacing GCN+GAT+GCN
         self.spatial_conv1 = SAGEConv(hidden_dim, hidden_dim)
-        self.spatial_norm1 = BatchNorm(hidden_dim)
+        self.spatial_norm1 = _make_conv_norm(conv_norm_type, hidden_dim)
 
         self.spatial_conv2 = SAGEConv(hidden_dim, hidden_dim)
-        self.spatial_norm2 = BatchNorm(hidden_dim)
+        self.spatial_norm2 = _make_conv_norm(conv_norm_type, hidden_dim)
 
         self.spatial_conv3 = SAGEConv(hidden_dim, hidden_dim // 2)
-        self.spatial_norm3 = BatchNorm(hidden_dim // 2)
+        self.spatial_norm3 = _make_conv_norm(conv_norm_type, hidden_dim // 2)
 
         self.accessibility_learner = nn.Sequential(
             nn.Linear(hidden_dim // 2, hidden_dim // 4),
@@ -1346,47 +1372,113 @@ class MultiTractGNNTrainer:
         return per_tract_errors
 
 
-def normalize_accessibility_features(features, method='robust'):
+def normalize_accessibility_features(features, method='robust', tract_labels=None):
     """
-    Robust feature normalization to prevent training instability.
-    
+    Feature normalization to prevent training instability.
+
     Args:
-        features: Numpy array of accessibility features
-        method: 'robust' (default) or 'standard'
-    
+        features: numpy array [n_addresses, n_features]
+        method: 'robust' (global RobustScaler, default), 'standard' (global StandardScaler),
+                or 'per_tract' (z-score computed separately within each tract)
+        tract_labels: array-like of tract FIPS, one per row; required when method='per_tract'
+
     Returns:
-        Tuple of (normalized_features, scaler)
+        Tuple of (normalized_features, scaler_info).
+        For 'per_tract': scaler_info is a dict with keys
+            'tract_mu'      -> {tract: [mean per feature]}
+            'tract_sigma'   -> {tract: [std per feature, clamped to 1.0 if < 1e-8]}
+            'zero_var_log'  -> list of {'tract': ..., 'feature_idx': ...} dicts
+        For other methods: scaler_info is the fitted sklearn scaler object.
     """
+    if method == 'per_tract':
+        if tract_labels is None:
+            raise ValueError(
+                "normalize_accessibility_features: tract_labels required when method='per_tract'"
+            )
+        tract_labels = np.asarray(tract_labels, dtype=object)
+        # fail-fast: any missing tract assignment
+        missing = np.array([
+            v is None or (isinstance(v, float) and np.isnan(v))
+            for v in tract_labels
+        ])
+        if np.any(missing):
+            raise ValueError(
+                f"normalize_accessibility_features: {missing.sum()} rows have missing "
+                "tract_labels; cannot apply per_tract standardization"
+            )
+
+        n, p = features.shape
+        if p == 0:
+            return features, {'tract_mu': {}, 'tract_sigma': {}, 'zero_var_log': []}
+
+        normalized = np.empty((n, p), dtype=float)
+        unique_tracts = np.unique(tract_labels)
+
+        tract_mu = {}
+        tract_sigma = {}
+        zero_var_log = []
+
+        for tract in unique_tracts:
+            mask = tract_labels == tract
+            tract_data = features[mask].astype(float)  # [n_tract, p]
+
+            mu = tract_data.mean(axis=0)      # [p]
+            sigma = tract_data.std(axis=0)    # [p]
+
+            for j in range(p):
+                if sigma[j] < 1e-8:
+                    zero_var_log.append({'tract': str(tract), 'feature_idx': int(j)})
+                    sigma[j] = 1.0
+
+            normalized[mask] = (tract_data - mu) / sigma
+            tract_mu[str(tract)] = mu.tolist()
+            tract_sigma[str(tract)] = sigma.tolist()
+
+        if np.any(np.isnan(normalized)):
+            print("error: nan values after per-tract normalization")
+            normalized = np.nan_to_num(normalized)
+        if np.any(np.isinf(normalized)):
+            print("error: infinite values after per-tract normalization")
+            normalized = np.nan_to_num(normalized)
+
+        scaler_info = {
+            'tract_mu': tract_mu,
+            'tract_sigma': tract_sigma,
+            'zero_var_log': zero_var_log,
+        }
+        return normalized, scaler_info
+
+    # global methods (original behavior)
     if method == 'robust':
         from sklearn.preprocessing import RobustScaler
         scaler = RobustScaler()
     else:
         from sklearn.preprocessing import StandardScaler
         scaler = StandardScaler()
-    
+
     # Handle edge cases
     if features.shape[1] == 0:
         return features, scaler
-    
+
     # Check for zero variance features
     feature_stds = np.std(features, axis=0)
     zero_var_mask = feature_stds < 1e-8
-    
+
     if np.any(zero_var_mask):
         print(f"{np.sum(zero_var_mask)} features have zero variance; proceeding")
-    
+
     # Apply normalization
     normalized_features = scaler.fit_transform(features)
-    
+
     # Validation
     if np.any(np.isnan(normalized_features)):
         print("Error: NaN values after normalization")
         normalized_features = np.nan_to_num(normalized_features)
-    
+
     if np.any(np.isinf(normalized_features)):
         print("Error: Infinite values after normalization")
         normalized_features = np.nan_to_num(normalized_features)
-    
+
     return normalized_features, scaler
 
 def generate_auxiliary_labels(accessibility_features, context_features, feature_names):

@@ -4,9 +4,9 @@
 
 **Codename:** GRANITE
 
-**Last updated:** 2026-05-12
+**Last updated:** 2026-05-21
 
-**Active branch:** `main` (HEAD: `6e5173c`)
+**Active branch:** `main` (HEAD: `486279248`)
 
 ---
 
@@ -42,7 +42,7 @@
 
 **Graph construction.** Dual edge set in `granite/data/loaders.py:_create_road_network_graph`. Road-network edges: 500 m road snap, candidate pairs filtered to less than 1000 m Euclidean and less than 1500 m road-network shortest-path, weight `1 / (1 + path_length / 500)`. Geographic edges: k=6, less than 1000 m Euclidean filter, weight `exp(-distance_m / 300)`. Symmetric, deduplicated. No feature-similarity edges.
 
-**Normalization.** `LayerNorm` at GNN input. `BatchNorm` after each graph convolution layer. `RobustScaler` on raw input features (`normalize_accessibility_features` in `granite/models/gnn.py`), fit globally across all addresses in the batch. Per-tract feature standardization is not in the GNN path; the M3 baselines do apply per-tract z-score at `granite/evaluation/recovery_baselines.py:139`.
+**Normalization.** `LayerNorm` at GNN input. `BatchNorm` after each graph convolution layer. `RobustScaler` on raw input features by default (`normalize_accessibility_features` in `granite/models/gnn.py`), fit globally across all addresses in the batch. A `feature_standardization` config toggle (`config.yaml:features`) selects between `global` (RobustScaler, default) and `per_tract` (z-score, mean/std computed per tract, std < 1e-8 clamped to 1.0). Per-tract mode was added for ablation 01_per_tract_std; `global` is the production default.
 
 **Cross-tract smoothness loss.** Active in the constrained multi-tract path at weight 0.1 (`granite/models/gnn.py:1198`). Weight is hardcoded; no config flag currently disables it.
 
@@ -62,6 +62,10 @@
 
 ### Active
 
+- **Ablation series** (started 2026-05-18): Architecture and normalization sensitivity study on the 20-tract SVI disaggregation task. Both GraphSAGE and GCN-GAT. Steps:
+  - **00_baseline** (complete, 2026-05-18): Frozen reference run. SAGE pooled BG r=0.769, GCN-GAT r=0.749; constraint error saturates to 0 post-correction; spatial std SAGE 0.0797, GCN-GAT 0.0887; feature importance Spearman rho=0.099 between architectures.
+  - **01_per_tract_std** (complete, 2026-05-21): Replaced global RobustScaler with per-tract z-score. SAGE BG r=0.754 (-0.016), GCN-GAT BG r=0.766 (+0.017). Spatial std slope vs SVI flattened for both. Moran's I SAGE +0.045. GCN-GAT spatial std *decreased* (-0.007) despite the hypothesis expecting an increase -- architecture-dependent interaction. 530 zero-variance (tract, feature) pairs clamped. All changes within the 0.05 BG r flag threshold; no stop conditions triggered.
+  - **02 onward** (pending): Step 2b (LayerNorm/BatchNorm swap); steps 03-05 TBD.
 - **M5** (in progress): Implementing the synthetic target generator that produces address-level "true" targets from controlled mechanisms (signal type, signal-to-noise ratio, spatial autocorrelation) over the real tract assignments, address coordinates, and k-NN graph topology. Smoke driver at `granite/scripts/run_m5_smoke.py`; generator at `granite/synthetic/generator.py`.
 - **M3.6 through M3.8** (parallel track): Door 2 acquisition of an external target (tax delinquency) absent from the feature stack, with the redundancy filter gating whether it proceeds to GRANITE training.
 
@@ -86,6 +90,51 @@
 ---
 
 ## Milestone entries
+
+### Ablation 00_baseline: frozen reference run (2026-05-18)
+
+**Status:** complete.
+
+**Setup.** 20 stratified Hamilton County tracts, both GraphSAGE and GCN-GAT, seed 42. Single-tract mode (0 neighbor tracts). 150 epochs, constraint weight 2.0, variation weight 1.5. Global RobustScaler on accessibility features. Validation: pooled BG r against nationally-ranked ACS BG SVI.
+
+**Results.**
+
+| metric | GRANITE-SAGE | GRANITE-GCNGAT | IDW | Kriging |
+|---|---|---|---|---|
+| pooled BG r | 0.769 | 0.749 | 0.772 | 0.768 |
+| spatial std (mean) | 0.0797 | 0.0887 | - | - |
+| spatial std slope vs SVI | -0.0177 | -0.0080 | - | - |
+| Moran's I (mean) | 0.833 | 0.848 | - | - |
+| constraint error (mean) | 0.0 | 0.0 | - | - |
+| FI Spearman rho (SAGE vs GCN-GAT) | 0.099 | - | - | - |
+| top-10 feature overlap | 2 | - | - | - |
+
+**Artifacts.** `experiments/ablation/00_baseline/`
+
+---
+
+### Ablation 01_per_tract_std: per-tract z-score (2026-05-21)
+
+**Status:** complete.
+
+**Single change vs 00_baseline.** Global RobustScaler (median/IQR) replaced with per-tract z-score (mean/std). For single-tract mode this is effectively StandardScaler applied to each tract's addresses independently; std < 1e-8 clamped to 1.0.
+
+**Results.**
+
+| metric | SAGE baseline | SAGE per_tract | delta | GCN-GAT baseline | GCN-GAT per_tract | delta |
+|---|---|---|---|---|---|---|
+| pooled BG r | 0.769 | 0.754 | -0.016 | 0.749 | 0.766 | +0.017 |
+| spatial std (mean) | 0.0797 | 0.0823 | +0.003 | 0.0887 | 0.0814 | -0.007 |
+| spatial std slope vs SVI | -0.0177 | -0.0144 | +0.003 (flatter) | -0.0080 | -0.0064 | +0.002 (flatter) |
+| Moran's I (mean) | 0.833 | 0.878 | +0.045 | 0.848 | 0.849 | +0.001 |
+| FI Spearman rho | 0.099 | 0.116 | +0.017 | | | |
+| top-10 overlap | 2 | 3 | +1 | | | |
+
+**Reading.** Hypothesis (spatial std increases, slope flattens) partially holds. Slope flattens for both. SAGE spatial std increases; GCN-GAT spatial std decreases -- architecture-dependent interaction with the scaler change. BG r movement is within noise (< 0.05). 530 zero-variance (tract, feature) pairs clamped (concentrated in small tracts). No stop conditions triggered. SAGE Moran's I increased substantially (+0.045); spatial autocorrelation of predictions strengthened under z-score standardization.
+
+**Artifacts.** `experiments/ablation/01_per_tract_std/`
+
+---
 
 ### M0: n20 SVI parity check (2026-05-09)
 
@@ -237,4 +286,21 @@ output/m3_n20_baselines/
     lift_table.csv
     lift_summary.csv
     per_tract_metrics.csv
+
+experiments/ablation/
+  00_baseline/
+    results/per_tract_metrics.csv          # 40 rows (20 tracts x 2 architectures)
+    results/aggregate_metrics.json         # mean/median per architecture
+    results/block_group_validation.json    # pooled BG r: SAGE=0.769, GCN-GAT=0.749, IDW=0.772, Kriging=0.768
+    results/feature_importance/            # sage/gcn_gat permutation importance CSVs
+    figures/                               # 6 PNG figures
+  01_per_tract_std/
+    results/per_tract_metrics.csv
+    results/aggregate_metrics.json         # SAGE spatial_std=0.0823, GCN-GAT=0.0814
+    results/block_group_validation.json    # SAGE=0.754, GCN-GAT=0.766
+    results/delta_vs_baseline.json         # structured delta table vs 00_baseline
+    results/per_tract_scalers.npz          # per-tract mu/sigma (80 entries)
+    results/zero_var_columns.csv           # 530 clamped (tract, feature_idx) pairs
+    results/feature_importance/            # sage_importance.csv, gcngat_importance.csv
+    figures/                               # 8 PNG figures (6 standard + 2 comparison)
 ```

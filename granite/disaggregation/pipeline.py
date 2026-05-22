@@ -294,7 +294,19 @@ class GRANITEPipeline:
 
         # Build graph with context features
         from ..models.gnn import normalize_accessibility_features
-        normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
+        feat_std_mode = self.config.get('features', {}).get('feature_standardization', 'global')
+        if feat_std_mode == 'per_tract':
+            if 'tract_fips' not in tract_addresses.columns:
+                raise ValueError(
+                    "feature_standardization='per_tract' requires tract_fips column in tract_addresses"
+                )
+            _tract_labels = tract_addresses['tract_fips'].values
+            normalized_features, feature_scaler = normalize_accessibility_features(
+                accessibility_features, method='per_tract', tract_labels=_tract_labels
+            )
+        else:
+            normalized_features, feature_scaler = normalize_accessibility_features(accessibility_features)
+        self._stored_feature_scaler = feature_scaler
         normalized_features = self._apply_feature_mode(
             normalized_features,
             tract_addresses,
@@ -689,13 +701,16 @@ class GRANITEPipeline:
 
             arch = self.config.get('model', {}).get('architecture', 'gcn_gat')
             ModelClass = GraphSAGEAccessibilitySVIGNN if arch == 'sage' else AccessibilitySVIGNN
+            _norm_cfg = self.config.get('norm_layers', {})
             model = ModelClass(
                 accessibility_features_dim=graph_data.x.shape[1],
                 context_features_dim=context_dim,
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
                 dropout=self.config.get('model', {}).get('dropout', 0.3),
                 seed=seed,
-                use_context_gating=use_gating and has_context  # Only if both enabled and available
+                use_context_gating=use_gating and has_context,
+                input_layernorm=_norm_cfg.get('input_layernorm', True),
+                conv_norm_type=_norm_cfg.get('conv_norm_type', 'batchnorm'),
             )
 
             if use_gating and has_context:
@@ -2068,11 +2083,14 @@ class GRANITEPipeline:
             seed = self.config.get('processing', {}).get('random_seed', 42)
             arch = self.config.get('model', {}).get('architecture', 'gcn_gat')
             ModelClass = GraphSAGEAccessibilitySVIGNN if arch == 'sage' else AccessibilitySVIGNN
+            _norm_cfg = self.config.get('norm_layers', {})
             model = ModelClass(
                 accessibility_features_dim=graph_data.x.shape[1],
                 hidden_dim=self.config.get('model', {}).get('hidden_dim', 64),
                 dropout=self.config.get('model', {}).get('dropout', 0.3),
-                seed=seed # Ensure reproducibility
+                seed=seed,
+                input_layernorm=_norm_cfg.get('input_layernorm', True),
+                conv_norm_type=_norm_cfg.get('conv_norm_type', 'batchnorm'),
             )
             
             # Create trainer

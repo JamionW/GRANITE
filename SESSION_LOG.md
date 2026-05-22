@@ -589,3 +589,36 @@ Outputs saved to `output/mehdi_review/<FIPS>/` with figures collated and renamed
 - Synthetic noise filter smoke: median_ridge_r=0.065, median_gbm_r=0.025, is_admissible=True, is_redundant=False, exit 0
 - M3 column schema: byte-identical to reference; values differ only due to single-tract vs 20-tract global standardization (expected)
 - `run_meta.json` records target_mode, target_name, target_source, n_addresses_matched, n_addresses_missing on both paths
+
+## 2026-05-21: ablation 01_per_tract_std (Step 2a)
+
+**What changed:** Added `feature_standardization: {global, per_tract}` config toggle. `global` (default) preserves existing RobustScaler behavior; `per_tract` applies per-column z-score (mean/std) within each tract group, clamping near-zero std (<1e-8) to 1.0.
+
+**Files changed:**
+- `config.yaml`: added `feature_standardization: "global"` under `features:`
+- `granite/models/gnn.py`: extended `normalize_accessibility_features()` with `method='per_tract'` branch and `tract_labels` parameter; fail-fast on missing tract assignments
+- `granite/disaggregation/pipeline.py`: reads `features.feature_standardization` config key, passes `tract_labels` when per_tract mode active; stores scaler as `_stored_feature_scaler`
+
+**Files created:**
+- `experiments/ablation/01_per_tract_std/run_ablation_01.py` (driver: same 20 tracts, seed 42, both architectures, per_tract std enabled)
+- `experiments/ablation/01_per_tract_std/git_state.txt`, `config_snapshot.yaml`, `environment.txt`, `tract_selection.txt` (pre-flight)
+- `experiments/ablation/01_per_tract_std/results/per_tract_metrics.csv` (40 rows)
+- `experiments/ablation/01_per_tract_std/results/aggregate_metrics.json`
+- `experiments/ablation/01_per_tract_std/results/block_group_validation.json`
+- `experiments/ablation/01_per_tract_std/results/delta_vs_baseline.json`
+- `experiments/ablation/01_per_tract_std/results/per_tract_scalers.npz` (80 entries: 40 tract-arch pairs x mu+sigma)
+- `experiments/ablation/01_per_tract_std/results/zero_var_columns.csv` (530 zero-variance feature-tract pairs clamped)
+- `experiments/ablation/01_per_tract_std/results/feature_importance/sage_importance.csv`
+- `experiments/ablation/01_per_tract_std/results/feature_importance/gcngat_importance.csv`
+- 8 figures in `experiments/ablation/01_per_tract_std/figures/` (6 standard + 2 comparison)
+
+**Cache invalidation:** None. Per-tract standardization is applied after feature computation; OSRM cache keys are unaffected.
+
+**Headline deltas vs 00_baseline:**
+- SAGE spatial std: +0.0026 (0.0797 -> 0.0823); slope vs SVI flattened from -0.01772 to -0.01438
+- GCN-GAT spatial std: -0.0073 (0.0887 -> 0.0814); slope flattened from -0.00798 to -0.00644
+- SAGE BG r: -0.016 (0.769 -> 0.754); GCN-GAT BG r: +0.017 (0.749 -> 0.766); all within 0.05 flag threshold
+- Moran's I: SAGE +0.045, GCN-GAT +0.001
+- Feature importance Spearman rho SAGE vs GCN-GAT: 0.099 -> 0.116; top-10 overlap: 2 -> 3
+- 530 zero-variance (tract, feature) pairs clamped to std=1.0 (small tracts with constant columns)
+- Constraint errors: ~2e-8 (post-correction saturates to zero as expected)

@@ -442,9 +442,17 @@ class AccessibilityGNNTrainer:
         }
 
         self.enforce_constraints = config.get('enforce_constraints', True)
-        self.constraint_weight = config.get('constraint_weight', 
+        self.constraint_weight = config.get('constraint_weight',
                                         2.0 if self.enforce_constraints else 0.0)
-        
+
+        # fail-fast: variation_weight is not consumed by this trainer (see audit entry 008)
+        if 'variation_weight' in self.config:
+            raise ValueError(
+                "variation_weight is not a valid config key for AccessibilityGNNTrainer. "
+                "The variation loss weight is hardcoded (1.5 constrained, 2.0 unconstrained). "
+                "See experiments/audits/loss_term_audit.md entry 008."
+            )
+
         # Set seed for optimizer initialization
         set_random_seed(seed)
         
@@ -608,51 +616,54 @@ class AccessibilityGNNTrainer:
         else:
             range_loss = torch.tensor(0.0, device=predictions.device)
         
-        # 5. Accessibility consistency
-        accessibility_consistency_loss = self._compute_accessibility_consistency_loss(predictions)
-        
+        # 5. Minimum spread (sorted-prediction gradient hinge)
+        min_spread_loss = self._compute_min_spread_loss(predictions)
+
         if self.enforce_constraints:
             # Standard constrained training
             total_loss = (
                 self.constraint_weight * constraint_loss +     # Use configured weight
-                1.5 * variation_loss +
+                1.5 * variation_loss +  # variation weight hardcoded 1.5 (constrained), 2.0 (unconstrained); see audit entry 008
                 1.0 * bounds_loss +
                 0.3 * range_loss +
-                0.5 * accessibility_consistency_loss
+                0.5 * min_spread_loss
             )
         else:
             # Unconstrained: learn from structure only
             total_loss = (
                 0.0 * constraint_loss +           # No constraint pressure
-                2.0 * variation_loss +            # Strong variation encouragement
+                2.0 * variation_loss +            # Strong variation encouragement; see audit entry 008
                 1.0 * bounds_loss +               # Keep valid range
                 0.5 * range_loss +                # Distribution shape
-                1.0 * accessibility_consistency_loss  # Structure learning
+                1.0 * min_spread_loss             # Sorted-gradient spread encouragement
             )
-        
+
         return {
             'total': total_loss,
             'constraint': constraint_loss,
             'variation': variation_loss,
             'bounds': bounds_loss,
             'range': range_loss,
-            'accessibility': accessibility_consistency_loss
+            'min_spread': min_spread_loss
         }
     
-    def _compute_accessibility_consistency_loss(self, predictions):
-        """Encourage structured predictions"""
+    def _compute_min_spread_loss(self, predictions):
+        """Penalize collapsed prediction distributions by hinging on the mean consecutive
+        difference of sorted predictions falling below 0.001. Activates only when
+        len(predictions) >= 4. Renamed from _compute_accessibility_consistency_loss
+        on 2026-05-27; see experiments/audits/loss_term_audit.md entry 011."""
 
         if len(predictions) < 4:
             return torch.tensor(0.0, device=predictions.device)
-        
+
         sorted_preds = torch.sort(predictions)[0]
-        
+
         if len(sorted_preds) > 1:
             pred_gradient = sorted_preds[1:] - sorted_preds[:-1]
             gradient_loss = F.relu(0.001 - pred_gradient.mean())
         else:
             gradient_loss = torch.tensor(0.0, device=predictions.device)
-        
+
         return gradient_loss
 
     def predict_unconstrained(self, graph_data):
@@ -722,6 +733,14 @@ class MultiTractGNNTrainer:
                 "smoothness_weight is no longer a valid config key. "
                 "The term was removed after ablation step 3 confirmed it is behaviorally inert. "
                 "See experiments/ablation/03_smoothness/INSPECTION_FINDING.md."
+            )
+
+        # fail-fast: variation_weight is not consumed by this trainer (see audit entry 003)
+        if 'variation_weight' in config:
+            raise ValueError(
+                "variation_weight is not a valid config key for MultiTractGNNTrainer. "
+                "The variation loss weight is hardcoded (0.8 constrained, 2.0 unconstrained). "
+                "See experiments/audits/loss_term_audit.md entry 003."
             )
 
         # Set seed for optimizer initialization
@@ -1255,7 +1274,7 @@ class MultiTractGNNTrainer:
             # Standard constrained training
             total_loss = (
                 self.constraint_weight * constraint_loss +
-                0.8 * variation_loss +
+                0.8 * variation_loss +  # variation weight hardcoded 0.8 (constrained), 2.0 (unconstrained); see audit entry 003
                 1.0 * bounds_loss
             )
             # add block group constraint if provided
@@ -1268,7 +1287,7 @@ class MultiTractGNNTrainer:
             # Unconstrained: learn from structure only
             total_loss = (
                 0.0 * constraint_loss +     # No constraint pressure
-                2.0 * variation_loss +      # Strong variation encouragement
+                2.0 * variation_loss +      # Strong variation encouragement; see audit entry 003
                 1.0 * bounds_loss           # Keep valid range
             )
 

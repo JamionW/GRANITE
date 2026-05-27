@@ -865,8 +865,11 @@ deserves reconsideration.
 ## Entry 011: `accessibility_consistency_loss` in `AccessibilityGNNTrainer._compute_losses`
 
 **Audited:** 2026-05-27
-**Location:** `granite/models/gnn.py`, lines 612 and 642-656, inside `_compute_losses`
-and `_compute_accessibility_consistency_loss`
+**Renamed:** `_compute_accessibility_consistency_loss` -> `_compute_min_spread_loss`; variable
+`accessibility_consistency_loss` -> `min_spread_loss`; dict key `'accessibility'` -> `'min_spread'`
+on 2026-05-27 (audit followup commit; see SESSION_LOG.md entry 2026-05-27).
+**Location (post-rename):** `granite/models/gnn.py`, inside `_compute_losses`
+and `_compute_min_spread_loss`
 **Status:** active (both paths, different weights)
 
 ---

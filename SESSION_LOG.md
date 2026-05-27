@@ -1,5 +1,41 @@
 # GRANITE Session Log
 
+## 2026-05-27: audit followup -- remove orphaned variation_weight key, rename accessibility_consistency_loss
+
+**Files modified:**
+- `config.yaml`: removed `training.variation_weight: 1.5`. The key was declared but never
+  consumed by either trainer (both hardcode their variation loss weights). See audit entries
+  003 and 008.
+- `granite/models/gnn.py`:
+  - `AccessibilityGNNTrainer.__init__`: added fail-fast raising `ValueError` when
+    `variation_weight` appears in a loaded config, matching the smoothness_weight pattern.
+  - `MultiTractGNNTrainer.__init__`: same fail-fast for `variation_weight`.
+  - `AccessibilityGNNTrainer._compute_losses`: renamed call from
+    `_compute_accessibility_consistency_loss` to `_compute_min_spread_loss`; renamed local
+    variable from `accessibility_consistency_loss` to `min_spread_loss`; changed loss dict
+    key from `'accessibility'` to `'min_spread'`; added inline comments on hardcoded
+    variation loss weights at both constrained and unconstrained call sites.
+  - `_compute_multi_tract_losses`: added inline comments on hardcoded variation loss weights.
+  - `_compute_accessibility_consistency_loss` renamed to `_compute_min_spread_loss`;
+    docstring updated to accurately describe the sorted-prediction-gradient hinge.
+- `tests/test_loss_terms.py`: expanded test suite with `TestVariationWeightFailFast`
+  (6 tests) and `TestMinSpreadLoss` (4 tests); added single-tract loss dict key tests;
+  all 20 tests pass.
+- `experiments/audits/loss_term_audit.md`: updated entry 011 to record rename history
+  with date and pointer to this SESSION_LOG entry.
+
+**Why:** Loss term audit (entries 003, 008, 011) found: (1) `variation_weight: 1.5` in
+config.yaml had no effect on either trainer; (2) `_compute_accessibility_consistency_loss`
+was misnamed -- no accessibility features enter the computation; it is a minimum-spread
+penalty on sorted predictions.
+
+**Behavior change:** none. The rename is semantics-only. Loss values, weights, and
+gradient routing are unchanged. Verified: all 20 loss-term regression tests pass.
+
+**Cache invalidation:** none.
+
+---
+
 ## 2026-05-22: ablation Step 3 cleanup -- remove misnamed smoothness loss
 
 **Files modified:**

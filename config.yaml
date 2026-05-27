@@ -61,7 +61,6 @@ training:
   weight_decay: 0.0001
   enforce_constraints: true
   constraint_weight: 2.0
-  variation_weight: 1.5
   early_stopping_patience: 15
   apply_post_correction: true
   ordering_weight: 0.5

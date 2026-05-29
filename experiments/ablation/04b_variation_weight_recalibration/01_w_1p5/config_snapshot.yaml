@@ -1,0 +1,89 @@
+accessibility:
+  destinations:
+    employment: true
+    grocery: true
+    healthcare: true
+  enabled: true
+  max_addresses_per_tract: 10
+  timeout_minutes: 2
+data:
+  address_features_file: data/raw/address_features/combined_address_features.csv
+  address_file: chattanooga.geojson
+  census_tracts_file: data/raw/tl_2020_47_tract.shp
+  census_year: 2020
+  county_fips: '065'
+  neighbor_tracts: 0
+  roads_file: data/raw/tl_2023_47065_roads.shp
+  state_fips: '47'
+  svi_file: data/raw/SVI_2020_US.csv
+  target: svi
+features:
+  feature_standardization: per_tract
+  nlcd_path: ./data/nlcd_hamilton_county.tif
+  scaling: robust
+  type: nlcd
+mixture:
+  enabled: false
+  expert_hidden_dim: 64
+  finetune_epochs: 50
+  gate_epochs: 100
+  gate_hidden_dim: 32
+  svi_boundaries:
+    high:
+    - 0.55
+    - 1.0
+    low:
+    - 0.01
+    - 0.4
+    medium:
+    - 0.3
+    - 0.7
+model:
+  attention_heads: 4
+  dropout: 0.3
+  hidden_dim: 64
+  use_context_gating: true
+  use_multitask: true
+norm_layers:
+  conv_norm_type: batchnorm
+  input_layernorm: true
+output:
+  directory: ./output
+  save_intermediate: false
+  save_plots: true
+  save_predictions: true
+processing:
+  cache_dir: ./granite_cache
+  enable_caching: true
+  random_seed: 42
+  skip_importance: true
+  verbose: false
+recovery:
+  output_dir: ./output/recovery
+  standardize_target: true
+  target_feature: null
+routing:
+  batch_size: 100
+  driving_url: http://localhost:5000
+  walking_url: http://localhost:5001
+training:
+  apply_post_correction: false
+  constraint_mode: cbc_no_shift
+  constraint_weight: 2.0
+  early_stopping_patience: 15
+  enforce_constraints: true
+  epochs: 150
+  learning_rate: 0.001
+  ordering_margin: 0.02
+  ordering_min_gap: 0.5
+  ordering_weight: 0.5
+  variation_weight: 1.5
+  weight_decay: 0.0001
+transit:
+  local_file: carta_gtfs.zip
+  source: gtfs
+validation:
+  compare_baselines: true
+  compute_spatial_diagnostics: true
+  correction_mode: global
+  mode: null

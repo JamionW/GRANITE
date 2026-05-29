@@ -1,0 +1,106 @@
+{
+  "0.8": {
+    "sage": {
+      "mean_within_tract_std": 0.05948569999999999,
+      "delta_vs_cbc_baseline_std": 0.0,
+      "delta_vs_soft_std": -0.02283510000000001,
+      "mean_morans_i": 0.8668723,
+      "delta_vs_cbc_baseline_morans_i": 0.0,
+      "delta_vs_soft_morans_i": -0.010717199999999982,
+      "pooled_block_group_r": 0.7510639217121053,
+      "delta_vs_cbc_baseline_bg_r": 0.0,
+      "delta_vs_soft_bg_r": -0.0026325786017765695,
+      "variation_loss_activation_rate": NaN
+    },
+    "gcn_gat": {
+      "mean_within_tract_std": 0.082895,
+      "delta_vs_cbc_baseline_std": 0.0,
+      "delta_vs_soft_std": 0.001470099999999988,
+      "mean_morans_i": 0.8420901000000001,
+      "delta_vs_cbc_baseline_morans_i": 0.0,
+      "delta_vs_soft_morans_i": -0.006955049999999963,
+      "pooled_block_group_r": 0.7480323549330572,
+      "delta_vs_cbc_baseline_bg_r": 0.0,
+      "delta_vs_soft_bg_r": -0.018399105168971364,
+      "variation_loss_activation_rate": NaN
+    }
+  },
+  "1.5": {
+    "sage": {
+      "mean_within_tract_std": 0.05948569999999999,
+      "delta_vs_cbc_baseline_std": 0.0,
+      "delta_vs_soft_std": -0.02283510000000001,
+      "mean_morans_i": 0.8668723,
+      "delta_vs_cbc_baseline_morans_i": 0.0,
+      "delta_vs_soft_morans_i": -0.010717199999999982,
+      "pooled_block_group_r": 0.7510639217121053,
+      "delta_vs_cbc_baseline_bg_r": 0.0,
+      "delta_vs_soft_bg_r": -0.0026325786017765695,
+      "variation_loss_activation_rate": 0.0
+    },
+    "gcn_gat": {
+      "mean_within_tract_std": 0.0829603,
+      "delta_vs_cbc_baseline_std": 6.530000000000424e-05,
+      "delta_vs_soft_std": 0.0015353999999999923,
+      "mean_morans_i": 0.8419769,
+      "delta_vs_cbc_baseline_morans_i": -0.0001132000000000355,
+      "delta_vs_soft_morans_i": -0.007068249999999998,
+      "pooled_block_group_r": 0.7480646775406984,
+      "delta_vs_cbc_baseline_bg_r": 3.232260764118866e-05,
+      "delta_vs_soft_bg_r": -0.018366782561330175,
+      "variation_loss_activation_rate": 0.0005
+    }
+  },
+  "2.5": {
+    "sage": {
+      "mean_within_tract_std": 0.05948569999999999,
+      "delta_vs_cbc_baseline_std": 0.0,
+      "delta_vs_soft_std": -0.02283510000000001,
+      "mean_morans_i": 0.8668723,
+      "delta_vs_cbc_baseline_morans_i": 0.0,
+      "delta_vs_soft_morans_i": -0.010717199999999982,
+      "pooled_block_group_r": 0.7510639217121053,
+      "delta_vs_cbc_baseline_bg_r": 0.0,
+      "delta_vs_soft_bg_r": -0.0026325786017765695,
+      "variation_loss_activation_rate": 0.0
+    },
+    "gcn_gat": {
+      "mean_within_tract_std": 0.0832629,
+      "delta_vs_cbc_baseline_std": 0.00036790000000000433,
+      "delta_vs_soft_std": 0.0018379999999999924,
+      "mean_morans_i": 0.8420009500000001,
+      "delta_vs_cbc_baseline_morans_i": -8.91499999999823e-05,
+      "delta_vs_soft_morans_i": -0.007044199999999945,
+      "pooled_block_group_r": 0.7480558713900683,
+      "delta_vs_cbc_baseline_bg_r": 2.3516457011152347e-05,
+      "delta_vs_soft_bg_r": -0.01837558871196021,
+      "variation_loss_activation_rate": 0.00102
+    }
+  },
+  "4.0": {
+    "sage": {
+      "mean_within_tract_std": 0.05948569999999999,
+      "delta_vs_cbc_baseline_std": 0.0,
+      "delta_vs_soft_std": -0.02283510000000001,
+      "mean_morans_i": 0.8668723,
+      "delta_vs_cbc_baseline_morans_i": 0.0,
+      "delta_vs_soft_morans_i": -0.010717199999999982,
+      "pooled_block_group_r": 0.7510639217121053,
+      "delta_vs_cbc_baseline_bg_r": 0.0,
+      "delta_vs_soft_bg_r": -0.0026325786017765695,
+      "variation_loss_activation_rate": 0.0
+    },
+    "gcn_gat": {
+      "mean_within_tract_std": 0.08337595,
+      "delta_vs_cbc_baseline_std": 0.00048095000000000776,
+      "delta_vs_soft_std": 0.0019510499999999958,
+      "mean_morans_i": 0.8419501,
+      "delta_vs_cbc_baseline_morans_i": -0.000140000000000029,
+      "delta_vs_soft_morans_i": -0.007095049999999992,
+      "pooled_block_group_r": 0.7480362914869565,
+      "delta_vs_cbc_baseline_bg_r": 3.936553899297479e-06,
+      "delta_vs_soft_bg_r": -0.018395168615072066,
+      "variation_loss_activation_rate": 0.00102
+    }
+  }
+}

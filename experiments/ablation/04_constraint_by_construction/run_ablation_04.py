@@ -89,8 +89,6 @@ def _load_base_config():
         cfg.setdefault(k, {})
     # remove smoothness_weight -- it is no longer valid (step 3 finding)
     cfg.get('training', {}).pop('smoothness_weight', None)
-    # remove variation_weight if present -- hardcoded in trainer
-    cfg.get('training', {}).pop('variation_weight', None)
     return cfg
 
 

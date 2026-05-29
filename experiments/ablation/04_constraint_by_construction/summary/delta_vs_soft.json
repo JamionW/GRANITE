@@ -1,0 +1,58 @@
+{
+  "cbc_with_shift": {
+    "sage": {
+      "mean_within_tract_std": 0.059486,
+      "mean_morans_i": 0.866872,
+      "block_group_r": 0.751064,
+      "bg_r_per_tract_mean": -0.390766,
+      "pre_correction_constraint_error_mean": 4.05e-08,
+      "pre_correction_constraint_error_max": 1.3e-07,
+      "feature_importance_spearman_vs_soft": 0.0094,
+      "delta_within_tract_std": -0.022835,
+      "delta_morans_i": -0.010717,
+      "delta_block_group_r": -0.002633,
+      "delta_bg_r_per_tract_mean": -0.560931
+    },
+    "gcn_gat": {
+      "mean_within_tract_std": 0.08296,
+      "mean_morans_i": 0.841977,
+      "block_group_r": 0.748065,
+      "bg_r_per_tract_mean": 0.071159,
+      "pre_correction_constraint_error_mean": 3.4999999999999996e-08,
+      "pre_correction_constraint_error_max": 1.5e-07,
+      "feature_importance_spearman_vs_soft": 0.0338,
+      "delta_within_tract_std": 0.001535,
+      "delta_morans_i": -0.007068,
+      "delta_block_group_r": -0.018367,
+      "delta_bg_r_per_tract_mean": 0.017487
+    }
+  },
+  "cbc_no_shift": {
+    "sage": {
+      "mean_within_tract_std": 0.059486,
+      "mean_morans_i": 0.866872,
+      "block_group_r": 0.751064,
+      "bg_r_per_tract_mean": -0.390766,
+      "pre_correction_constraint_error_mean": 4.05e-08,
+      "pre_correction_constraint_error_max": 1.3e-07,
+      "feature_importance_spearman_vs_soft": 0.0094,
+      "delta_within_tract_std": -0.022835,
+      "delta_morans_i": -0.010717,
+      "delta_block_group_r": -0.002633,
+      "delta_bg_r_per_tract_mean": -0.560931
+    },
+    "gcn_gat": {
+      "mean_within_tract_std": 0.08296,
+      "mean_morans_i": 0.841977,
+      "block_group_r": 0.748065,
+      "bg_r_per_tract_mean": 0.071159,
+      "pre_correction_constraint_error_mean": 3.4999999999999996e-08,
+      "pre_correction_constraint_error_max": 1.5e-07,
+      "feature_importance_spearman_vs_soft": 0.0338,
+      "delta_within_tract_std": 0.001535,
+      "delta_morans_i": -0.007068,
+      "delta_block_group_r": -0.018367,
+      "delta_bg_r_per_tract_mean": 0.017487
+    }
+  }
+}

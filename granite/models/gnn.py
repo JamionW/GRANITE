@@ -453,6 +453,15 @@ class AccessibilityGNNTrainer:
                 "See experiments/audits/loss_term_audit.md entry 008."
             )
 
+        # constraint_mode: 'soft', 'cbc_with_shift', or 'cbc_no_shift'
+        # same semantics as MultiTractGNNTrainer; see experiments/ablation/04_constraint_by_construction/
+        self.constraint_mode = config.get('constraint_mode', 'soft')
+        if self.constraint_mode not in {'soft', 'cbc_with_shift', 'cbc_no_shift'}:
+            raise ValueError(
+                f"constraint_mode must be 'soft', 'cbc_with_shift', or 'cbc_no_shift'; "
+                f"got '{self.constraint_mode}'. See experiments/ablation/04_constraint_by_construction/."
+            )
+
         # Set seed for optimizer initialization
         set_random_seed(seed)
         
@@ -514,6 +523,14 @@ class AccessibilityGNNTrainer:
                 graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
             )
 
+            # cbc transform: replace predictions with target_svi + zero-mean deviations
+            # no clamping here; bounds_loss penalizes out-of-range; clamping breaks
+            # the exact constraint for high/low svi tracts
+            if self.constraint_mode != 'soft':
+                pred_mean = predictions.mean()
+                deviations = predictions - pred_mean
+                predictions = target_svi.squeeze() + deviations
+
             # Optional: Track attention weights for analysis
             if attention_weights is not None:
                 if epoch == 0:
@@ -521,7 +538,7 @@ class AccessibilityGNNTrainer:
                 self.training_history['attention_weights'].append(
                     attention_weights.detach().cpu().numpy()
                 )
-            
+
             # Compute losses with REBALANCED weights
             losses = self._compute_losses(predictions, target_svi, n_addresses)
             total_loss = losses['total']
@@ -577,7 +594,15 @@ class AccessibilityGNNTrainer:
         final_predictions, final_learned_accessibility, attention_weights = self.model(
             graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
         )
-        
+
+        # apply cbc transform to final predictions if in cbc mode
+        # no clamping; bounds_loss has penalized out-of-range during training
+        if self.constraint_mode != 'soft':
+            with torch.no_grad():
+                fp_mean = final_predictions.mean()
+                fp_deviations = final_predictions - fp_mean
+                final_predictions = target_svi.squeeze() + fp_deviations
+
         results = {
             'final_predictions': final_predictions.detach().numpy(),
             'learned_accessibility': final_learned_accessibility.detach().numpy(),
@@ -595,10 +620,14 @@ class AccessibilityGNNTrainer:
     
     def _compute_losses(self, predictions, target_svi, n_addresses):
         """Compute training losses with optional constraint enforcement."""
-        
+
         # 1. Constraint preservation loss
+        # in cbc modes, constraint error is zero by construction; skip the loss term
         predicted_mean = predictions.mean()
-        constraint_loss = F.mse_loss(predicted_mean.unsqueeze(0), target_svi)
+        if getattr(self, 'constraint_mode', 'soft') != 'soft':
+            constraint_loss = torch.tensor(0.0, device=predictions.device)
+        else:
+            constraint_loss = F.mse_loss(predicted_mean.unsqueeze(0), target_svi)
         
         # 2. Spatial variation encouragement
         spatial_std = predictions.std()
@@ -741,6 +770,17 @@ class MultiTractGNNTrainer:
                 "variation_weight is not a valid config key for MultiTractGNNTrainer. "
                 "The variation loss weight is hardcoded (0.8 constrained, 2.0 unconstrained). "
                 "See experiments/audits/loss_term_audit.md entry 003."
+            )
+
+        # constraint_mode controls how the tract-mean constraint is applied
+        # 'soft': constraint loss in the training objective (default behavior)
+        # 'cbc_with_shift': constraint-by-construction in train loop; post-hoc shift still applied
+        # 'cbc_no_shift': constraint-by-construction in train loop; post-hoc shift skipped
+        self.constraint_mode = config.get('constraint_mode', 'soft')
+        if self.constraint_mode not in {'soft', 'cbc_with_shift', 'cbc_no_shift'}:
+            raise ValueError(
+                f"constraint_mode must be 'soft', 'cbc_with_shift', or 'cbc_no_shift'; "
+                f"got '{self.constraint_mode}'. See experiments/ablation/04_constraint_by_construction/."
             )
 
         # Set seed for optimizer initialization
@@ -915,7 +955,13 @@ class MultiTractGNNTrainer:
                 predictions = outputs['svi']
                 learned_accessibility = outputs['learned_accessibility']
                 attention_weights = outputs['attention_weights']
-                
+
+                # cbc transform: replace predictions with target + deviations
+                if self.constraint_mode != 'soft':
+                    predictions = self._apply_cbc_transform(
+                        predictions, tract_targets, tract_masks_tensor
+                    )
+
                 # Track attention weights
                 if attention_weights is not None:
                     if epoch == 0:
@@ -923,7 +969,7 @@ class MultiTractGNNTrainer:
                     self.training_history['attention_weights'].append(
                         attention_weights.detach().cpu().numpy()
                     )
-                
+
                 # Compute constraint losses
                 losses = self._compute_multi_tract_losses(
                     predictions, tract_targets, tract_masks_tensor, n_addresses,
@@ -971,9 +1017,15 @@ class MultiTractGNNTrainer:
             else:
                 # === SINGLE-TASK PATH (original) ===
                 predictions, learned_accessibility, attention_weights = self.model(
-                    graph_data.x, graph_data.edge_index, 
+                    graph_data.x, graph_data.edge_index,
                     return_accessibility=True, context_features=context
                 )
+
+                # cbc transform: replace predictions with target + deviations
+                if self.constraint_mode != 'soft':
+                    predictions = self._apply_cbc_transform(
+                        predictions, tract_targets, tract_masks_tensor
+                    )
 
                 # Track attention weights
                 if attention_weights is not None:
@@ -982,7 +1034,7 @@ class MultiTractGNNTrainer:
                     self.training_history['attention_weights'].append(
                         attention_weights.detach().cpu().numpy()
                     )
-                
+
                 # Compute losses
                 losses = self._compute_multi_tract_losses(
                     predictions, tract_targets, tract_masks_tensor, n_addresses,
@@ -1080,7 +1132,15 @@ class MultiTractGNNTrainer:
         final_predictions, final_learned_accessibility, attention_weights = self.model(
             graph_data.x, graph_data.edge_index, return_accessibility=True, context_features=context
         )
-        
+
+        # apply cbc transform to final predictions if in cbc mode
+        # no clamping in _apply_cbc_transform; see docstring
+        if self.constraint_mode != 'soft':
+            with torch.no_grad():
+                final_predictions = self._apply_cbc_transform(
+                    final_predictions, tract_targets, tract_masks_tensor
+                )
+
         # Compute final metrics
         final_per_tract_errors = self._compute_per_tract_errors(
             final_predictions, tract_targets, tract_masks_tensor
@@ -1188,6 +1248,27 @@ class MultiTractGNNTrainer:
             pairs_per_group
         )
 
+    def _apply_cbc_transform(self, predictions, tract_targets, tract_masks_tensor):
+        """apply constraint-by-construction: replace each address prediction with
+        target_svi + (pred - tract_mean).
+
+        this gives exactly zero tract-mean constraint error by construction.
+        gradients flow through the deviations, not through the mean shift.
+        no clamping here: bounds_loss in the loss function penalizes out-of-range values,
+        and clamping after shifting would break the exact constraint for high/low svi tracts.
+        """
+        result = predictions.clone()
+        for fips, target_svi in tract_targets.items():
+            mask = tract_masks_tensor[fips]
+            tract_preds = predictions[mask]
+            if len(tract_preds) == 0:
+                continue
+            tract_mean = tract_preds.mean()
+            deviations = tract_preds - tract_mean
+            reconstructed = target_svi.squeeze() + deviations
+            result[mask] = reconstructed
+        return result
+
     def _compute_ordering_loss(self, predictions, low_value_indices, high_value_indices, margin=0.02):
         """margin-based ranking loss: low-value properties should predict higher vulnerability."""
         if len(low_value_indices) == 0:
@@ -1212,21 +1293,24 @@ class MultiTractGNNTrainer:
         """
 
         # 1. Per-tract constraint losses (weight controlled by config)
-        constraint_losses = []
-
-        for fips, target_svi in tract_targets.items():
-            mask = tract_masks[fips]
-            tract_predictions = predictions[mask]
-
-            if len(tract_predictions) > 0:
-                tract_mean = tract_predictions.mean()
-                tract_loss = F.mse_loss(tract_mean.unsqueeze(0), target_svi)
-                constraint_losses.append(tract_loss)
-
-        if len(constraint_losses) > 0:
-            constraint_loss = torch.mean(torch.stack(constraint_losses))
-        else:
+        # in cbc modes, constraint error is zero by construction; skip the loss term
+        if getattr(self, 'constraint_mode', 'soft') != 'soft':
             constraint_loss = torch.tensor(0.0, device=predictions.device)
+        else:
+            constraint_losses = []
+            for fips, target_svi in tract_targets.items():
+                mask = tract_masks[fips]
+                tract_predictions = predictions[mask]
+
+                if len(tract_predictions) > 0:
+                    tract_mean = tract_predictions.mean()
+                    tract_loss = F.mse_loss(tract_mean.unsqueeze(0), target_svi)
+                    constraint_losses.append(tract_loss)
+
+            if len(constraint_losses) > 0:
+                constraint_loss = torch.mean(torch.stack(constraint_losses))
+            else:
+                constraint_loss = torch.tensor(0.0, device=predictions.device)
 
         # 2. Within-tract variation encouragement
         variation_losses = []

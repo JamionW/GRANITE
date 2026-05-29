@@ -232,7 +232,9 @@ def _git_sha():
         return 'unknown'
 
 
-def _write_preflight(variant_dir):
+def _write_preflight(variant_dir, cfg):
+    # cfg must be the fully-mutated runtime config, not the raw file, so the snapshot
+    # matches what actually ran. callers must apply all variant mutations before calling.
     sha = _git_sha()
     (variant_dir / 'git_state.txt').write_text(sha + '\n')
     try:
@@ -242,9 +244,8 @@ def _write_preflight(variant_dir):
     except Exception:
         env_out = 'unavailable\n'
     (variant_dir / 'environment.txt').write_text(env_out)
-    with open(CONFIG_PATH) as f:
-        cfg_raw = f.read()
-    (variant_dir / 'config_snapshot.yaml').write_text(cfg_raw)
+    with open(variant_dir / 'config_snapshot.yaml', 'w') as f:
+        yaml.dump(cfg, f, default_flow_style=False)
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +260,15 @@ def run_variant(variant, cfg_base, data, bg_gdf, validator, tract_list, verbose)
     fi_dir  = res_dir / 'feature_importance'
     fi_dir.mkdir(parents=True, exist_ok=True)
 
-    _write_preflight(vdir)
+    # build variant config before writing preflight so snapshot matches runtime
+    cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in cfg_base.items()}
+    cfg['training'] = dict(cfg_base.get('training', {}))
+    cfg['training']['smoothness_weight'] = variant['smoothness_weight']
+    # norm_layers: 2a state (input LN on, batchnorm on conv)
+    cfg['norm_layers'] = {'input_layernorm': True, 'conv_norm_type': 'batchnorm'}
+    cfg['features']['feature_standardization'] = 'per_tract'
+
+    _write_preflight(vdir, cfg)
 
     # if main results already exist, load them and skip the training loop
     _existing_csv = res_dir / 'per_tract_metrics.csv'
@@ -301,13 +310,6 @@ def run_variant(variant, cfg_base, data, bg_gdf, validator, tract_list, verbose)
                               cross_tract_r, tract_list)
         print(f'[{variant["key"]}] regenerated from existing results')
         return per_tract_df, agg_metrics, bg_validation, cross_tract_r, importance_agg, tract_signal
-
-    cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in cfg_base.items()}
-    cfg['training'] = dict(cfg_base.get('training', {}))
-    cfg['training']['smoothness_weight'] = variant['smoothness_weight']
-    # norm_layers: 2a state (input LN on, batchnorm on conv)
-    cfg['norm_layers'] = {'input_layernorm': True, 'conv_norm_type': 'batchnorm'}
-    cfg['features']['feature_standardization'] = 'per_tract'
 
     scratch = str(REPO_ROOT / 'output' / f'ablation_03_{variant["key"]}_scratch')
     os.makedirs(scratch, exist_ok=True)

@@ -675,3 +675,30 @@ Outputs saved to `output/mehdi_review/<FIPS>/` with figures collated and renamed
 - Feature importance Spearman rho SAGE vs GCN-GAT: 0.099 -> 0.116; top-10 overlap: 2 -> 3
 - 530 zero-variance (tract, feature) pairs clamped to std=1.0 (small tracts with constant columns)
 - Constraint errors: ~2e-8 (post-correction saturates to zero as expected)
+
+---
+
+## 2026-05-29: Step 4 pre-summary fixups
+
+**Files changed:** `experiments/ablation/04_constraint_by_construction/run_ablation_04.py`, `experiments/ablation/run_ablation_03.py`, `experiments/ablation/01_per_tract_std/CONFIG_SNAPSHOT_NOTE.md`, all three step 4 variant result sets re-run
+
+**What changed and why:**
+
+Two artifact-quality issues surfaced in `experiments/ablation/04_constraint_by_construction/ANOMALY.md` were resolved before summary generation.
+
+**Issue 1: `pre_correction_constraint_error_mean` NaN across all three step 4 variants.**
+Root cause: `run_ablation_04.py` line 337 used `training_result.get('final_predictions', None)` to retrieve pre-shift predictions, but `_train_accessibility_svi_gnn` returns a dict with key `raw_predictions`, not `final_predictions`. The lookup always returned `None`, producing NaN for every row.
+Fix: changed key to `raw_predictions` and simplified the redundant if/else branches.
+After fix, values match expected pattern:
+- `soft`: pre_correction = 0.0254 SAGE, 0.0195 GCN-GAT (small nonzero; constraint loss pulls but shift is what makes mean exact)
+- `cbc_with_shift`: pre_correction = 4.05e-08 / 3.5e-08 (machine precision; by-construction enforcement is exact)
+- `cbc_no_shift`: pre_correction = 4.05e-08 / 3.5e-08 (same; no shift needed)
+
+**Issue 2: config snapshot captured before runtime mutations in `run_ablation_03.py`.**
+Root cause: `_write_preflight(vdir)` was called before `cfg['features']['feature_standardization'] = 'per_tract'` was applied, so step 3 snapshots recorded `global` instead of `per_tract`. Same bug existed for `01_per_tract_std` (config.yaml on disk used as snapshot source).
+Fix: updated `_write_preflight` in `run_ablation_03.py` to accept the cfg dict and write `yaml.dump(cfg, ...)`, and moved the cfg mutation block to before the `_write_preflight` call. `run_ablation_04.py` already had correct ordering.
+Added `experiments/ablation/01_per_tract_std/CONFIG_SNAPSHOT_NOTE.md` documenting the 2a snapshot discrepancy with evidence (per_tract_scalers.npz, zero_var_columns.csv, README metadata, identical numerics with step 4 baseline).
+
+**Sanity check:** `00_baseline_for_step4` pooled BG r = 0.7537 SAGE, 0.7664 GCN-GAT (identical to 2a; baseline reproduced).
+
+**Cache invalidation:** None. All three variants were rerun from cache.

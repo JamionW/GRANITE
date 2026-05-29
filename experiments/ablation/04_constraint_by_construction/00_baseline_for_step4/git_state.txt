@@ -1,0 +1,5 @@
+sha: e988de442bbe8cf7bb587263be4817fb6a5b464b
+diff_stat:
+experiments/ablation/run_ablation_03.py |  26 ++++---
+ granite/models/gnn.py                   | 130 ++++++++++++++++++++++++++------
+ 2 files changed, 121 insertions(+), 35 deletions(-)

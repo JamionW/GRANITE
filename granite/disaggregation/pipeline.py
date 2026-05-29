@@ -908,9 +908,10 @@ class GRANITEPipeline:
                 'per_tract_errors': training_result['per_tract_errors'],
                 'spatial_std': spatial_std,
                 'epochs_trained': training_result['epochs_trained'],
-                'learning_converged': training_result['learning_converged']
+                'learning_converged': training_result['learning_converged'],
+                'variation_loss_activation_rate': training_result.get('variation_loss_activation_rate', float('nan')),
             }
-            
+
         except Exception as e:
             self._log(f"Error in multi-tract training: {str(e)}")
             import traceback
@@ -2153,9 +2154,10 @@ class GRANITEPipeline:
                 'raw_constraint_error': constraint_error,
                 'spatial_std': spatial_std,
                 'epochs_trained': training_result.get('epochs_trained', epochs),
-                'learning_converged': training_result.get('learning_converged', False)
+                'learning_converged': training_result.get('learning_converged', False),
+                'variation_loss_activation_rate': training_result.get('variation_loss_activation_rate', float('nan')),
             }
-            
+
         except Exception as e:
             self._log(f"Error training GNN: {str(e)}")
             import traceback

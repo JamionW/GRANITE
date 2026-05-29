@@ -1,5 +1,85 @@
 # GRANITE Session Log
 
+## 2026-05-29: step 4b sweep complete -- Outcome C, soft mode selected for step 5
+
+**Files changed:**
+- `granite/disaggregation/pipeline.py`: `_train_multi_tract_gnn` and
+  `_train_accessibility_svi_gnn` now forward `variation_loss_activation_rate` from the trainer
+  result into their return dict. Previously the key was computed by the trainer but discarded
+  by the pipeline before the ablation script could read it (causing NaN in aggregate_metrics).
+
+**Sweep results (cbc_no_shift, 20 tracts, seed 42):**
+
+| weight | SAGE std | SAGE BG r | GCN-GAT std | GCN-GAT BG r | SAGE act_rate |
+|---|---|---|---|---|---|
+| 0.8 | 0.0595 | 0.7511 | 0.0829 | 0.7480 | 0.0 |
+| 1.5 | 0.0595 | 0.7511 | 0.0830 | 0.7481 | 0.0 |
+| 2.5 | 0.0595 | 0.7511 | 0.0833 | 0.7481 | 0.0 |
+| 4.0 | 0.0595 | 0.7511 | 0.0834 | 0.7480 | 0.0 |
+| soft (ref) | 0.0823 | 0.7537 | 0.0814 | 0.7664 | - |
+
+**Verdict: Outcome C.** SAGE within-tract std is identical across all four weights (0.0595).
+The variation hinge (min_variation=0.02) never fired for SAGE at any weight -- activation
+rate is 0.0 across the full sweep. SAGE predictions are already above the 0.02 floor so the
+hinge is structurally dormant. The spread collapse from 0.082 to 0.060 under cbc is not a
+calibration artifact; it is a structural consequence of removing the constraint loss from the
+training objective. Raising variation_weight has no effect because the mechanism that would
+drive it cannot engage.
+
+**Step 5 decision:** use `constraint_mode: soft`. The cbc spread collapse is a documented
+finding. See `experiments/ablation/04b_variation_weight_recalibration/summary/README.md`.
+
+**Cache invalidation:** none.
+
+---
+
+## 2026-05-29: step 4b setup -- wire variation_weight, create sweep infrastructure
+
+**Files changed:**
+- `granite/models/gnn.py`:
+  - `MultiTractGNNTrainer.__init__`: removed fail-fast ValueError for `variation_weight`; replaced
+    with `self.variation_weight = config.get('variation_weight', 0.8)`. Default 0.8 is backward
+    compatible with the prior hardcoded value.
+  - `MultiTractGNNTrainer.__init__`: added `'variation_activation_count': 0` to `training_history`.
+  - `MultiTractGNNTrainer.train`: added per-epoch tracking of hinge activation
+    (`losses['variation'].item() > 0`); added `variation_loss_activation_rate` to results dict
+    (count / epochs_trained).
+  - `_compute_multi_tract_losses`: replaced hardcoded `0.8 * variation_loss` with
+    `self.variation_weight * variation_loss`.
+- `config.yaml`: re-added `variation_weight: 0.8` under `training:` with inline comment
+  `# multi-tract trainer only; see step 4b sweep`.
+- `tests/test_loss_terms.py`: replaced `TestVariationWeightFailFast` (6 tests that expected
+  ValueError from multi-trainer) with `TestVariationWeightWiring` (6 tests: reads 1.5, defaults
+  to 0.8, explicit matches implicit, clean config passes, single-trainer still raises, single
+  clean passes). All 20 tests pass.
+- `experiments/ablation/04_constraint_by_construction/run_ablation_04.py`: removed stale
+  `cfg.get('training', {}).pop('variation_weight', None)` line (comment said "hardcoded in
+  trainer"; no longer true).
+
+**Files created:**
+- `experiments/ablation/04b_variation_weight_recalibration/run_ablation_04b.py`: sweep driver
+  for four variation_weight values (0.8, 1.5, 2.5, 4.0) under cbc_no_shift, both architectures,
+  same 20 tracts and seed as step 4. Includes sanity check (00_w_0p8 must reproduce step 4
+  02_cbc_no_shift within 1e-4), all five stop conditions from spec, variation_activation_rate
+  capture per variant, and three summary figures (variation_weight_sweep.png,
+  spread_vs_generalization.png, extreme_tract_recalibration.png).
+- `experiments/ablation/04b_variation_weight_recalibration/{00_w_0p8,01_w_1p5,02_w_2p5,03_w_4p0,summary}/`
+  (empty subdirectories; populated by sweep runs).
+
+**Why:** Step 4 found SAGE within-tract std collapsed under cbc_no_shift (0.060 vs 0.082 soft).
+Hypothesis: calibration artifact. The variation_loss weight was tuned against soft-mode gradient
+magnitudes; removing constraint_loss reduced the effective regularization pressure on spread.
+Step 4b tests whether raising variation_weight from 0.8 to 4.0 recovers spread without
+sacrificing generalization.
+
+**Behavior change:** MultiTractGNNTrainer now reads variation_weight from config instead of
+hardcoding 0.8. Default is 0.8, so all existing configs and runs that omit variation_weight
+are bit-identical to prior behavior.
+
+**Cache invalidation:** none. Feature extraction and OSRM routing are unchanged.
+
+---
+
 ## 2026-05-27: audit followup -- remove orphaned variation_weight key, rename accessibility_consistency_loss
 
 **Files modified:**

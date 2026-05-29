@@ -66,6 +66,7 @@ training:
   ordering_weight: 0.5
   ordering_min_gap: 0.5
   ordering_margin: 0.02
+  variation_weight: 0.8  # multi-tract trainer only; see step 4b sweep
 
 # =============================================================================
 # Mixture of Experts

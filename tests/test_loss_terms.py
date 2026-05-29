@@ -6,7 +6,8 @@ Verifies:
 - loss dict contains expected keys
 - loss dict does not contain 'smoothness' or old 'accessibility' key
 - loading a config with smoothness_weight raises ValueError (fail-fast guard)
-- loading a config with variation_weight raises ValueError in both trainers
+- loading a config with variation_weight wires self.variation_weight in both trainers
+- MultiTractGNNTrainer defaults variation_weight to 0.8; AccessibilityGNNTrainer defaults to 1.5
 - _compute_min_spread_loss (formerly _compute_accessibility_consistency_loss) is callable
 """
 import pytest
@@ -129,31 +130,41 @@ class TestSmoothnessWeightFailFast:
         assert trainer is not None
 
 
-class TestVariationWeightFailFast:
-    def test_multi_trainer_variation_weight_raises(self):
-        with pytest.raises(ValueError, match="variation_weight"):
-            _make_multi_trainer(config={'variation_weight': 1.5})
+class TestVariationWeightWiring:
+    """variation_weight is now a valid MultiTractGNNTrainer config key (step 4b)."""
 
-    def test_multi_trainer_variation_weight_zero_also_raises(self):
-        # the key itself is disallowed regardless of value
-        with pytest.raises(ValueError, match="variation_weight"):
-            _make_multi_trainer(config={'variation_weight': 0.0})
+    def test_multi_trainer_reads_variation_weight(self):
+        trainer = _make_multi_trainer(config={'variation_weight': 1.5})
+        assert trainer.variation_weight == pytest.approx(1.5), (
+            "variation_weight not wired: expected self.variation_weight=1.5"
+        )
 
-    def test_single_trainer_variation_weight_raises(self):
-        with pytest.raises(ValueError, match="variation_weight"):
-            _make_single_trainer(config={'variation_weight': 1.5})
+    def test_multi_trainer_default_variation_weight(self):
+        trainer = _make_multi_trainer(config={})
+        assert trainer.variation_weight == pytest.approx(0.8), (
+            "default variation_weight should be 0.8 for backward compatibility"
+        )
 
-    def test_single_trainer_variation_weight_zero_also_raises(self):
-        with pytest.raises(ValueError, match="variation_weight"):
-            _make_single_trainer(config={'variation_weight': 0.0})
+    def test_multi_trainer_explicit_default_matches_implicit(self):
+        t_explicit = _make_multi_trainer(config={'variation_weight': 0.8})
+        t_implicit = _make_multi_trainer(config={})
+        assert t_explicit.variation_weight == pytest.approx(t_implicit.variation_weight)
 
     def test_multi_trainer_clean_config_does_not_raise(self):
         trainer = _make_multi_trainer(config={'constraint_weight': 2.0})
         assert trainer is not None
 
-    def test_single_trainer_clean_config_does_not_raise(self):
-        trainer = _make_single_trainer(config={'constraint_weight': 2.0})
-        assert trainer is not None
+    def test_single_trainer_reads_variation_weight(self):
+        trainer = _make_single_trainer(config={'variation_weight': 2.5})
+        assert trainer.variation_weight == pytest.approx(2.5), (
+            "variation_weight not wired in AccessibilityGNNTrainer: expected 2.5"
+        )
+
+    def test_single_trainer_default_variation_weight(self):
+        trainer = _make_single_trainer(config={})
+        assert trainer.variation_weight == pytest.approx(1.5), (
+            "default variation_weight for single-tract trainer should be 1.5"
+        )
 
 
 class TestMinSpreadLoss:

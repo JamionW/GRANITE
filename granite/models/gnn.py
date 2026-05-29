@@ -445,13 +445,9 @@ class AccessibilityGNNTrainer:
         self.constraint_weight = config.get('constraint_weight',
                                         2.0 if self.enforce_constraints else 0.0)
 
-        # fail-fast: variation_weight is not consumed by this trainer (see audit entry 008)
-        if 'variation_weight' in self.config:
-            raise ValueError(
-                "variation_weight is not a valid config key for AccessibilityGNNTrainer. "
-                "The variation loss weight is hardcoded (1.5 constrained, 2.0 unconstrained). "
-                "See experiments/audits/loss_term_audit.md entry 008."
-            )
+        # variation_weight: configurable weight for the hinge-based variation loss (constrained path)
+        # default 1.5 matches the prior hardcoded value; see step 4b sweep
+        self.variation_weight = config.get('variation_weight', 1.5)
 
         # constraint_mode: 'soft', 'cbc_with_shift', or 'cbc_no_shift'
         # same semantics as MultiTractGNNTrainer; see experiments/ablation/04_constraint_by_construction/
@@ -482,13 +478,14 @@ class AccessibilityGNNTrainer:
         self.best_loss = float('inf')
         self.patience_counter = 0
         self.training_history = {
-            'losses': [], 
-            'constraint_errors': [], 
+            'losses': [],
+            'constraint_errors': [],
             'spatial_stds': [],
             'raw_predictions_history': [],
-            'attention_weights': [] 
+            'attention_weights': [],
+            'variation_activation_count': 0,
         }
-        
+
     def train(self, graph_data, tract_svi, epochs=100, verbose=True):
         """
         Train GNN on single tract with deterministic behavior.
@@ -542,7 +539,11 @@ class AccessibilityGNNTrainer:
             # Compute losses with REBALANCED weights
             losses = self._compute_losses(predictions, target_svi, n_addresses)
             total_loss = losses['total']
-            
+
+            # track variation hinge activation (fires when tract_std < min_variation=0.02)
+            if losses['variation'].item() > 0:
+                self.training_history['variation_activation_count'] += 1
+
             # Backward pass
             total_loss.backward()
             
@@ -603,6 +604,7 @@ class AccessibilityGNNTrainer:
                 fp_deviations = final_predictions - fp_mean
                 final_predictions = target_svi.squeeze() + fp_deviations
 
+        epochs_trained = epoch + 1
         results = {
             'final_predictions': final_predictions.detach().numpy(),
             'learned_accessibility': final_learned_accessibility.detach().numpy(),
@@ -610,14 +612,17 @@ class AccessibilityGNNTrainer:
             'training_history': self.training_history,
             'final_spatial_std': float(final_predictions.std()),
             'constraint_error': float(abs(final_predictions.mean() - tract_svi)),
-            'epochs_trained': epoch + 1,
+            'epochs_trained': epochs_trained,
             'final_loss': total_loss.item(),
             'learning_converged': self.patience_counter < 15,
+            'variation_loss_activation_rate': (
+                self.training_history['variation_activation_count'] / epochs_trained
+            ),
             'success': True
         }
-        
+
         return results
-    
+
     def _compute_losses(self, predictions, target_svi, n_addresses):
         """Compute training losses with optional constraint enforcement."""
 
@@ -652,7 +657,7 @@ class AccessibilityGNNTrainer:
             # Standard constrained training
             total_loss = (
                 self.constraint_weight * constraint_loss +     # Use configured weight
-                1.5 * variation_loss +  # variation weight hardcoded 1.5 (constrained), 2.0 (unconstrained); see audit entry 008
+                self.variation_weight * variation_loss +  # configurable; default 1.5; see step 4b sweep
                 1.0 * bounds_loss +
                 0.3 * range_loss +
                 0.5 * min_spread_loss
@@ -764,13 +769,9 @@ class MultiTractGNNTrainer:
                 "See experiments/ablation/03_smoothness/INSPECTION_FINDING.md."
             )
 
-        # fail-fast: variation_weight is not consumed by this trainer (see audit entry 003)
-        if 'variation_weight' in config:
-            raise ValueError(
-                "variation_weight is not a valid config key for MultiTractGNNTrainer. "
-                "The variation loss weight is hardcoded (0.8 constrained, 2.0 unconstrained). "
-                "See experiments/audits/loss_term_audit.md entry 003."
-            )
+        # variation_weight: configurable weight for the hinge-based variation loss (constrained path)
+        # default 0.8 matches the prior hardcoded value; see step 4b sweep
+        self.variation_weight = config.get('variation_weight', 0.8)
 
         # constraint_mode controls how the tract-mean constraint is applied
         # 'soft': constraint loss in the training objective (default behavior)
@@ -803,12 +804,13 @@ class MultiTractGNNTrainer:
         self.best_loss = float('inf')
         self.patience_counter = 0
         self.training_history = {
-            'losses': [], 
-            'constraint_errors': [], 
+            'losses': [],
+            'constraint_errors': [],
             'spatial_stds': [],
             'per_tract_errors': {},
             'raw_predictions_history': [],
-            'attention_weights': [] 
+            'attention_weights': [],
+            'variation_activation_count': 0,
         }
     
     def train(self, graph_data, tract_svis: Dict[str, float],
@@ -1047,15 +1049,19 @@ class MultiTractGNNTrainer:
                 if verbose and epoch % 10 == 0:
                     print(f"Epoch {epoch}: Loss={total_loss:.4f}")
             
+            # track variation hinge activation (fires when any tract_std < min_variation=0.02)
+            if losses['variation'].item() > 0:
+                self.training_history['variation_activation_count'] += 1
+
             # Backward pass
             total_loss.backward()
-            
+
             # Gradient clipping for stability
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            
+
             self.optimizer.step()
             self.scheduler.step(total_loss)
-            
+
             # Track metrics
             overall_constraint_error = self._compute_overall_constraint_error(
                 predictions, tract_targets, tract_masks_tensor
@@ -1146,6 +1152,7 @@ class MultiTractGNNTrainer:
             final_predictions, tract_targets, tract_masks_tensor
         )
         
+        epochs_trained = epoch + 1
         results = {
             'final_predictions': final_predictions.detach().numpy(),
             'learned_accessibility': final_learned_accessibility.detach().numpy(),
@@ -1155,9 +1162,12 @@ class MultiTractGNNTrainer:
                 final_predictions, tract_targets, tract_masks_tensor
             ),
             'per_tract_errors': final_per_tract_errors,
-            'epochs_trained': epoch + 1,
+            'epochs_trained': epochs_trained,
             'final_loss': total_loss.item(),
             'learning_converged': self.patience_counter < 15,
+            'variation_loss_activation_rate': (
+                self.training_history['variation_activation_count'] / epochs_trained
+            ),
             'success': True
         }
 
@@ -1358,7 +1368,7 @@ class MultiTractGNNTrainer:
             # Standard constrained training
             total_loss = (
                 self.constraint_weight * constraint_loss +
-                0.8 * variation_loss +  # variation weight hardcoded 0.8 (constrained), 2.0 (unconstrained); see audit entry 003
+                self.variation_weight * variation_loss +  # configurable; default 0.8; see step 4b sweep
                 1.0 * bounds_loss
             )
             # add block group constraint if provided

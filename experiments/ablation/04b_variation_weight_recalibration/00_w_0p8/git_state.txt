@@ -1,0 +1,8 @@
+sha: b0db535fb5d5dd2ad46afe75a19416de79019c0b
+diff_stat:
+SESSION_LOG.md                                     | 47 ++++++++++++++++++++++
+ config.yaml                                        |  1 +
+ .../run_ablation_04.py                             |  2 -
+ granite/models/gnn.py                              | 47 +++++++++++-----------
+ tests/test_loss_terms.py                           | 47 +++++++++++++---------
+ 5 files changed, 101 insertions(+), 43 deletions(-)

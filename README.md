@@ -64,6 +64,16 @@ Two GNN architectures, selectable via `--architecture {gcn_gat|sage}`:
 
 Training uses a multi-component loss: constraint satisfaction (tract mean preservation, weight configurable), optional block group mean constraints (intermediate supervision between tract and address level, weight configurable via `bg_constraint_weight`), spatial variation encouragement, bounds enforcement, and accessibility consistency. Block group SVI targets are computed independently from ACS block-group-level estimates via CDC percentile methodology, not from disaggregated tract data. Post-training additive correction is available via config but currently disabled for the constraint ablation experiment.
 
+## Baselines
+
+The headline baseline is **Dasymetric disaggregation** (single-attribute, NLCD impervious surface ancillary, following Nguyen et al. 2021). It allocates tract SVI proportionally to impervious surface percentage, satisfying the aggregate constraint by construction. The secondary mass-preserving baseline is **Pycnophylactic disaggregation** (Tobler 1979), which iteratively smooths the predicted surface while preserving tract totals.
+
+IDW and Kriging are retired to `graveyard/` and are not used in the current pipeline. Under single-centroid interpolation (one point per tract), point interpolation methods collapse to the tract mean and contribute no within-tract signal; they function as a degenerate proximity floor rather than a spatial disaggregation method. They remain in `graveyard/` as frozen artifacts for ablation runs that recorded them.
+
+The primary validation metric is **pooled BG r**: Pearson r between predicted block-group-mean SVI and nationally-ranked ACS block-group SVI, pooled across all n20 evaluation tracts (69 qualifying block groups, min 10 addresses each). This metric is grounded in `data/results/m0_n20_svi_parity/aggregate.csv`.
+
+The **per-tract BG r** is a secondary diagnostic: the same correlation computed independently within each tract's block groups. It isolates within-tract allocation skill (pooled BG r is dominated by between-tract variance from tract-mean preservation) and is the metric on which Dasymetric and GRANITE visibly separate, though with wide confidence intervals due to small per-tract BG counts (typically 2-5 qualifying block groups per tract).
+
 ## Installation
 
 ```bash
@@ -123,7 +133,7 @@ granite --global-training --verbose
 granite/
     data/                   # data loading, graph construction, address feature join
     disaggregation/         # main pipeline orchestration
-    evaluation/             # baselines (IDW, kriging, naive), spatial diagnostics
+    evaluation/             # baselines (Dasymetric, Pycnophylactic), spatial diagnostics; IDW/Kriging retired to graveyard/
     features/               # modal accessibility computation
     models/                 # GNN architecture, mixture of experts
     routing/                # OSRM interface

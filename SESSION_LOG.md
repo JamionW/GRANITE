@@ -1,5 +1,25 @@
 # GRANITE Session Log
 
+## 2026-06-05: baseline unification + BG-r metric provenance audit
+
+**Files created:**
+- `experiments/audits/baseline_metric_provenance.md`: full provenance report mapping all four BG-r numbers to their source metric, file, and validation context
+
+**Files modified:**
+- `README.md`: Project Structure `evaluation/` line updated to name Dasymetric/Pycnophylactic and note IDW/Kriging retired to graveyard; new Baselines subsection added before Installation, stating headline baseline (Dasymetric), secondary baseline (Pycnophylactic), IDW/Kriging framing as retired degenerate proximity floor, pooled BG r as primary metric, and per-tract BG r as within-tract divergence diagnostic
+
+**What changed and why:**
+- four BG-r numbers in circulation (0.469, 0.558, 0.769/0.749, 0.772/0.768) were mapped to their distinct metrics:
+  - 0.469/0.558: Metric D (global held-out BG r, legacy), from `bg_validation_summary.csv` (root), written by unknown legacy script predating the n20 harness; n_predictions=192; superseded
+  - 0.769/0.749: Metric A (pooled BG r across n20 tracts, n=69 BGs), from `experiments/ablation/00_baseline/results/block_group_validation.json`; canonical for architecture comparison
+  - 0.772/0.768: same Metric A for IDW/Kriging; recorded in 00_baseline frozen artifact; both methods now retired to graveyard
+  - canonical current numbers: 0.769 GRANITE, 0.802 Dasymetric, 0.768 Pycnophylactic from `data/results/m0_n20_svi_parity/aggregate.csv`
+- README.md baseline identity inconsistency resolved: Dasymetric is headline baseline; Pycnophylactic is secondary; IDW/Kriging appear only as retired
+
+**Cache invalidation notes:** none -- no changes to feature extraction, routing logic, or training.
+
+**Frozen artifact note:** no ablation result files were modified. The 00_baseline block_group_validation.json correctly records IDW/Kriging because those were the active baselines at run time.
+
 ## 2026-05-29: step 4b sweep complete -- Outcome C, soft mode selected for step 5
 
 **Files changed:**

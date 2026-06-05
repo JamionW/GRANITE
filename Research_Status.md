@@ -4,7 +4,7 @@
 
 **Codename:** GRANITE
 
-**Last updated:** 2026-05-21
+**Last updated:** 2026-06-05
 
 **Active branch:** `main` (HEAD: `486279248`)
 
@@ -84,10 +84,11 @@
 
 ### Retired or demoted
 
-- IDW and Kriging (graveyard, 2026-04-18). Collapse to tract mean under single-centroid interpolation.
+- IDW and Kriging (graveyard, 2026-04-18). Collapse to tract mean under single-centroid interpolation; labeled as degenerate proximity floor, not competitors.
 - "GRANITE beats baselines on SVI" as a headline.
 - "Hard constraint enforcement as implicit regularizer" framing.
 - Block-group r as a benchmark; demoted to scale-decomposability diagnostic.
+- 0.469 / 0.558 BG-r framing (legacy global validation context, `bg_validation_summary.csv` root artifact, superseded by n20 pooled BG r from `data/results/m0_n20_svi_parity/aggregate.csv`). See `experiments/audits/baseline_metric_provenance.md` for full provenance.
 
 ---
 

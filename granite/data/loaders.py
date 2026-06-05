@@ -888,12 +888,15 @@ class DataLoader:
         import torch
         from torch_geometric.data import Data
 
-        _VALID_VARIANTS = ('production', 'mlp_floor')
+        _VALID_VARIANTS = (
+            'production', 'mlp_floor',
+            'spatial_knn_uniform', 'road_network_uniform', 'randomized',
+        )
         graph_variant = self.config.get('graph_variant', 'production')
         if graph_variant not in _VALID_VARIANTS:
             raise ValueError(
                 f"unknown graph_variant '{graph_variant}'; valid values are "
-                f"{_VALID_VARIANTS}. see experiments/ablation/05_graph_contribution/README.md"
+                f"{_VALID_VARIANTS}. see experiments/ablation/05b_topology_specificity/README.md"
             )
 
         n_addresses = len(addresses)
@@ -904,6 +907,19 @@ class DataLoader:
             indices = list(range(n_addresses))
             edge_index = torch.LongTensor([indices, indices])
             edge_weight = torch.FloatTensor([1.0] * n_addresses)
+        elif graph_variant == 'spatial_knn_uniform':
+            k = self.config.get('graph_knn_k', 10)
+            edge_index, edge_weight = self._create_spatial_knn_uniform(addresses, k)
+        elif graph_variant == 'road_network_uniform':
+            k = self.config.get('graph_knn_k', 10)
+            edge_index, edge_weight = self._create_road_network_uniform(
+                addresses, k, state_fips, county_fips
+            )
+        elif graph_variant == 'randomized':
+            k = self.config.get('graph_knn_k', 10)
+            graph_draw_seed = self.config.get('graph_draw_seed', 42)
+            knn_ei, knn_ew = self._create_spatial_knn_uniform(addresses, k)
+            edge_index, edge_weight = self._randomize_graph(knn_ei, knn_ew, n_addresses, graph_draw_seed)
         else:
             # production: road-network-plus-geographic graph (unchanged)
             self._log(f"Creating road network graph for {n_addresses} addresses...")
@@ -964,6 +980,204 @@ class DataLoader:
         
         return edge_index, edge_weight
 
+    def _create_spatial_knn_uniform(self, addresses, k):
+        """euclidean k-NN graph with uniform edge weight 1.0"""
+        import torch
+        from sklearn.neighbors import NearestNeighbors
+
+        n = len(addresses)
+        if n < 2:
+            return self._create_minimal_connectivity(n)
+
+        coords = np.array([[g.x, g.y] for g in addresses.geometry])
+        k_actual = min(k, n - 1)
+
+        nbrs = NearestNeighbors(n_neighbors=k_actual + 1, metric='euclidean').fit(coords)
+        _, indices = nbrs.kneighbors(coords)
+
+        edge_set = set()
+        edge_list = []
+        for i in range(n):
+            for j in indices[i][1:]:  # skip self (index 0)
+                j_int = int(j)
+                if j_int == i:
+                    # co-located node appears in k-NN list; skip to avoid self-loop
+                    continue
+                u, v = (i, j_int) if i < j_int else (j_int, i)
+                if (u, v) not in edge_set:
+                    edge_set.add((u, v))
+                    edge_list.extend([[u, v], [v, u]])
+
+        if not edge_list:
+            return self._create_minimal_connectivity(n)
+
+        edge_index = torch.LongTensor(edge_list).t().contiguous()
+        edge_weight = torch.FloatTensor([1.0] * len(edge_list))
+        self._log(f"spatial_knn_uniform: {n} nodes, k={k_actual}, {len(edge_list) // 2} undirected edges")
+        return edge_index, edge_weight
+
+    def _create_road_network_uniform(self, addresses, k, state_fips, county_fips):
+        """road-snapped shortest-path k-NN, uniform weight 1.0; unsnapped nodes fall back to euclidean"""
+        import torch
+        from sklearn.neighbors import NearestNeighbors
+
+        n = len(addresses)
+        if n < 2:
+            return self._create_minimal_connectivity(n)
+
+        roads = self.load_road_network(state_fips=state_fips, county_fips=county_fips)
+        if len(roads) == 0:
+            self._log("road_network_uniform: no road data; falling back to euclidean")
+            return self._create_spatial_knn_uniform(addresses, k)
+
+        road_graph, addr_to_road = self._create_road_connectivity(addresses, roads)
+        snapped = set(addr_to_road.keys())
+        unsnapped = set(range(n)) - snapped
+        self._last_road_fallback = len(unsnapped)
+        self._log(
+            f"road_network_uniform: {len(snapped)} snapped, {len(unsnapped)} fallback"
+        )
+
+        snapped_list = sorted(snapped)
+        edge_set = set()
+        edge_list = []
+
+        if len(snapped_list) >= 2:
+            # candidate-filtered road-distance k-NN:
+            # (1) find k*3 euclidean candidates among snapped addresses
+            # (2) per source: one single_source_dijkstra with adaptive cutoff
+            #     cutoff = max(max_euclidean_to_candidates * 5, 500m)
+            #     adaptive cutoff prevents full-graph traversal on rural tracts
+            # (3) take k nearest by road distance
+            coords = np.array([[g.x, g.y] for g in addresses.geometry])
+            snapped_arr = np.array(snapped_list)
+            snapped_coords = coords[snapped_arr]
+            k_cand = min(k * 3, len(snapped_list) - 1)
+            cand_nbrs = NearestNeighbors(n_neighbors=k_cand + 1, metric='euclidean').fit(snapped_coords)
+            _, cand_rel = cand_nbrs.kneighbors(snapped_coords)
+
+            k_snap = min(k, len(snapped_list) - 1)
+            for i, addr_i in enumerate(snapped_list):
+                rnode_i = addr_to_road[addr_i]
+
+                # gather candidate (addr_j, rnode_j) pairs
+                targets = []
+                for j_rel in cand_rel[i][1:]:
+                    addr_j = snapped_list[int(j_rel)]
+                    if addr_j == addr_i:
+                        continue
+                    targets.append((addr_j, addr_to_road[addr_j]))
+
+                if not targets:
+                    continue
+
+                # adaptive cutoff: 5x the max euclidean distance to candidates
+                max_euc_m = max(
+                    ((rnode_i[0] - rj[0]) ** 2 + (rnode_i[1] - rj[1]) ** 2) ** 0.5 * 111000
+                    for _, rj in targets
+                )
+                cutoff = max(max_euc_m * 5.0, 500.0)
+
+                try:
+                    lengths = nx.single_source_dijkstra_path_length(
+                        road_graph, rnode_i, cutoff=cutoff, weight='length'
+                    )
+                except (nx.NetworkXNoPath, nx.NodeNotFound, nx.NetworkXError):
+                    lengths = {}
+
+                road_dists_i = []
+                for addr_j, rnode_j in targets:
+                    if rnode_i == rnode_j:
+                        d = 0.0
+                    else:
+                        d = lengths.get(rnode_j, float('inf'))
+                    road_dists_i.append((d, addr_j))
+
+                road_dists_i.sort()
+                for _, addr_j in road_dists_i[:k_snap]:
+                    u, v = (addr_i, addr_j) if addr_i < addr_j else (addr_j, addr_i)
+                    if (u, v) not in edge_set:
+                        edge_set.add((u, v))
+                        edge_list.extend([[u, v], [v, u]])
+
+        # euclidean k-NN fallback for unsnapped nodes
+        if unsnapped:
+            coords = np.array([[g.x, g.y] for g in addresses.geometry])
+            k_fall = min(k, n - 1)
+            nbrs = NearestNeighbors(n_neighbors=k_fall + 1, metric='euclidean').fit(coords)
+            _, indices = nbrs.kneighbors(coords)
+            for addr_i in unsnapped:
+                for addr_j in indices[addr_i][1:k_fall + 1]:
+                    u, v = (addr_i, int(addr_j)) if addr_i < int(addr_j) else (int(addr_j), addr_i)
+                    if (u, v) not in edge_set:
+                        edge_set.add((u, v))
+                        edge_list.extend([[u, v], [v, u]])
+
+        if not edge_list:
+            return self._create_minimal_connectivity(n)
+
+        edge_index = torch.LongTensor(edge_list).t().contiguous()
+        edge_weight = torch.FloatTensor([1.0] * len(edge_list))
+        self._log(
+            f"road_network_uniform: {n} nodes, {len(edge_list) // 2} undirected edges, "
+            f"{len(unsnapped)} fallback"
+        )
+        return edge_index, edge_weight
+
+    def _randomize_graph(self, edge_index, edge_weight, n_addresses, seed):
+        """degree-preserving double-edge swap on an input undirected graph.
+
+        On nx.NetworkXError / nx.NetworkXAlgorithmError (sparse tracts that
+        cannot reach nswap), falls back to the unswapped spatial_knn_uniform
+        graph and increments self._under_mixed_tracts. Degree is preserved
+        either way; the fallback is the original spatial graph.
+        """
+        import torch
+
+        G = nx.Graph()
+        G.add_nodes_from(range(n_addresses))
+        edge_tensor = edge_index.numpy()
+        for col in range(edge_tensor.shape[1]):
+            u, v = int(edge_tensor[0, col]), int(edge_tensor[1, col])
+            if u < v:
+                G.add_edge(u, v)
+
+        n_edges = G.number_of_edges()
+        if n_edges < 2:
+            self._log("randomized: too few edges for swap; returning input graph")
+            return edge_index, torch.FloatTensor([1.0] * edge_index.shape[1])
+
+        n_swaps = max(1, 10 * n_edges)
+        max_tries = n_swaps * 10
+
+        try:
+            nx.double_edge_swap(G, nswap=n_swaps, max_tries=max_tries, seed=seed)
+        except (nx.NetworkXError, nx.NetworkXAlgorithmError) as e:
+            self._log(
+                f"randomized: swap failed n_nodes={n_addresses} n_edges={n_edges} "
+                f"seed={seed} reason={e}; using unswapped graph"
+            )
+            if not hasattr(self, '_under_mixed_tracts'):
+                self._under_mixed_tracts = 0
+            self._under_mixed_tracts += 1
+            # return the original spatial_knn_uniform graph; degree preserved
+            return edge_index, torch.FloatTensor([1.0] * edge_index.shape[1])
+
+        edge_list = []
+        for u, v in G.edges():
+            if u != v:
+                edge_list.extend([[u, v], [v, u]])
+
+        if not edge_list:
+            return self._create_minimal_connectivity(n_addresses)
+
+        edge_index_new = torch.LongTensor(edge_list).t().contiguous()
+        edge_weight_new = torch.FloatTensor([1.0] * len(edge_list))
+        self._log(
+            f"randomized: {n_addresses} nodes, {len(edge_list) // 2} undirected edges, seed={seed}"
+        )
+        return edge_index_new, edge_weight_new
+
     def _create_road_network_graph(self, addresses, roads):
         """Create graph with road network-based connectivity"""
         import torch
@@ -1019,48 +1233,64 @@ class DataLoader:
         return edge_index, edge_weight
 
     def _create_road_connectivity(self, addresses, roads):
-        """Create NetworkX graph from road segments and map addresses to roads"""
+        """Create NetworkX graph from road segments and map addresses to roads.
+
+        The road graph and BallTree are county-level structures that do not change
+        between tracts. Cache them in self._road_graph_cache after first build so
+        repeated calls (e.g. during preflight over 20 tracts) pay the build cost
+        only once (~2s) instead of once per tract (~40s total).
+        """
         from sklearn.neighbors import BallTree
-        
-        self._log("Building road network graph...")
-        
-        road_graph = nx.Graph()
-        
-        for idx, road in roads.iterrows():
-            if road.geometry.geom_type == 'LineString':
-                coords = list(road.geometry.coords)
-                
-                for i in range(len(coords) - 1):
-                    u, v = coords[i], coords[i + 1]
-                    length = ((u[0] - v[0])**2 + (u[1] - v[1])**2)**0.5 * 111000
-                    
-                    road_graph.add_edge(
-                        u, v, 
-                        length=length,
-                        road_id=idx,
-                        road_type=road.get('RTTYP', 'unknown')
-                    )
-        
-        if road_graph.number_of_nodes() == 0:
-            self._log("No road nodes found")
-            return road_graph, {}
-        
-        road_nodes = np.array(list(road_graph.nodes()))
-        tree = BallTree(np.radians(road_nodes), metric='haversine')
-        
+
+        if not hasattr(self, '_road_graph_cache') or self._road_graph_cache is None:
+            self._log("Building road network graph...")
+            road_graph = nx.Graph()
+            for idx, road in roads.iterrows():
+                if road.geometry.geom_type == 'LineString':
+                    coords = list(road.geometry.coords)
+                    for i in range(len(coords) - 1):
+                        u, v = coords[i], coords[i + 1]
+                        length = ((u[0] - v[0])**2 + (u[1] - v[1])**2)**0.5 * 111000
+                        road_graph.add_edge(
+                            u, v,
+                            length=length,
+                            road_id=idx,
+                            road_type=road.get('RTTYP', 'unknown')
+                        )
+            if road_graph.number_of_nodes() == 0:
+                self._log("No road nodes found")
+                return road_graph, {}
+            road_nodes = np.array(list(road_graph.nodes()))
+            tree = BallTree(np.radians(road_nodes), metric='haversine')
+            self._road_graph_cache = {
+                'road_graph': road_graph,
+                'road_nodes': road_nodes,
+                'tree': tree,
+            }
+            self._log(
+                f"Road graph cached: {road_graph.number_of_nodes()} nodes, "
+                f"{road_graph.number_of_edges()} edges"
+            )
+        else:
+            self._log("Road network graph: using cached instance")
+
+        road_graph = self._road_graph_cache['road_graph']
+        road_nodes = self._road_graph_cache['road_nodes']
+        tree       = self._road_graph_cache['tree']
+
         address_to_road_mapping = {}
         address_coords = np.array([[addr.geometry.x, addr.geometry.y] for _, addr in addresses.iterrows()])
-        
+
         distances, indices = tree.query(np.radians(address_coords), k=1)
         distances = distances.flatten() * 6371000
-        
+
         for i, (addr_idx, addr) in enumerate(addresses.iterrows()):
             if distances[i] < 500:
                 nearest_road_node = tuple(road_nodes[indices[i][0]])
                 address_to_road_mapping[i] = nearest_road_node
-        
+
         self._log(f"Mapped {len(address_to_road_mapping)}/{len(addresses)} addresses to road network")
-        
+
         return road_graph, address_to_road_mapping
 
     def _extract_network_edges(self, road_graph, address_to_road_mapping):

@@ -881,28 +881,44 @@ class DataLoader:
             self._log(f"Error loading roads: {str(e)}")
             return gpd.GeoDataFrame(geometry=[])
 
-    def create_spatial_accessibility_graph(self, addresses, accessibility_features, 
+    def create_spatial_accessibility_graph(self, addresses, accessibility_features,
                                             state_fips='47', county_fips='065',
                                             context_features=None):
         """Create graph with context features for context-aware learning"""
         import torch
         from torch_geometric.data import Data
-        
+
+        _VALID_VARIANTS = ('production', 'mlp_floor')
+        graph_variant = self.config.get('graph_variant', 'production')
+        if graph_variant not in _VALID_VARIANTS:
+            raise ValueError(
+                f"unknown graph_variant '{graph_variant}'; valid values are "
+                f"{_VALID_VARIANTS}. see experiments/ablation/05_graph_contribution/README.md"
+            )
+
         n_addresses = len(addresses)
-        self._log(f"Creating road network graph for {n_addresses} addresses...")
-        
-        roads = self.load_road_network(state_fips=state_fips, county_fips=county_fips)
-        
-        if len(roads) > 0:
-            edge_index, edge_weight = self._create_road_network_graph(addresses, roads)
+
+        if graph_variant == 'mlp_floor':
+            # self-loops only: no message passing between nodes
+            self._log(f"mlp_floor graph: {n_addresses} self-loop nodes, no inter-node edges")
+            indices = list(range(n_addresses))
+            edge_index = torch.LongTensor([indices, indices])
+            edge_weight = torch.FloatTensor([1.0] * n_addresses)
         else:
-            self._log("No road network available, using geographic connectivity")
-            edge_index, edge_weight = self._create_geographic_fallback_graph(addresses)
-        
-        if edge_index.shape[1] == 0:
-            self._log("WARNING: No edges created, adding minimal connectivity")
-            edge_index, edge_weight = self._create_minimal_connectivity(n_addresses)
-        
+            # production: road-network-plus-geographic graph (unchanged)
+            self._log(f"Creating road network graph for {n_addresses} addresses...")
+            roads = self.load_road_network(state_fips=state_fips, county_fips=county_fips)
+
+            if len(roads) > 0:
+                edge_index, edge_weight = self._create_road_network_graph(addresses, roads)
+            else:
+                self._log("No road network available, using geographic connectivity")
+                edge_index, edge_weight = self._create_geographic_fallback_graph(addresses)
+
+            if edge_index.shape[1] == 0:
+                self._log("WARNING: No edges created, adding minimal connectivity")
+                edge_index, edge_weight = self._create_minimal_connectivity(n_addresses)
+
         node_features = torch.FloatTensor(accessibility_features)
         
         if context_features is not None:

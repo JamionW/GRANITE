@@ -1,0 +1,5 @@
+sha: 87ca99cba1702be36eb01abcebd44af87adab609
+diff_stat:
+config.yaml             |  5 +++++
+ granite/data/loaders.py | 46 +++++++++++++++++++++++++++++++---------------
+ 2 files changed, 36 insertions(+), 15 deletions(-)

@@ -69,6 +69,11 @@ training:
   variation_weight: 0.8  # multi-tract trainer only; see step 4b sweep
 
 # =============================================================================
+# Graph Construction
+# =============================================================================
+graph_variant: production  # 'production' (road network + geographic) or 'mlp_floor' (self-loops only)
+
+# =============================================================================
 # Mixture of Experts
 # =============================================================================
 mixture:

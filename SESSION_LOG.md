@@ -782,3 +782,33 @@ Added `experiments/ablation/01_per_tract_std/CONFIG_SNAPSHOT_NOTE.md` documentin
 **Sanity check:** `00_baseline_for_step4` pooled BG r = 0.7537 SAGE, 0.7664 GCN-GAT (identical to 2a; baseline reproduced).
 
 **Cache invalidation:** None. All three variants were rerun from cache.
+
+## 2026-06-05: step 5 complete -- graph contribution boundary test
+
+**Files changed:**
+- `granite/data/loaders.py`: added `graph_variant` branch in `create_spatial_accessibility_graph`.
+  `production` runs the existing road-network path unchanged. `mlp_floor` returns self-loops only
+  (edge_index = [[i],[i]] for all i, edge_weight = 1.0). Unknown variant raises ValueError.
+- `config.yaml`: added `graph_variant: production` (default preserves current behavior).
+- `experiments/ablation/05_graph_contribution/`: run_sweep.py, make_figures.py, README.md,
+  post_run_handler.py, per-condition subdirs with results and figures.
+
+**Sweep:** 2 conditions x 2 architectures x 5 seeds x 20 tracts = 400 tract evaluations.
+constraint_mode=soft, variation_weight=0.8, seeds=[42, 17, 123, 2024, 7].
+
+**Sanity regression (production, seed=42):** PASSED within 1e-3 (BG r) / 2e-3 (std).
+
+**Results:**
+
+| condition | arch | within_tract_std | pooled_bg_r |
+|---|---|---|---|
+| production | SAGE | 0.0899 | 0.7632 +/- 0.0070 |
+| production | GCN-GAT | 0.0906 | 0.7639 +/- 0.0168 |
+| mlp_floor | SAGE | 0.0832 | 0.7714 +/- 0.0115 |
+| mlp_floor | GCN-GAT | 0.0812 | 0.7660 +/- 0.0099 |
+
+**Cache invalidation:** none. `graph_variant` affects only message-passing graph topology;
+node features and OSRM routing cache keys are unchanged.
+
+**Artifacts:** `experiments/ablation/05_graph_contribution/`
+**Git sha:** 87ca99cba1702be36eb01abcebd44af87adab609

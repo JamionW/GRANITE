@@ -93,6 +93,33 @@
 
 ## Milestone entries
 
+
+### Ablation 05_graph_contribution: graph contribution boundary test (2026-06-05)
+
+**Status:** complete.
+
+**Design.** Two conditions (production, mlp_floor), both architectures, five seeds [42, 17, 123, 2024, 7],
+20 tracts each. constraint_mode=soft, variation_weight=0.8. mlp_floor replaces the road-network graph with
+self-loops only -- SAGE and GAT reduce to node-wise functions on the input features.
+
+**Results.**
+
+| condition | arch | within_tract_std | pooled_bg_r |
+|---|---|---|---|
+| production | SAGE | 0.0899 +/- 0.0190 | 0.7632 |
+| production | GCN-GAT | 0.0906 +/- 0.0065 | 0.7639 |
+| mlp_floor | SAGE | 0.0832 +/- 0.0167 | 0.7714 |
+| mlp_floor | GCN-GAT | 0.0812 +/- 0.0068 | 0.7660 |
+
+**Verdict.**
+
+**SAGE: graph contributes.** mlp_floor falls outside the production seed band on Moran's I (0.6820 vs prod 0.8570+/-0.0267). The gap is the road-network graph's measurable contribution. A full construction sweep (road, feature-similarity, randomized) is the recommended follow-up to characterize which wiring type drives the gain.
+
+**GCN_GAT: graph contributes.** mlp_floor falls outside the production seed band on within-tract std (0.0812 vs prod 0.0906+/-0.0065) and Moran's I (0.6747 vs prod 0.8368+/-0.0237). The gap is the road-network graph's measurable contribution. A full construction sweep (road, feature-similarity, randomized) is the recommended follow-up to characterize which wiring type drives the gain.
+
+**Artifacts.** `experiments/ablation/05_graph_contribution/` git sha: 87ca99cba1702be36eb01abcebd44af87adab609
+
+---
 ### Ablation 00_baseline: frozen reference run (2026-05-18)
 
 **Status:** complete.

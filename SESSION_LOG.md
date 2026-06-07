@@ -1,5 +1,57 @@
 # GRANITE Session Log
 
+## 2026-06-07: CPU torch pin; README and STARTUP corrections
+
+**Files modified:**
+- `requirements.txt`: pinned `torch==2.10.0+cpu` with `--index-url https://download.pytorch.org/whl/cpu` and `--extra-index-url https://pypi.org/simple`; no CUDA or nvidia libraries are pulled
+- `STARTUP.md`: updated step 2 install timing to 1m7s (measured, semi-warm pip cache, CPU build); updated prose to describe CPU-only torch resolve; reduced troubleshooting block for torch/torch-geometric (CPU index is now the default path); updated step 4 runtime to 1.2s (measured in clean venv)
+- `README.md`: five grounded corrections -- (1) coordinate claim gated to "ablation indicates, confirmatory re-run pending"; (2) install block now runs `pip install -r requirements.txt` before `pip install -e .`; (3) feature count reconciled to 73/19 across Overview, Features, and Configuration sections; (4) time-based example replaces 3km distance example in Key Research Findings; (5) Python requirement tightened to 3.11
+- `Research_Status.md`: last-updated date
+
+**Verification:**
+- Clean virtualenv install: 1m7s, no nvidia or cuda packages
+- `python -c "from granite.models.gnn import AccessibilitySVIGNN; print('ok')"` output: `ok`
+- `python experiments/ablation/00_baseline_current/regen_figures.py` completed successfully, 1.2s total
+- Feature count grounded at pipeline.py: PROPTYPE_VOCAB has 5 entries; address-level = 7 individual + 4 LUCODE one-hot + 5 PROPTYPE one-hot + 3 NLCD = 19; full total = 30+15+9+19 = 73
+
+**Cache invalidation notes:** none; no routing or feature extraction logic was changed.
+
+## 2026-06-06: STARTUP.md corrections (verified install, paths, baselines)
+
+**Files created:**
+- `experiments/ablation/00_baseline_current/regen_figures.py`: regen script reading committed Dasymetric/Pycnophylactic results; produces bg_r_by_tract.png and aggregate_summary.png
+- `experiments/ablation/00_baseline_current/results/per_tract.csv`: copy of m0_n20_svi_parity per-tract metrics (GRANITE, Dasymetric, Pycnophylactic), force-added to git
+- `experiments/ablation/00_baseline_current/results/aggregate.csv`: copy of m0_n20_svi_parity pooled metrics, force-added to git
+
+**Files modified:**
+- `STARTUP.md`: complete rewrite -- canonical run now points at 00_baseline_current (current baselines), step 3 uses AccessibilitySVIGNN import, install timing reflects measured warm-cache (3-5s) vs cold Codespace estimate, output paths verified CWD-independent, IDW/kriging retired-baseline note added
+- `experiments/ablation/00_baseline/regen_figures.py`: fixed print messages to show absolute paths (FIGURES_DIR / filename) instead of hardcoded relative strings; CWD-independence confirmed by running from /tmp
+- `.devcontainer/devcontainer.json`: added postCreateCommand to auto-install dependencies on Codespace creation
+
+**What changed and why:**
+- original STARTUP.md used invented install timing, wrong import check, misleading output path, and surfaced IDW/kriging as current baselines
+- clean-venv install (semi-warm pip cache): 2m24s measured; torch 2.12.0 with CUDA runtime resolved; no compiler required; fully warm cache < 10s
+- 00_baseline block_group_validation.json carries IDW/kriging keys (retired); 00_baseline_current points at m0 Dasymetric/Pycnophylactic results
+- canonical run changed from 00_baseline regen to 00_baseline_current regen
+
+**Cache invalidation notes:** none.
+
+## 2026-06-06: STARTUP.md authorship (first-time setup guide)
+
+**Files created:**
+- `STARTUP.md`: zero-context setup guide for committee members opening the repo in Codespaces
+
+**Files modified:**
+- `README.md`: added single line near top pointing to STARTUP.md for first-time setup
+
+**What changed and why:**
+- audited the clean-clone runnable surface: data/raw/, data/processed/, and granite_cache/ are all gitignored; a fresh clone has no data for the main granite CLI
+- canonical run identified as `python experiments/ablation/00_baseline/regen_figures.py`, which reads two committed result files (per_tract_metrics.csv, block_group_validation.json) and produces three PNG figures; verified to run in ~7 seconds with no OSRM or external data dependency
+- OSRM and full pipeline steps placed in optional/unverified section only
+- devcontainer postStartCommand (start_osrm.sh) noted to fail gracefully when OSRM data is absent; does not affect canonical run
+
+**Cache invalidation notes:** none -- no changes to feature extraction, routing, or training.
+
 ## 2026-06-05: baseline unification + BG-r metric provenance audit
 
 **Files created:**

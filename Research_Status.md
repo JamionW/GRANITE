@@ -4,9 +4,9 @@
 
 **Codename:** GRANITE
 
-**Last updated:** 2026-06-05
+**Last updated:** 2026-06-07 (CPU torch pin; README and STARTUP corrections)
 
-**Active branch:** `main` (HEAD: `486279248`)
+**Active branch:** `main` (HEAD: `f29423d`)
 
 ---
 

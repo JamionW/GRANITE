@@ -136,3 +136,4 @@ granite_inline_diagnostics.py
 # But keep example data
 !data/example/
 !data/README.md
+.claude/

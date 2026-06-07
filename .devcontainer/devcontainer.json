@@ -6,6 +6,7 @@
       "moby": false
     }
   },
+  "postCreateCommand": "pip install -r /workspaces/GRANITE/requirements.txt && pip install -e /workspaces/GRANITE",
   "postStartCommand": "bash /workspaces/GRANITE/granite/scripts/start_osrm.sh",
   "forwardPorts": [5000, 5001],
   "portsAttributes": {

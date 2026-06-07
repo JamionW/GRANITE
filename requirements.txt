@@ -17,8 +17,10 @@ geopy>=2.3.0
 libpysal>=4.6.0
 esda>=2.4.0
 
-# deep learning
-torch>=1.10.0
+# deep learning (cpu-only wheel; no nvidia/cuda runtime libraries)
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+torch==2.10.0+cpu
 torch-geometric>=2.0.0
 
 # visualization

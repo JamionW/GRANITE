@@ -1,0 +1,4 @@
+method,median_bg_r,ci_low_95,ci_high_95,n_tracts,pooled_bg_r,pooled_bg_r_ci_low,pooled_bg_r_ci_high,pooled_n_bgs
+GRANITE,0.3901,-0.4452,0.6974,19,0.7692,0.6602,0.8527,69
+Dasymetric,0.7867,0.2531,0.8627,19,0.8018,0.7118,0.871,69
+Pycnophylactic,0.2078,-0.3526,0.5289,19,0.7678,0.6516,0.8579,69

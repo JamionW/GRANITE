@@ -4,6 +4,8 @@ Constraint-preserving graph neural network for spatial disaggregation of
 the CDC Social Vulnerability Index from census tract resolution to individual
 addresses in Hamilton County, Tennessee (FIPS 47065).
 
+First-time setup: see [STARTUP.md](STARTUP.md).
+
 ## Research Question
 
 Under what conditions does hard aggregate constraint enforcement improve or
@@ -12,7 +14,7 @@ feature classes survive constraint correction?
 
 ## Overview
 
-GRANITE accepts known tract-level SVI values as hard constraints and learns how vulnerability distributes spatially within each tract based on 73 address-level features: parcel attributes, building footprints, flood zones, land cover, multi-modal accessibility, and socioeconomic controls. Graph convolution over a road-network-derived spatial graph produces address-level SVI estimates.
+GRANITE accepts known tract-level SVI values as hard constraints and learns how vulnerability distributes spatially within each tract based on 73 address-level features (canonical full configuration): parcel attributes, building footprints, flood zones, land cover, multi-modal accessibility, and socioeconomic controls. Graph convolution over a road-network-derived spatial graph produces address-level SVI estimates.
 
 Disaggregation is treated as an allocation problem: the tract mean is fixed, and the GNN learns the within-tract distribution.
 
@@ -35,7 +37,7 @@ Hamilton County, Tennessee (FIPS 47065): 85 tracts with valid SVI data, 102,647 
 
 ## Features
 
-72+ features per address (variable depending on property type coverage), organized in four groups:
+73 features per address in the canonical full configuration, organized in four groups:
 
 **30 base accessibility features** (10 per destination type: employment, healthcare, grocery). Temporal metrics (min, mean, median travel time), count metrics (destinations reachable within 5/10/15 min), and equity metrics (drive advantage ratio, dispersion, time range, percentile rank).
 
@@ -43,7 +45,7 @@ Hamilton County, Tennessee (FIPS 47065): 85 tracts with valid SVI data, 102,647 
 
 **9 socioeconomic controls.** Tract-level ACS variables from CDC SVI: no vehicle (EP_NOVEH), poverty (EP_POV150), unemployment (EP_UNEMP), no high school diploma (EP_NOHSDP), uninsured (EP_UNINSUR), mobile homes (EP_MOBILE), crowded housing (EP_CROWD), population (E_TOTPOP), housing units (E_HU). Tract-level constants.
 
-**18 address-level features** (variable, 15-19 depending on property type coverage). Building footprint (log area, vertex count), FEMA flood zone (SFHA binary), OSM building type (residential binary), parcel data (log appraised value, build-to-land ratio, log acres), land use code (4-category one-hot), property type (up to 5 one-hot), NLCD land cover (classification code, impervious surface %, tree canopy %).
+**19 address-level features** (canonical full configuration; count is lower when source columns are absent). Building footprint (log area, vertex count), FEMA flood zone (SFHA binary), OSM building type (residential binary), parcel data (log appraised value, build-to-land ratio, log acres), land use code (4-category one-hot), property type (5-category one-hot, all columns emitted even if a type is absent from a tract), NLCD land cover (classification code, impervious surface %, tree canopy %). The four groups sum to 30+15+9+19=73 in the canonical run.
 
 See `docs/FEATURES.md` for the complete feature reference.
 
@@ -80,6 +82,7 @@ The **per-tract BG r** is a secondary diagnostic: the same correlation computed 
 # clone and install
 git clone https://github.com/JamionW/GRANITE.git
 cd GRANITE
+pip install -r requirements.txt
 pip install -e .
 
 # OSRM setup (required for accessibility computation)
@@ -100,7 +103,7 @@ python granite/scripts/acquire_address_features.py
 python data/raw/address_features/join_to_addresses.py
 ```
 
-**Requirements:** Python 3.8+, PyTorch, PyTorch Geometric, GeoPandas. See `requirements.txt` for full dependencies.
+**Requirements:** Python 3.11, PyTorch (CPU build), PyTorch Geometric, GeoPandas. See `requirements.txt` for full dependencies.
 
 ## Usage
 
@@ -158,7 +161,7 @@ First runs compute OSRM travel times for all origin/destination pairs (can take 
 
 ## Key Research Findings
 
-Accessibility features (OSRM-based travel times) proved counterproductive for within-tract disaggregation through rigorous ablation; raw spatial coordinates outperformed them. Constraint enforcement dominates learning: post-hoc correction to satisfy tract-level aggregate constraints does most of the predictive work. Features that correlate strongly with SVI at tract level (e.g., grocery count within 3km) actively hurt address-level disaggregation due to ecological fallacy effects.
+Ablation results indicate that accessibility features (OSRM-based travel times) may be counterproductive for within-tract disaggregation, with raw spatial coordinates outperforming them in initial runs. A confirmatory coordinate-artifact re-run is pending before this is treated as a settled finding. Constraint enforcement dominates learning: post-hoc correction to satisfy tract-level aggregate constraints does most of the predictive work. Features that correlate strongly with SVI at tract level (e.g., employment count reachable within 10 minutes) appear to hurt address-level disaggregation in ablation, consistent with ecological fallacy effects, though this direction also awaits confirmation.
 
 ## Author
 

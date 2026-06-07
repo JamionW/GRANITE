@@ -53,19 +53,19 @@ def main():
     plot_ablation_spatial_std_by_svi(
         df, str(FIGURES_DIR / 'spatial_std_by_svi.png')
     )
-    print('written: figures/spatial_std_by_svi.png')
+    print(f'written: {FIGURES_DIR / "spatial_std_by_svi.png"}')
 
     print('\n--- morans_i_by_tract ---')
     plot_ablation_morans_i_by_tract(
         df, str(FIGURES_DIR / 'morans_i_by_tract.png')
     )
-    print('written: figures/morans_i_by_tract.png')
+    print(f'written: {FIGURES_DIR / "morans_i_by_tract.png"}')
 
     print('\n--- block_group_scatter ---')
     plot_ablation_block_group_scatter(
         per_tract_bg, bg_validation, str(FIGURES_DIR / 'block_group_scatter.png')
     )
-    print('written: figures/block_group_scatter.png')
+    print(f'written: {FIGURES_DIR / "block_group_scatter.png"}')
 
     print('\ndone.')
 

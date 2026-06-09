@@ -51,7 +51,7 @@ OUTPUT_DIR = './output/coord_artifact'
 
 def prediction_csv_path(mode, fips):
     return os.path.join(INPUT_DIR, mode, f'tract_{fips}',
-                        f'granite_predictions_tract_{fips}_{mode}.csv')
+                        'granite_predictions.csv')
 
 
 # =============================================================================

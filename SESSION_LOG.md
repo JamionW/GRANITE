@@ -884,3 +884,23 @@ node features and OSRM routing cache keys are unchanged.
 
 **Artifacts:** `experiments/ablation/05_graph_contribution/`
 **Git sha:** 87ca99cba1702be36eb01abcebd44af87adab609
+
+---
+
+## 2026-06-09 — Cut ungrounded address-level coordinate/accessibility figures
+
+**Files changed:** `Research_Status.md`, `docs/FEATURES.md`, `CLAUDE.md`
+
+**What changed and why:** Removed all four assertion sites for the ungrounded figures r=0.671 (spatial coordinates at address level) and r=0.033 (accessibility features at address level). These figures traced only to `output/coord_artifact_test/` and `output/coord_artifact/` artifacts deleted 2026-04-27; no surviving committed artifact supports them at any file:line. The `experiments/audits/outstanding_items_reconciliation.md` audit (already committed) documented this gap.
+
+Specific excisions:
+- `Research_Status.md`: removed numbered item 2 ("Ecological fallacy at address scale") in full; renumbered former items 3-7 to 2-6.
+- `docs/FEATURES.md`: removed the entire "### Empirical finding" section (heading + four sentences).
+- `CLAUDE.md` Feature matrix section: removed the paragraph "Accessibility features (travel times...) do not treat it as a data quality problem."
+- `CLAUDE.md` Key result reference points: removed two bullets ("Spatial coordinates alone: r ~ 0.67" and "Accessibility features alone: r ~ 0.03").
+
+The audit file (`experiments/audits/outstanding_items_reconciliation.md`) and existing on-disk BG-validation outputs under `output/coord_artifact/` were left untouched. The audit file correctly records the figures as ungrounded and should remain as provenance.
+
+Ecological-fallacy finding re-grounding deferred to a separate experiment. The `scripts/coord_artifact_experiment.py` and `scripts/coord_artifact_bg_validation.py` infrastructure exists and can produce a committed artifact when re-run.
+
+**Cache invalidation:** none. No pipeline logic changed.

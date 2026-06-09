@@ -45,10 +45,6 @@ Of these, 9 are tract-level constants (socioeconomic controls). Modal features w
 | `healthcare` | CMS Hospital Compare | 12 facilities |
 | `grocery` | OpenStreetMap supermarket/grocery tags | 189 stores |
 
-### Empirical finding
-
-Accessibility features show near-zero within-tract variance (r ~ 0.03 with SVI predictions). Raw spatial coordinates (r ~ 0.67) dramatically outperform them as predictors. This is a validated empirical finding, not a data quality problem. In Hamilton County, addresses within a single tract are close enough that travel-time differences are negligible.
-
 ---
 
 ## Group 2: Modal Accessibility (15 features)

@@ -954,3 +954,29 @@ The audit file (`experiments/audits/outstanding_items_reconciliation.md`) and ex
 Ecological-fallacy finding re-grounding deferred to a separate experiment. The `scripts/coord_artifact_experiment.py` and `scripts/coord_artifact_bg_validation.py` infrastructure exists and can produce a committed artifact when re-run.
 
 **Cache invalidation:** none. No pipeline logic changed.
+
+---
+
+## 2026-06-10 -- Persist per-address predictions for n20, provenance-anchored
+
+**Files changed:** `scripts/persist_per_address_predictions.py` (new), `experiments/recovery/per_address_predictions/` (new)
+
+**What changed and why:** PATH B (no checkpoint found). Re-ran GRANITE m0/soft on warm cache for all 20 n20 tracts under the frozen config (GraphSAGE, seed=42, 150 epochs, apply_post_correction=True, neighbor_tracts=0). Captured per-address SVI predictions for GRANITE, Dasymetric, and Pycnophylactic from the same pipeline run so all three arrays share the same address ordering.
+
+Provenance guard passed with all deltas well within tol=0.005:
+
+| method | frozen | reproduced | delta |
+|---|---|---|---|
+| GRANITE | 0.7692 | 0.769165 | 0.000035 |
+| Dasymetric | 0.8018 | 0.801786 | 0.000014 |
+| Pycnophylactic | 0.7678 | 0.767751 | 0.000049 |
+
+**Artifacts:**
+- `experiments/recovery/per_address_predictions/granite_m0.parquet` (39535 rows)
+- `experiments/recovery/per_address_predictions/dasymetric.parquet` (39535 rows)
+- `experiments/recovery/per_address_predictions/pycnophylactic.parquet` (39535 rows)
+- `experiments/recovery/per_address_predictions/provenance.json` (config hash 778295c2bdb6ed21, all three r values, index alignment note)
+
+Index alignment: fips + address_idx (0-based within tract), row order matches n20_feature_matrix.csv exactly.
+
+**Cache invalidation:** none. Pipeline logic unchanged; pyarrow added as a dependency.

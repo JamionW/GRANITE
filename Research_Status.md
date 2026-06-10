@@ -333,4 +333,16 @@ experiments/ablation/
     results/zero_var_columns.csv           # 530 clamped (tract, feature_idx) pairs
     results/feature_importance/            # sage_importance.csv, gcngat_importance.csv
     figures/                               # 8 PNG figures (6 standard + 2 comparison)
+
+experiments/recovery/
+  per_address_predictions/
+    granite_m0.parquet                     # 39535 rows; fips, address_idx, svi_pred
+    dasymetric.parquet                     # 39535 rows; same index
+    pycnophylactic.parquet                 # 39535 rows; same index
+    provenance.json                        # config hash, seed, reproduced BG r all 3 methods
 ```
+
+**Per-address arrays (n20, provenance-anchored).** PATH B re-run (no checkpoint).
+GRANITE m0/soft GraphSAGE seed=42, 150 epochs, apply_post_correction=True.
+Provenance guard passed (tol=0.005): GRANITE delta=3.5e-5, Dasymetric=1.4e-5, Pycnophylactic=4.9e-5.
+Index alignment: fips + address_idx (0-based within tract); row order matches n20_feature_matrix.csv.

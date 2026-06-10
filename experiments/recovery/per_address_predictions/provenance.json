@@ -1,0 +1,61 @@
+{
+  "source_run": "persist_per_address_predictions.py PATH B re-run",
+  "source_reference": "experiments/ablation/00_baseline_current/results/aggregate.csv",
+  "frozen_bg_r": {
+    "GRANITE": 0.7692,
+    "Dasymetric": 0.8018,
+    "Pycnophylactic": 0.7678
+  },
+  "reproduced_bg_r": {
+    "GRANITE": 0.769165,
+    "Dasymetric": 0.801786,
+    "Pycnophylactic": 0.767751
+  },
+  "deltas": {
+    "GRANITE": 3.5e-05,
+    "Dasymetric": 1.4e-05,
+    "Pycnophylactic": 4.9e-05
+  },
+  "all_within_tol": true,
+  "tol": 0.005,
+  "config_hash": "778295c2bdb6ed21",
+  "config_key_settings": {
+    "architecture": "sage",
+    "seed": 42,
+    "epochs": 150,
+    "apply_post_correction": true,
+    "neighbor_tracts": 0,
+    "target": "svi"
+  },
+  "n20_tracts": [
+    "47065000600",
+    "47065000700",
+    "47065001200",
+    "47065001800",
+    "47065001900",
+    "47065002400",
+    "47065003400",
+    "47065010431",
+    "47065010433",
+    "47065010435",
+    "47065011311",
+    "47065011321",
+    "47065011324",
+    "47065011325",
+    "47065011326",
+    "47065011402",
+    "47065011413",
+    "47065011444",
+    "47065011447",
+    "47065011900"
+  ],
+  "total_addresses": 39535,
+  "n20_expected_rows": 39535,
+  "index_alignment": "fips + address_idx (0-based within tract); matches n20_feature_matrix.csv row order",
+  "parquet_paths": {
+    "GRANITE": "experiments/recovery/per_address_predictions/granite_m0.parquet",
+    "Dasymetric": "experiments/recovery/per_address_predictions/dasymetric.parquet",
+    "Pycnophylactic": "experiments/recovery/per_address_predictions/pycnophylactic.parquet"
+  },
+  "wall_time_s": 785.6
+}

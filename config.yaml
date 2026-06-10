@@ -73,8 +73,10 @@ training:
 # =============================================================================
 # valid: production, mlp_floor, spatial_knn_uniform, road_network_uniform, randomized
 graph_variant: production
-# k used by spatial_knn_uniform and road_network_uniform (step 5b)
+# k used by spatial_knn_uniform and randomized variants (step 5b)
 graph_knn_k: 10
+# k used by road_network_uniform only; calibrated to match spatial_knn_uniform mean degree
+road_knn_k: 9
 # seed for degree-preserving swap in randomized variant (step 5b)
 graph_draw_seed: 42
 

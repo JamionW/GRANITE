@@ -957,6 +957,62 @@ Ecological-fallacy finding re-grounding deferred to a separate experiment. The `
 
 ---
 
+## 2026-06-10 -- Delinquency convergent validity (Door 2 acquisition)
+
+**Files created:**
+- `scripts/delinquency_convergent_validity.py`: per-tract partial Spearman analysis; pre-registered positive direction; Wilcoxon tests vs zero and paired; completeness and binary robustness checks
+- `experiments/recovery/delinquency_convergent_validity/results.json`: full numeric results
+- `experiments/recovery/delinquency_convergent_validity/per_tract_partial.csv`: partial rho per tract per method, 16 primary tracts
+- `experiments/recovery/delinquency_convergent_validity/summary.txt`: plaintext report
+
+**Data join:** n20 addresses (lat/lon) -> parcels.shp via gpd.sjoin(predicate='within'), CRS EPSG:6576. Parcel key MAP|GROUP_|PARCEL (strip+upper, blank group -> ''). Bill Year filter [2000, 2026]. Match rate: 39,476/39,535 (99.9%). Addresses with any delinquency: 1,866 (4.7%).
+
+**Index alignment:** confirmed across granite_m0.parquet, dasymetric.parquet, pycnophylactic.parquet, and n20_feature_matrix.csv before any statistic computed.
+
+**Pre-registered direction:** positive partial Spearman (higher svi_pred -> more delinquency-prone addresses after controlling log_appvalue). Committed in script docstring.
+
+**Primary statistic:** partial Spearman r_xy.z = (r_xy - r_xz*r_yz) / sqrt((1-r_xz^2)(1-r_yz^2)), x=method_svi, y=n_delinq_years, z=log_appvalue. Per tract, 16 primary tracts only.
+
+**Per-tract partial rho (n=16 primary tracts):**
+
+| method | median | IQR | positive/negative tracts |
+|---|---|---|---|
+| granite | +0.003 | [-0.017, +0.018] | 10/6 |
+| dasymetric | -0.012 | [-0.029, +0.006] | 5/11 |
+| pycnophylactic | +0.019 | [-0.008, +0.039] | 11/5 |
+
+**Wilcoxon signed-rank (one-sided, vs 0, n=16):**
+- granite: W=75.0, p=0.3718
+- dasymetric: W=41.0, p=0.9205
+- pycnophylactic: W=99.0, p=0.0583 (marginal)
+
+**Wilcoxon paired (GRANITE > baseline, n=16 pairs):**
+- granite vs dasymetric: W=93.0, p=0.1057
+- granite vs pycnophylactic: W=46.0, p=0.8739
+
+3 vs-zero and 2 between-method tests; no correction applied; counts flagged.
+
+**Completeness (building features vs n_delinq_years, n=16):**
+- build_to_land_ratio: median=-0.101, IQR=[-0.124, -0.075]
+- log_acres: median=-0.070, IQR=[-0.121, -0.049]
+- log_bldg_footprint_m2: median=-0.063, IQR=[-0.117, -0.038]
+Building features weakly negatively correlated with delinquency (larger/newer buildings less delinquency-prone); shared-driver concern not ruled out but weak.
+
+**Binary robustness (n=16):** granite +0.003, dasymetric -0.012, pycnophylactic +0.020. Consistent with continuous results.
+
+**Full n20 secondary (20 tracts):** granite +0.005, dasymetric -0.014, pycnophylactic +0.019. Sparse-tract deltas negligible.
+
+**Verdicts:**
+- granite: null/inconclusive (p=0.372, positive median, n=16 power limit)
+- dasymetric: null (p=0.920, negative median)
+- pycnophylactic: marginal (p=0.058, positive median)
+
+**Interpretation:** The primary vs-zero test is null for GRANITE. Cannot separate "GNN allocates noise" from "proxy too attenuated by escrow ceiling." Dasymetric is negative, consistent with its ancillary-variable (impervious surface) allocation not tracking socioeconomic distress. Pycnophylactic's marginal positive is unexpected given its spatial smoothing; possibly an artifact of small n. A positive GRANITE result would have been conservative given attenuation; the null leaves the recovery question open.
+
+**Cache invalidation notes:** none. No routing or feature extraction logic changed.
+
+---
+
 ## 2026-06-10 -- Persist per-address predictions for n20, provenance-anchored
 
 **Files changed:** `scripts/persist_per_address_predictions.py` (new), `experiments/recovery/per_address_predictions/` (new)

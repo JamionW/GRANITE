@@ -1,0 +1,134 @@
+{
+  "index_alignment": "confirmed: identical (fips, address_idx) across granite_m0, dasymetric, pycnophylactic, and n20 feature matrix",
+  "n_addresses": 39535,
+  "n_primary_tracts": 16,
+  "n_sparse_tracts_excluded_primary": 4,
+  "pre_registered_direction": "positive partial Spearman (higher svi_pred -> more delinquency-prone)",
+  "primary_partial_rho": {
+    "granite": {
+      "median": 0.002819,
+      "q25": -0.017105,
+      "q75": 0.017656,
+      "n_positive": 10,
+      "n_negative": 6,
+      "n_tracts": 16
+    },
+    "dasymetric": {
+      "median": -0.01199,
+      "q25": -0.029162,
+      "q75": 0.005829,
+      "n_positive": 5,
+      "n_negative": 11,
+      "n_tracts": 16
+    },
+    "pycnophylactic": {
+      "median": 0.01904,
+      "q25": -0.007614,
+      "q75": 0.039285,
+      "n_positive": 11,
+      "n_negative": 5,
+      "n_tracts": 16
+    }
+  },
+  "wilcoxon_vs_zero": [
+    {
+      "label": "granite vs 0",
+      "n": 16,
+      "statistic": 75.0,
+      "p": 0.37178,
+      "median": 0.002819
+    },
+    {
+      "label": "dasymetric vs 0",
+      "n": 16,
+      "statistic": 41.0,
+      "p": 0.920471,
+      "median": -0.01199
+    },
+    {
+      "label": "pycnophylactic vs 0",
+      "n": 16,
+      "statistic": 99.0,
+      "p": 0.058334,
+      "median": 0.01904
+    }
+  ],
+  "wilcoxon_paired": [
+    {
+      "label": "granite vs dasymetric",
+      "n_pairs": 16,
+      "statistic": 93.0,
+      "p": 0.105713
+    },
+    {
+      "label": "granite vs pycnophylactic",
+      "n_pairs": 16,
+      "statistic": 46.0,
+      "p": 0.873886
+    }
+  ],
+  "binary_robustness_median_partial_rho": {
+    "granite": 0.003244,
+    "dasymetric": -0.011523,
+    "pycnophylactic": 0.019563
+  },
+  "full_n20_secondary": {
+    "n_tracts": 20,
+    "median_partial_rho": {
+      "granite": 0.004982,
+      "dasymetric": -0.014386,
+      "pycnophylactic": 0.01904
+    },
+    "wilcoxon_vs_zero": [
+      {
+        "label": "granite vs 0 (all 20)",
+        "n": 20,
+        "statistic": 121.0,
+        "p": 0.285298,
+        "median": 0.004982
+      },
+      {
+        "label": "dasymetric vs 0 (all 20)",
+        "n": 20,
+        "statistic": 63.0,
+        "p": 0.943007,
+        "median": -0.014386
+      },
+      {
+        "label": "pycnophylactic vs 0 (all 20)",
+        "n": 20,
+        "statistic": 150.0,
+        "p": 0.048654,
+        "median": 0.01904
+      }
+    ]
+  },
+  "completeness_building_vs_delinquency": {
+    "build_to_land_ratio": {
+      "median_spearman": -0.100641,
+      "q25": -0.123936,
+      "q75": -0.07515
+    },
+    "log_acres": {
+      "median_spearman": -0.069742,
+      "q25": -0.121445,
+      "q75": -0.049064
+    },
+    "log_bldg_footprint_m2": {
+      "median_spearman": -0.063208,
+      "q25": -0.117039,
+      "q75": -0.037953
+    }
+  },
+  "verdicts": {
+    "granite": "null/inconclusive (p=0.372, positive median, n=16 power limit)",
+    "dasymetric": "null (p=0.920, negative median)",
+    "pycnophylactic": "marginal (p<0.10, positive median)"
+  },
+  "caveats": [
+    "n=16 primary tracts; between-method comparison underpowered",
+    "3 vs-zero + 2 between-method tests; no correction applied; counts flagged",
+    "escrow ceiling: mortgaged owner-occupied under-reports delinquency; attenuates toward null",
+    "convergent validity against independent distress proxy; not recovery of true address-level SVI"
+  ]
+}

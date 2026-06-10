@@ -1,5 +1,55 @@
 # GRANITE Session Log
 
+## 2026-06-10: Feature taxonomy -- variance decomposition on n20 matrix (Milestones A-C)
+
+**Files created:**
+- `scripts/capture_feature_matrix.py`: assembles 73-feature matrix per tract via pipeline methods; no GNN training; no normalization
+- `scripts/variance_decomposition.py`: one-way ANOVA partition (eta_sq, within_share) + tract_svi_r coupling; no normalization
+- `experiments/ecological_fallacy/n20_feature_matrix.csv`: 39,535 rows x 78 cols (fips, address_idx, lat, lon, tract_svi + 73 features), 20 n20 tracts, natural units
+- `experiments/ecological_fallacy/variance_decomposition.csv`: 75 rows, one per analyzed column (73 features + lat/lon)
+- `experiments/ecological_fallacy/variance_decomposition_summary.md`: class-level table, four-corners prose, coupling correlations, caveat
+- `experiments/ecological_fallacy/Ecological_Fallacy_Finding.md`: supersedes deleted ungrounded r=0.671/0.033 claims; new mechanism grounded in committed CSV
+
+**Files modified:**
+- `.gitignore`: added `!experiments/**/*.csv` negation so artifacts under experiments/ are not masked by `*.csv` rule
+- `Research_Status.md`: added locked-in finding 7 (feature taxonomy) with caveat; no other findings renumbered
+- `SESSION_LOG.md`: this entry
+
+**What superseded what:**
+- Ungrounded claims r=0.671 (coordinates) and r=0.033 (accessibility) were removed in commit 7dc0617 (2026-06-09) because they traced to a deleted output with no surviving artifact.
+- Those claims have been replaced by committed variance decomposition numbers: eta_sq=0.979 for coordinates (near-perfect tract proxy), accessibility median within_share=0.230 (not flat within tracts).
+- The old ecological-fallacy framing (coordinates outperform accessibility at address level) is superseded by the taxonomy finding: aggregate SVI coupling and within-tract variance share are near-orthogonal, not positively coupled as the fallacy story required.
+
+**Key numbers (from variance_decomposition.csv):**
+- Coupling correlation Pearson(eta_sq, |tract_svi_r|): -0.052 (n=75)
+- Coupling correlation accessibility+modal+building subset: -0.269 (n=64)
+- Coordinate median eta_sq: 0.979 (97.9% between-tract)
+- Accessibility median eta_sq: 0.770 (within_share 0.230)
+- Building median eta_sq: 0.094 (within_share 0.906)
+- Socioeconomic median eta_sq: 1.000 (zero within-tract variance by construction; passes invariant check)
+
+**Caveat recorded:**
+eta_sq measures variance location, not predictive validity. No address-level SVI ground truth exists.
+The taxonomy locates candidate features; it does not validate them.
+
+**Cache invalidation notes:** none; capture script reads cached accessibility features; no routing logic changed.
+
+## 2026-06-09: Remove ungrounded ecological-fallacy figures (r=0.671/0.033)
+
+**Files modified:**
+- `Research_Status.md`: removed item 2 ("Ecological fallacy at address scale"; r=0.033/r=0.671 assertion); renumbered items 3-7 to 2-6
+- `docs/FEATURES.md`: removed "Empirical finding" subsection (r~0.03/r~0.67 claims)
+- `CLAUDE.md`: removed two paragraphs citing r~0.67/r~0.03 from "Feature matrix" and "Key result reference points" sections
+- `SESSION_LOG.md`: this prior entry (appended)
+
+**What changed and why:**
+All four assertion sites for r=0.671 (coordinates) and r=0.033 (accessibility) were surgical excisions.
+Figures traced to `output/coord_artifact/` which is gitignored (`.gitignore:67`) and never committed.
+On-disk `output/coord_artifact/bg_validation_report.txt` contains a *different* metric (BG-level r, not address-level r) and does not support the claim. `Ecological_Fallacy_Finding.md` did not exist.
+The audit file `experiments/audits/outstanding_items_reconciliation.md` documents this provenance and was left untouched.
+
+**Cache invalidation notes:** none.
+
 ## 2026-06-07: CPU torch pin; README and STARTUP corrections
 
 **Files modified:**

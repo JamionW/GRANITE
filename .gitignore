@@ -57,6 +57,7 @@ data/processed/
 *.prj
 *.cpg
 *.csv
+!experiments/**/*.csv
 !requirements.txt
 !config/*.yaml
 *.zip

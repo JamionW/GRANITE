@@ -22,6 +22,7 @@ Usage:
     python experiments/ablation/05b_topology_specificity/run_sweep.py --check-only
 """
 import argparse
+import csv
 import json
 import math
 import os
@@ -440,6 +441,8 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
     pipeline.config = cfg
     pipeline.data_loader.config['graph_variant'] = condition
     pipeline.data_loader.config['graph_draw_seed'] = graph_draw_seed
+    pipeline.data_loader.config['graph_knn_k'] = cfg.get('graph_knn_k', 10)
+    pipeline.data_loader.config['road_knn_k'] = cfg.get('road_knn_k', cfg.get('graph_knn_k', 10))
     pipeline.data_loader.config['processing'] = cfg['processing']
 
     # reset under_mixed counter for this seed run
@@ -521,8 +524,35 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
 # condition sweep
 # ---------------------------------------------------------------------------
 
-def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=False):
+def _append_trial_csv(csv_path, condition, arch, seed_result):
+    """append one trial row to the incremental CSV; creates with header if new."""
+    is_new = not csv_path.exists()
+    with open(csv_path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            'condition', 'arch', 'training_seed', 'graph_draw_seed',
+            'morans_i', 'within_tract_std', 'pooled_bg_r',
+            'n_tracts', 'runtime_s',
+        ])
+        if is_new:
+            writer.writeheader()
+        writer.writerow({
+            'condition':        condition,
+            'arch':             arch,
+            'training_seed':    seed_result.get('training_seed'),
+            'graph_draw_seed':  seed_result.get('graph_draw_seed'),
+            'morans_i':         seed_result.get('morans_i'),
+            'within_tract_std': seed_result.get('within_tract_std'),
+            'pooled_bg_r':      seed_result.get('pooled_bg_r'),
+            'n_tracts':         seed_result.get('n_tracts'),
+            'runtime_s':        seed_result.get('runtime_s'),
+        })
+
+
+def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=False,
+                  incremental_csv=None, archs=None):
     """Run all (arch, seed) combinations for one condition. Returns nested results dict."""
+    if archs is None:
+        archs = ARCHITECTURES
     print(f'\n[step05b] === condition: {condition} ===')
     cond_dir = STEP5B_ROOT / condition
     cond_dir.mkdir(parents=True, exist_ok=True)
@@ -556,7 +586,7 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
         seed_label = 'training_seed'
 
     results = {}
-    for arch in ARCHITECTURES:
+    for arch in archs:
         arch_seed_results = []
         print(f'\n[step05b] {condition} / {ARCH_LABELS[arch]}')
 
@@ -570,6 +600,9 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
             )
             seed_result['runtime_s'] = round(time.time() - t0, 1)
             arch_seed_results.append(seed_result)
+            if incremental_csv is not None:
+                _append_trial_csv(incremental_csv, condition, arch, seed_result)
+                print(f'[step05b] trial row appended to {incremental_csv.name}')
             print(
                 f'[step05b] {seed_label}={varying_seed} done: '
                 f'std={seed_result["within_tract_std"]:.4f} '
@@ -633,6 +666,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--condition', choices=CONDITIONS + ['all'], default='all',
                         help='which condition to run (default: all)')
+    parser.add_argument('--sage-only', action='store_true',
+                        help='restrict to SAGE architecture only')
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--dry-run', action='store_true',
                         help='validate setup without running training')
@@ -674,7 +709,8 @@ def main():
     with open(REPO_ROOT / 'config.yaml') as _f:
         _live = yaml.safe_load(_f) or {}
     cfg_base['graph_knn_k'] = _live.get('graph_knn_k', 10)
-    print(f'[step05b] graph_knn_k={cfg_base["graph_knn_k"]}')
+    cfg_base['road_knn_k'] = _live.get('road_knn_k', cfg_base['graph_knn_k'])
+    print(f'[step05b] graph_knn_k={cfg_base["graph_knn_k"]} road_knn_k={cfg_base["road_knn_k"]}')
     cfg_base['data']['target'] = 'svi'
     cfg_base['data']['neighbor_tracts'] = 0
     cfg_base['data']['state_fips'] = '47'
@@ -697,10 +733,17 @@ def main():
     bg_gdf = _load_bg_gdf()
     validator = BlockGroupValidator(bg_gdf, verbose=False)
 
+    if args.sage_only:
+        archs_to_run = ['sage']
+        print('[step05b] --sage-only: restricting to SAGE architecture')
+    else:
+        archs_to_run = ARCHITECTURES
+
     conditions_to_run = CONDITIONS if args.condition == 'all' else [args.condition]
 
     results_path = STEP5B_ROOT / 'results' / 'topology_specificity_metrics.json'
     results_path.parent.mkdir(exist_ok=True)
+    incremental_csv = STEP5B_ROOT / 'results' / 'trials_incremental.csv'
     if results_path.exists():
         with open(results_path) as f:
             all_results = json.load(f)
@@ -724,7 +767,9 @@ def main():
             print(f'[step05b] {cond} already in results, skipping (delete to rerun)')
             continue
         cond_results = run_condition(
-            cond, cfg_base, bg_gdf, validator, tract_list, args.verbose
+            cond, cfg_base, bg_gdf, validator, tract_list, args.verbose,
+            incremental_csv=incremental_csv,
+            archs=archs_to_run,
         )
         all_results[cond] = cond_results
 

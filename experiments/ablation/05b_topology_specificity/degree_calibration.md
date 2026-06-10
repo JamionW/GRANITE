@@ -43,6 +43,26 @@ The primary degree-controlled contrast is spatial vs randomized: identical degre
 different topology, same k, same weights. A Moran's I gap there isolates edge structure as
 the causal factor.
 
+## road_knn_k calibration (2026-06-10)
+
+At k=10, road_network_uniform had mean degree 12.985 (total_edges=256678), exceeding
+spatial by 1.243 -- above DEGREE_PARITY_TOL=0.5. This confounds topology with density.
+
+A per-variant key `road_knn_k` was added to config.yaml and loaders.py so road_network_uniform
+can be calibrated independently of spatial and randomized (which remain at graph_knn_k=10).
+
+At road_knn_k=9, road_network_uniform reaches mean degree 11.740 (total_edges=232076), gap
+0.002 from spatial's 11.742. Parity check passes with margin 0.498.
+
+| condition | k | mean_degree | total_edges | n_tracts |
+|-----------|---|-------------|-------------|----------|
+| spatial_knn_uniform | 10 | 11.742 | 232109 | 20 |
+| road_network_uniform | 9 | 11.740 | 232076 | 20 |
+| randomized | 10 | 11.742 | 232109 | 20 |
+| production | n/a | 12.162 | 240404 | 20 |
+
+road_knn_k=9 is the committed value.
+
 ## Provenance of the retired 11.742 target
 
 The value 11.742 appeared in a prior session as a "spatial mean degree target" without a

@@ -911,7 +911,7 @@ class DataLoader:
             k = self.config.get('graph_knn_k', 10)
             edge_index, edge_weight = self._create_spatial_knn_uniform(addresses, k)
         elif graph_variant == 'road_network_uniform':
-            k = self.config.get('graph_knn_k', 10)
+            k = self.config.get('road_knn_k', self.config.get('graph_knn_k', 10))
             edge_index, edge_weight = self._create_road_network_uniform(
                 addresses, k, state_fips, county_fips
             )

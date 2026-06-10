@@ -1,0 +1,51 @@
+DELINQUENCY CONVERGENT VALIDITY -- SUMMARY
+============================================================
+
+Index alignment: confirmed across all 3 prediction files and n20 matrix.
+Analysis frame: 39,535 addresses, 16 primary tracts, 4 sparse excluded.
+
+Pre-registered direction: POSITIVE partial Spearman (higher svi_pred -> more delinquency-prone).
+
+Per-tract partial Spearman rho (n=16 primary tracts):
+  granite:        median=+0.0028, IQR=[-0.0171,+0.0177]  (+10/-6)
+  dasymetric:     median=-0.0120, IQR=[-0.0292,+0.0058]  (+5/-11)
+  pycnophylactic: median=+0.0190, IQR=[-0.0076,+0.0393]  (+11/-5)
+
+Wilcoxon signed-rank (one-sided, vs 0, n=16):
+  granite:        W=75.0, p=0.3718
+  dasymetric:     W=41.0, p=0.9205
+  pycnophylactic: W=99.0, p=0.0583
+
+Wilcoxon paired (one-sided, GRANITE > baseline, n=16 pairs):
+  granite vs dasymetric:     W=93.0, p=0.1057  (n_pairs=16)
+  granite vs pycnophylactic: W=46.0, p=0.8739  (n_pairs=16)
+  NOTE: 3 vs-zero + 2 between-method tests counted; no correction applied.
+
+Binary robustness (binary_delinq, partial Spearman, n=16):
+  granite: median=+0.0032, IQR=[-0.0171,+0.0174]
+  dasymetric: median=-0.0115, IQR=[-0.0310,+0.0060]
+  pycnophylactic: median=+0.0196, IQR=[-0.0079,+0.0391]
+
+Completeness (building features vs n_delinq_years, n=16):
+  build_to_land_ratio: median=-0.101, IQR=[-0.124,-0.075]
+  log_acres: median=-0.070, IQR=[-0.121,-0.049]
+  log_bldg_footprint_m2: median=-0.063, IQR=[-0.117,-0.038]
+
+Full n20 secondary (all 20 tracts, sparse included):
+  granite:        median=+0.0050  (delta from primary: +0.0022)
+  dasymetric:     median=-0.0144  (delta from primary: -0.0024)
+  pycnophylactic: median=+0.0190  (delta from primary: +0.0000)
+
+Verdicts:
+  granite:        null/inconclusive (p=0.372, positive median, n=16 power limit)
+  dasymetric:     null (p=0.920, negative median)
+  pycnophylactic: marginal (p<0.10, positive median)
+
+Interpretation:
+  Primary (vs-zero) test is load-bearing for the recovery question.
+  Between-method comparison is secondary and underpowered at n=16.
+  Escrow ceiling: mortgaged owner-occupied under-reports delinquency; attenuates toward null.
+  A positive result (if observed) is conservative given attenuation.
+  A null is ambiguous: cannot separate 'GNN allocates noise' from 'proxy too attenuated'.
+  This test establishes convergent validity against an independent distress proxy,
+  not recovery of true address-level SVI (no such ground truth exists).

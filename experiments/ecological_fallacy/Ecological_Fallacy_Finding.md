@@ -75,7 +75,8 @@ vulnerability. That test is not yet run.
 
 ## Provenance note
 
-The values r=0.671 (coordinates) and r=0.033 (accessibility) cited in earlier documentation were
-propagated from a deleted experiment run with no surviving committed artifact. They have been removed
-from all documentation (commit 7dc0617, 2026-06-09). The current finding replaces them with numbers
-grounded in `experiments/ecological_fallacy/variance_decomposition.csv` (committed 2026-06-10).
+Address-level r values cited in earlier documentation (removed in commit 7dc0617, 2026-06-09) were
+propagated from a deleted experiment run with no surviving committed artifact. See
+`experiments/audits/outstanding_items_reconciliation.md` for the full provenance table. The current
+finding replaces those claims with numbers grounded in
+`experiments/ecological_fallacy/variance_decomposition.csv` (committed 2026-06-10).

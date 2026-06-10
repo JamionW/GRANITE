@@ -71,7 +71,12 @@ training:
 # =============================================================================
 # Graph Construction
 # =============================================================================
-graph_variant: production  # 'production' (road network + geographic) or 'mlp_floor' (self-loops only)
+# valid: production, mlp_floor, spatial_knn_uniform, road_network_uniform, randomized
+graph_variant: production
+# k used by spatial_knn_uniform and road_network_uniform (step 5b)
+graph_knn_k: 10
+# seed for degree-preserving swap in randomized variant (step 5b)
+graph_draw_seed: 42
 
 # =============================================================================
 # Mixture of Experts

@@ -61,9 +61,8 @@ ARCHITECTURES = ['sage', 'gcn_gat']
 ARCH_LABELS = {'sage': 'GRANITE-SAGE', 'gcn_gat': 'GRANITE-GCNGAT'}
 TRAINING_SEEDS = [42, 17, 123, 2024, 7]
 GRAPH_DRAW_SEEDS = [42, 17, 123, 2024, 7]
-CONDITIONS = ['spatial_knn_uniform', 'road_network_uniform', 'randomized']
+CONDITIONS = ['spatial_knn_uniform', 'road_network_uniform', 'randomized', 'production']
 STRUCTURED_CONDITIONS = ['spatial_knn_uniform', 'road_network_uniform']
-GRAPH_KNN_K = 10
 
 MIN_ADDRESSES_PER_BG = 3
 MIN_ADDRESSES_POOLED = 10
@@ -237,7 +236,6 @@ def run_preflight_check(cfg_base, tract_list):
     from granite.data.loaders import DataLoader
 
     dl = DataLoader(str(REPO_ROOT / 'data'), config=dict(cfg_base))
-    dl.config['graph_knn_k'] = GRAPH_KNN_K
 
     # accumulators
     # per condition: list of (n_nodes, n_undirected_edges)
@@ -437,12 +435,10 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
     cfg['model'] = dict(cfg_base.get('model', {}))
     cfg['model']['architecture'] = arch
     cfg['graph_variant'] = condition
-    cfg['graph_knn_k'] = GRAPH_KNN_K
     cfg['graph_draw_seed'] = graph_draw_seed
 
     pipeline.config = cfg
     pipeline.data_loader.config['graph_variant'] = condition
-    pipeline.data_loader.config['graph_knn_k'] = GRAPH_KNN_K
     pipeline.data_loader.config['graph_draw_seed'] = graph_draw_seed
     pipeline.data_loader.config['processing'] = cfg['processing']
 
@@ -535,7 +531,6 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
 
     cfg_preflight = {k: (dict(v) if isinstance(v, dict) else v) for k, v in cfg_base.items()}
     cfg_preflight['graph_variant'] = condition
-    cfg_preflight['graph_knn_k'] = GRAPH_KNN_K
     _write_preflight(cond_dir, cfg_preflight, tract_list)
 
     scratch_dir = str(REPO_ROOT / 'output' / f'step05b_{condition}_scratch')
@@ -544,7 +539,6 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
     pipeline_cfg['data'] = dict(cfg_base.get('data', {}))
     pipeline_cfg['data']['target_fips'] = tract_list[0]
     pipeline_cfg['graph_variant'] = condition
-    pipeline_cfg['graph_knn_k'] = GRAPH_KNN_K
     pipeline = GRANITEPipeline(pipeline_cfg, output_dir=scratch_dir)
     pipeline.verbose = verbose
 
@@ -651,7 +645,6 @@ def main():
     print(f'[step05b] conditions={CONDITIONS} architectures={ARCHITECTURES}')
     print(f'[step05b] training_seeds={TRAINING_SEEDS}')
     print(f'[step05b] graph_draw_seeds={GRAPH_DRAW_SEEDS}')
-    print(f'[step05b] graph_knn_k={GRAPH_KNN_K}')
 
     if not BG_SVI_PATH.exists():
         print(f'[step05b] HALT: {BG_SVI_PATH} missing')
@@ -678,6 +671,10 @@ def main():
         return
 
     cfg_base = _load_base_config()
+    with open(REPO_ROOT / 'config.yaml') as _f:
+        _live = yaml.safe_load(_f) or {}
+    cfg_base['graph_knn_k'] = _live.get('graph_knn_k', 10)
+    print(f'[step05b] graph_knn_k={cfg_base["graph_knn_k"]}')
     cfg_base['data']['target'] = 'svi'
     cfg_base['data']['neighbor_tracts'] = 0
     cfg_base['data']['state_fips'] = '47'

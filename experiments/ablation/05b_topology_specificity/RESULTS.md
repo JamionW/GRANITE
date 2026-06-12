@@ -18,7 +18,7 @@ degree alone, drives within-tract Moran's I in GRANITE outputs.
 Degree calibration: spatial_knn_uniform and randomized reach mean degree 11.742,
 road_network_uniform reaches 11.740 at k=9 (gap 0.002), and production sits at
 12.162. All four share a degree within roughly 10 percent at a single representative
-k; production is not k-controlled and is the outlier.
+k; production is not k-controlled and is the uncontrolled reference.
 
 The primary contrast is spatial vs randomized: identical degree sequence node by node,
 different edge placement, same k, same weights. Any Moran's I gap between those two
@@ -68,8 +68,10 @@ one tract below 0.2.
 The plausible mechanism is architectural: SAGE applies a root-node self-transform that
 mixes each node's own features with the neighbor aggregate, so some signal survives even
 when neighbors are random. GCN-GAT lacks that skip connection; attention over random
-neighbors washes out the node signal entirely. This is a hypothesis, not an established
-mechanism.
+neighbors washes out the node signal except in tracts too small to scramble. This is a
+hypothesis, not an established mechanism. It also explains the 18-node holdout: at that
+tract size, the degree-preserving swap has almost no room to rewire, so the graph
+structure stays nearly spatial and GCN-GAT retains its coherence.
 
 The pattern parallels the architecture-dependent feature survival result in step 5: the
 choice of inductive bias determines not only which features survive constraint correction
@@ -120,7 +122,8 @@ It is not an error.
 
 All 40 trial records are in `results/trials_incremental.csv`. Per-condition aggregates
 are in each condition's `results/<condition>_metrics.json` and in the consolidated
-`results/topology_specificity_metrics.json`. All four conditions ran at commit
+`results/topology_specificity_metrics.json`. The runs executed against code at commit
 `49a052b` (step05b: road_knn_k=9 calibrates road_network_uniform degree to spatial
-for honest topology parity). Degree calibration artifacts trace to commit `f16c01c`.
+for honest topology parity); the result artifacts are committed here in this README
+commit. Degree calibration artifacts trace to commit `f16c01c`.
 Per-tract Moran's I values for the randomized 42/42 draw trace to `results/sweep_run.log`.

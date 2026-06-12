@@ -524,6 +524,27 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
 # condition sweep
 # ---------------------------------------------------------------------------
 
+def _load_completed_trials(csv_path):
+    """read incremental CSV; return dict keyed by (condition, arch, training_seed, graph_draw_seed)."""
+    if csv_path is None or not csv_path.exists():
+        return {}
+    completed = {}
+    with open(csv_path, newline='') as f:
+        for row in csv.DictReader(f):
+            key = (row['condition'], row['arch'],
+                   int(row['training_seed']), int(row['graph_draw_seed']))
+            completed[key] = {
+                'training_seed':    int(row['training_seed']),
+                'graph_draw_seed':  int(row['graph_draw_seed']),
+                'morans_i':         float(row['morans_i']),
+                'within_tract_std': float(row['within_tract_std']),
+                'pooled_bg_r':      float(row['pooled_bg_r']),
+                'n_tracts':         int(row['n_tracts']),
+                'runtime_s':        float(row['runtime_s']),
+            }
+    return completed
+
+
 def _append_trial_csv(csv_path, condition, arch, seed_result):
     """append one trial row to the incremental CSV; creates with header if new."""
     is_new = not csv_path.exists()
@@ -549,10 +570,12 @@ def _append_trial_csv(csv_path, condition, arch, seed_result):
 
 
 def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=False,
-                  incremental_csv=None, archs=None):
+                  incremental_csv=None, archs=None, completed_trials=None):
     """Run all (arch, seed) combinations for one condition. Returns nested results dict."""
     if archs is None:
         archs = ARCHITECTURES
+    if completed_trials is None:
+        completed_trials = {}
     print(f'\n[step05b] === condition: {condition} ===')
     cond_dir = STEP5B_ROOT / condition
     cond_dir.mkdir(parents=True, exist_ok=True)
@@ -592,6 +615,11 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
 
         for training_seed, graph_draw_seed in seed_pairs:
             varying_seed = graph_draw_seed if condition == 'randomized' else training_seed
+            key = (condition, arch, training_seed, graph_draw_seed)
+            if key in completed_trials:
+                print(f'[step05b] {seed_label}={varying_seed} already in CSV, skipping')
+                arch_seed_results.append(completed_trials[key])
+                continue
             print(f'[step05b] {seed_label}={varying_seed}')
             t0 = time.time()
             seed_result = run_seed(
@@ -751,6 +779,10 @@ def main():
     else:
         all_results = {}
 
+    completed_trials = _load_completed_trials(incremental_csv)
+    if completed_trials:
+        print(f'[step05b] {len(completed_trials)} completed trial(s) found in CSV; will skip')
+
     # preflight gate: run before sweep, write once, abort on failure
     parity_path = STEP5B_ROOT / 'results' / 'preflight.json'
     if not parity_path.exists():
@@ -763,19 +795,28 @@ def main():
         print(f'[step05b] preflight already passed (loaded {parity_path}); skipping re-check')
 
     for cond in conditions_to_run:
-        if cond in all_results:
-            print(f'[step05b] {cond} already in results, skipping (delete to rerun)')
+        # skip only if every requested arch is already present in the JSON
+        cond_done_archs = set(all_results.get(cond, {}).keys())
+        archs_needed = [a for a in archs_to_run if a not in cond_done_archs]
+        if not archs_needed:
+            print(f'[step05b] {cond} already in results for all archs, skipping (delete to rerun)')
             continue
+        if cond_done_archs:
+            print(f'[step05b] {cond} partial ({sorted(cond_done_archs)} done); running {archs_needed}')
         cond_results = run_condition(
             cond, cfg_base, bg_gdf, validator, tract_list, args.verbose,
             incremental_csv=incremental_csv,
-            archs=archs_to_run,
+            archs=archs_needed,
+            completed_trials=completed_trials,
         )
-        all_results[cond] = cond_results
+        # merge new arch results with any already-persisted arches for this condition
+        merged = dict(all_results.get(cond, {}))
+        merged.update(cond_results)
+        all_results[cond] = merged
 
         cond_results_path = STEP5B_ROOT / cond / 'results' / f'{cond}_metrics.json'
         with open(cond_results_path, 'w') as f:
-            json.dump(cond_results, f, indent=2,
+            json.dump(merged, f, indent=2,
                       default=lambda x: None if (isinstance(x, float) and math.isnan(x)) else x)
         print(f'[step05b] {cond} results written to {cond_results_path}')
 

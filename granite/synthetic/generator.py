@@ -19,6 +19,7 @@ import json
 import random
 import hashlib
 import datetime
+import subprocess
 import warnings
 
 import numpy as np
@@ -38,6 +39,9 @@ _FEATURE_CACHE_RELPATH = 'data/raw/address_features/combined_address_features.cs
 _N20_LIST_A = 'output/m2_n20_recovery/summary/n20_tract_list.txt'
 _N20_LIST_B = 'data/results/m0_n20_svi_parity/per_tract.csv'
 _PROJ_CRS = 'EPSG:32616'   # UTM zone 16N, Hamilton County TN
+_CALIBRATION_PATH = 'data/synthetic/calibration/svi_variance_decomposition.json'
+_BG_SVI_PATH = 'data/processed/national_bg_svi.csv'
+_HAMILTON_FIPS_PREFIX = '47065'  # first 5 chars of 12-char BG GEOID
 
 # autocorrelation targets (Moran's I on within-tract k-NN adjacency)
 _AUTOCORR_TARGETS = {
@@ -343,6 +347,117 @@ def _calibrate_length_scale(
 
 
 # ---------------------------------------------------------------------------
+# SVI variance decomposition calibration
+# ---------------------------------------------------------------------------
+
+def compute_svi_variance_decomposition():
+    """
+    Compute between-tract and within-tract SVI variance for the n20 Hamilton
+    County tracts, weighted by block-group population.
+
+    Weighting note: population weighting used here (each BG contributes
+    proportionally to its census population). Address-count weighting is an
+    alternative that weights by number of parcels in the BG; population
+    weighting is preferred for SVI calibration because SVI itself is
+    population-based.
+
+    Saves result to data/synthetic/calibration/svi_variance_decomposition.json.
+    Returns the dict that was saved.
+    """
+    n20_path = _abspath(_N20_LIST_A)
+    if not os.path.exists(n20_path):
+        raise FileNotFoundError(
+            f"n20 tract list not found at {_N20_LIST_A}; "
+            "generate m2 outputs first."
+        )
+    with open(n20_path) as fh:
+        n20_tracts = set(line.strip() for line in fh if line.strip())
+
+    bg_svi_path = _abspath(_BG_SVI_PATH)
+    if not os.path.exists(bg_svi_path):
+        raise FileNotFoundError(
+            f"national BG SVI not found at {_BG_SVI_PATH}; "
+            "run BlockGroupLoader.get_block_groups_with_demographics() first."
+        )
+
+    df = pd.read_csv(bg_svi_path, dtype={'GEOID': str})
+    # filter to Hamilton County block groups whose tract is in the n20 set
+    # GEOID is 12-char: 2 state + 3 county + 6 tract + 1 BG
+    # first 5 chars = county FIPS, first 11 chars = tract FIPS
+    df = df[df['GEOID'].str.startswith(_HAMILTON_FIPS_PREFIX)].copy()
+    df['tract_fips'] = df['GEOID'].str[:11]
+    df = df[df['tract_fips'].isin(n20_tracts)].copy()
+    df = df[df['SVI'].notna() & df['population'].notna()].copy()
+
+    if len(df) == 0:
+        raise ValueError(
+            "no BG rows found for n20 tracts in Hamilton County; "
+            "check that national_bg_svi.csv has GEOID starting with 47065."
+        )
+
+    # per-tract population-weighted mean SVI
+    def pop_wtd_mean(sub):
+        w = sub['population'].values.astype(float)
+        if w.sum() == 0:
+            return float(sub['SVI'].mean())
+        return float(np.average(sub['SVI'].values, weights=w))
+
+    tract_stats = []
+    for tract_fips, grp in df.groupby('tract_fips'):
+        tract_pop = float(grp['population'].sum())
+        tract_mean_svi = pop_wtd_mean(grp)
+        # within-tract variance: population-weighted variance over BGs
+        w = grp['population'].values.astype(float)
+        svi_vals = grp['SVI'].values
+        if w.sum() > 0:
+            wtd_var = float(np.average((svi_vals - tract_mean_svi) ** 2, weights=w))
+        else:
+            wtd_var = float(np.var(svi_vals))
+        tract_stats.append({
+            'tract_fips': tract_fips,
+            'tract_pop': tract_pop,
+            'tract_mean_svi': tract_mean_svi,
+            'within_var': wtd_var,
+        })
+
+    stats_df = pd.DataFrame(tract_stats)
+    total_pop = float(stats_df['tract_pop'].sum())
+    tract_weights = stats_df['tract_pop'].values / total_pop
+
+    # between-tract variance: population-weighted variance of tract means
+    grand_mean = float(np.average(stats_df['tract_mean_svi'].values, weights=tract_weights))
+    between_var = float(np.average(
+        (stats_df['tract_mean_svi'].values - grand_mean) ** 2,
+        weights=tract_weights,
+    ))
+
+    # within-tract variance: population-weighted mean of per-tract within-variances
+    within_var = float(np.average(stats_df['within_var'].values, weights=tract_weights))
+
+    total_var = between_var + within_var
+    ratio_between = between_var / total_var if total_var > 0 else 0.0
+
+    result = {
+        'source': 'national_bg_svi',
+        'weighting': 'population',
+        'n_tracts': int(len(stats_df)),
+        'n_bgs': int(len(df)),
+        'between_var': between_var,
+        'within_var': within_var,
+        'total_var': total_var,
+        'ratio_between': ratio_between,
+        'computed_at': datetime.datetime.utcnow().isoformat() + 'Z',
+    }
+
+    out_path = _abspath(_CALIBRATION_PATH)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, 'w') as fh:
+        json.dump(result, fh, indent=2)
+    print(f"  saved SVI variance decomposition to {_CALIBRATION_PATH}")
+    return result
+
+
+# ---------------------------------------------------------------------------
 # main generator class
 # ---------------------------------------------------------------------------
 
@@ -362,6 +477,14 @@ class SyntheticTargetGenerator:
     def __init__(self, seed: int, params: dict):
         self.seed = seed
         self.params = params
+        cal_path = _abspath(_CALIBRATION_PATH)
+        if not os.path.exists(cal_path):
+            raise FileNotFoundError(
+                f"calibration file not found at {_CALIBRATION_PATH}; "
+                "run compute_svi_variance_decomposition() first to generate it."
+            )
+        with open(cal_path) as fh:
+            self._calibration = json.load(fh)
 
     # ------------------------------------------------------------------
     # public API
@@ -454,7 +577,13 @@ class SyntheticTargetGenerator:
         sigma_noise_sq = noise_fraction / max(1.0 - noise_fraction, 1e-9)
         sigma_noise = float(np.sqrt(sigma_noise_sq))
         eps = rng.normal(0.0, sigma_noise, n_total)
-        y_true = y_pre + eps
+        y_within = y_pre + eps
+
+        # inject between-tract effect calibrated to real SVI variance decomposition
+        wtvr_target = 1.0 - float(self._calibration['ratio_between'])
+        y_true, sigma_between, tract_effect_var = self._inject_tract_effect(
+            y_within, addr_gdf, wtvr_target, rng
+        )
 
         # tract means (address-count-weighted)
         tract_means = {}
@@ -471,6 +600,13 @@ class SyntheticTargetGenerator:
             raise ValueError(
                 f"within-tract variance ratio {wtvr_ratio:.4f} < minimum 0.05. "
                 f"params: {self.params}"
+            )
+
+        if wtvr_ratio > 0.95:
+            raise ValueError(
+                f"within-tract variance ratio {wtvr_ratio:.4f} > maximum 0.95; "
+                f"between-tract variance too low, tract-mean constraint is uninformative. "
+                f"params: {params}"
             )
 
         # global Moran's I on full n20 address set, computed on the GP residuals.
@@ -494,7 +630,10 @@ class SyntheticTargetGenerator:
             'morans_i_achieved': achieved_mi,    # MI of GP residuals (calibrated component)
             'morans_i_target': target_mi,
             'morans_i_y_true': mi_y_true,        # MI of final y_true (for reference)
-            'within_tract_variance_ratio': wtvr_ratio,
+            'wtvr_achieved': wtvr_ratio,
+            'wtvr_target': wtvr_target,
+            'sigma_between': float(sigma_between),
+            'tract_effect_variance': float(tract_effect_var),
             'signal_variance': signal_var,
             'residual_variance': residual_var,
             'noise_variance': noise_var,
@@ -685,6 +824,87 @@ class SyntheticTargetGenerator:
             weighted_var += wt * float(np.var(y_true[idx]))
         return weighted_var
 
+    def _inject_tract_effect(self, y_within, addr_gdf, wtvr_target, rng):
+        """
+        Add a between-tract random effect so the address-count-weighted
+        within-tract variance ratio equals wtvr_target.
+
+        Variance accounting (address-count weighting):
+            W  = current within-tract variance of y_within
+            B0 = current between-tract variance of y_within
+            B_target = W * (1 / wtvr_target - 1)
+            sigma_between = sqrt(max(B_target - B0, 0))
+
+        Draws one N(0,1) effect per unique tract, centers to mean 0, scales
+        empirical std to exactly sigma_between, then broadcasts to addresses.
+
+        Returns:
+            (y_within + tract_effect_vector, sigma_between,
+             float(np.var(tract_effect_per_tract)))
+        """
+        n_total = len(y_within)
+
+        # collect per-tract address-count statistics
+        tract_info = {}
+        for fips, grp in addr_gdf.groupby('fips'):
+            idx = grp.index.tolist()
+            n_t = len(idx)
+            tract_info[fips] = {
+                'idx': idx,
+                'n': n_t,
+                'mean': float(np.mean(y_within[idx])),
+            }
+
+        # address-count weighted within-tract variance
+        w_var = sum(
+            (info['n'] / n_total) * float(np.var(y_within[info['idx']]))
+            for info in tract_info.values()
+        )
+
+        # address-count weighted between-tract variance
+        grand_mean = float(np.mean(y_within))
+        b0_var = sum(
+            (info['n'] / n_total) * (info['mean'] - grand_mean) ** 2
+            for info in tract_info.values()
+        )
+
+        # solve for required additional between-tract std
+        b_target = w_var * (1.0 / max(wtvr_target, 1e-9) - 1.0)
+        sigma_between = float(np.sqrt(max(b_target - b0_var, 0.0)))
+
+        fips_list = list(tract_info.keys())
+        n_tracts = len(fips_list)
+
+        # draw, center, scale per-tract raw effects
+        raw_effects = rng.standard_normal(n_tracts)
+        raw_effects = raw_effects - float(np.mean(raw_effects))
+        raw_std = float(np.std(raw_effects))
+        if sigma_between > 0 and raw_std > 0:
+            raw_effects = raw_effects * (sigma_between / raw_std)
+
+        # broadcast to address vector
+        tract_effect_vector = np.zeros(n_total)
+        for i, fips in enumerate(fips_list):
+            for j in tract_info[fips]['idx']:
+                tract_effect_vector[j] = raw_effects[i]
+
+        return (
+            y_within + tract_effect_vector,
+            sigma_between,
+            float(np.var(raw_effects)),
+        )
+
+    def _git_commit(self):
+        """return current HEAD commit hash, or 'unknown' on any error."""
+        try:
+            result = subprocess.run(
+                ['git', 'rev-parse', 'HEAD'],
+                capture_output=True, text=True, cwd=_REPO_ROOT, timeout=5,
+            )
+            return result.stdout.strip() if result.returncode == 0 else 'unknown'
+        except Exception:
+            return 'unknown'
+
     # ------------------------------------------------------------------
     # output persistence
     # ------------------------------------------------------------------
@@ -703,6 +923,7 @@ class SyntheticTargetGenerator:
         metadata = {
             'timestamp': timestamp,
             'seed': self.seed,
+            'generator_commit': self._git_commit(),
             'params': params,
             'diagnostics': diagnostics,
             'address_id_column': 'address_hash',

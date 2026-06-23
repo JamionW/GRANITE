@@ -81,7 +81,9 @@ def run_single(cfg):
     tol = 0.05
     ib = _in_band(achieved_mi, target_mi, tol)
 
-    wtvr = float(diag['within_tract_variance_ratio'])
+    wtvr = float(diag['wtvr_achieved'])
+    wtvr_tgt = float(diag['wtvr_target'])
+    sig_between = float(diag['sigma_between'])
     sig_v = float(diag['signal_variance'])
     res_v = float(diag['residual_variance'])
     noi_v = float(diag['noise_variance'])
@@ -89,19 +91,23 @@ def run_single(cfg):
     print(f"  achieved Moran's I : {achieved_mi:.4f}")
     print(f"  target  Moran's I  : {target_mi:.4f}  +/- {tol}")
     print(f"  in-band            : {'YES' if ib else 'NO'}")
-    print(f"  within-tract var ratio : {wtvr:.4f}")
+    print(f"  wtvr_target        : {wtvr_tgt:.4f}")
+    print(f"  wtvr_achieved      : {wtvr:.4f}")
+    print(f"  sigma_between      : {sig_between:.4f}")
     print(f"  signal variance    : {sig_v:.4f}")
     print(f"  residual variance  : {res_v:.4f}")
     print(f"  noise variance     : {noi_v:.4f}")
     print(f"  output path        : {result['output_dir']}")
 
-    # verify metadata.json echoes input params
+    # verify metadata.json echoes input params and has generator_commit
     import json
     meta_path = os.path.join(result['output_dir'], 'metadata.json')
     with open(meta_path) as fh:
         meta = json.load(fh)
     params_match = meta['params'] == params and meta['seed'] == _SEED
+    has_commit = 'generator_commit' in meta
     print(f"  metadata.json matches input params: {'YES' if params_match else 'NO'}")
+    print(f"  generator_commit present          : {'YES' if has_commit else 'NO'}")
 
     return {
         'run_id': run_id,

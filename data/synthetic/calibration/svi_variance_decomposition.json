@@ -1,0 +1,11 @@
+{
+  "source": "national_bg_svi",
+  "weighting": "population",
+  "n_tracts": 20,
+  "n_bgs": 73,
+  "between_var": 0.04824059976878281,
+  "within_var": 0.02428466894215479,
+  "total_var": 0.0725252687109376,
+  "ratio_between": 0.6651557536595186,
+  "computed_at": "2026-06-23T01:20:50.844719Z"
+}

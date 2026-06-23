@@ -1,5 +1,44 @@
 # GRANITE Session Log
 
+## 2026-06-23: M5 patch -- between-tract variance injection, two-sided WTVR guard, regeneration contract
+
+**Files modified:**
+- `granite/synthetic/generator.py`: four changes (see below)
+- `granite/scripts/run_m5_smoke.py`: updated to read renamed diagnostics key `wtvr_achieved` (was `within_tract_variance_ratio`); added `wtvr_target` and `generator_commit` printout
+
+**Files created:**
+- `data/synthetic/calibration/svi_variance_decomposition.json`: population-weighted SVI variance decomposition for 20 n20 tracts, 73 Hamilton County BGs
+
+**Changes in generator.py:**
+
+1. `compute_svi_variance_decomposition()` (new module-level function): loads `data/processed/national_bg_svi.csv`, filters to n20 BGs (GEOID prefix 47065, tract in n20 list), computes population-weighted between_var=0.04824 and within_var=0.02428 over tract-BG hierarchy, saves JSON. ratio_between=0.6652 (66.5% of real SVI variance is between-tract).
+
+2. `__init__` now loads the calibration JSON on construction and raises FileNotFoundError with instructions if missing.
+
+3. Between-tract effect injection (`_inject_tract_effect`): y_within = y_pre + noise; then _inject_tract_effect draws per-tract N(0,1) effects, centers, scales to sigma_between derived from wtvr_target=0.3348. wtvr_achieved lands ~0.30-0.33 across all three smoke configs (see below).
+
+4. Two-sided WTVR guard: existing lower bound (<0.05) kept; upper bound (>0.95) added immediately after.
+
+5. Diagnostics: renamed `within_tract_variance_ratio` to `wtvr_achieved`; added `wtvr_target`, `sigma_between`, `tract_effect_variance`.
+
+6. Metadata: added `generator_commit` (git rev-parse HEAD via subprocess).
+
+**Cache invalidation:** none. Per-tract GP, length-scale calibration, and Moran's I weights are untouched.
+
+**Smoke results (seed=42):**
+
+| Run | autocorr | snr | wtvr_target | wtvr_achieved | MI achieved | MI target | in-band |
+|-----|----------|-----|-------------|---------------|-------------|-----------|---------|
+| 1   | medium   | medium | 0.3348   | 0.3275        | 0.3940      | 0.4000    | YES     |
+| 2   | strong   | high   | 0.3348   | 0.3272        | 0.6972      | 0.7000    | YES     |
+| 3   | weak     | low    | 0.3348   | 0.2982        | 0.1191      | 0.1000    | YES     |
+
+**Knob checks:**
+- autocorr medium -> strong: morans_i_achieved 0.3940 -> 0.6972 (rises, correct)
+- snr medium -> high: noise_variance 1.0000 -> 0.3333 (noise share drops, correct for high SNR)
+
+Both guards stayed silent on all runs.
+
 ## 2026-06-10: Feature taxonomy -- variance decomposition on n20 matrix (Milestones A-C)
 
 **Files created:**

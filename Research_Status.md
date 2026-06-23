@@ -4,9 +4,9 @@
 
 **Codename:** GRANITE
 
-**Last updated:** 2026-06-10 (delinquency convergent validity; locked-in finding 8 added)
+**Last updated:** 2026-06-23 (M5 patch: between-tract variance injection, two-sided WTVR guard, regeneration contract)
 
-**Active branch:** `main` (HEAD: `f29423d`)
+**Active branch:** `main`
 
 ---
 

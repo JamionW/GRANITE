@@ -1036,3 +1036,5 @@ Provenance guard passed with all deltas well within tol=0.005:
 Index alignment: fips + address_idx (0-based within tract), row order matches n20_feature_matrix.csv exactly.
 
 **Cache invalidation:** none. Pipeline logic unchanged; pyarrow added as a dependency.
+
+2026-06-23: Added PROJECT_PREAMBLE.md as the durable grounded-truth block for strategic instance context; no code changes, no cache invalidation.

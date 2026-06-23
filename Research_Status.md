@@ -96,6 +96,9 @@
 
 ## Milestone entries
 
+### PROJECT_PREAMBLE.md added (2026-06-23)
+
+Added PROJECT_PREAMBLE.md at repo root as the durable grounded-truth block for strategic instance context. Captures validated numbers, canonical graph description, six locked findings, phantom figure registry, executive summary, and operating contract. No code changes.
 
 ### Ablation 05_graph_contribution: graph contribution boundary test (2026-06-05)
 

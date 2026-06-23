@@ -65,8 +65,9 @@ data/processed/
 *.gpkg
 
 # Output files
-output/
-results/
+/output/
+/results/
+*.pid
 *.png
 *.pdf
 *.jpg

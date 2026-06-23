@@ -1,0 +1,68 @@
+{
+  "mean_spatial_std": {
+    "sage": {
+      "baseline": 0.0797295,
+      "per_tract": 0.0823208,
+      "delta": 0.002591
+    },
+    "gcngat": {
+      "baseline": 0.08870984999999999,
+      "per_tract": 0.08142490000000001,
+      "delta": -0.007285
+    }
+  },
+  "mean_morans_i": {
+    "sage": {
+      "baseline": 0.83260845,
+      "per_tract": 0.8775895,
+      "delta": 0.044981
+    },
+    "gcngat": {
+      "baseline": 0.8476092,
+      "per_tract": 0.84904515,
+      "delta": 0.001436
+    }
+  },
+  "block_group_r": {
+    "sage": {
+      "baseline": 0.7691647597080817,
+      "per_tract": 0.7536965003138819,
+      "delta": -0.015468
+    },
+    "gcngat": {
+      "baseline": 0.7491051475476098,
+      "per_tract": 0.7664314601020286,
+      "delta": 0.017326
+    },
+    "idw": {
+      "baseline": 0.7718927214530875,
+      "note": "IDW unaffected by feature standardization; copied from baseline"
+    },
+    "kriging": {
+      "baseline": 0.768151760049769,
+      "note": "kriging unaffected by feature standardization; copied from baseline"
+    }
+  },
+  "spatial_std_slope_vs_svi": {
+    "sage": {
+      "baseline": -0.017717,
+      "per_tract": -0.014379,
+      "delta": 0.003338
+    },
+    "gcngat": {
+      "baseline": -0.007978,
+      "per_tract": -0.006443,
+      "delta": 0.001535
+    }
+  },
+  "feature_importance_spearman": {
+    "baseline": 0.099,
+    "per_tract": 0.116,
+    "delta": 0.016945
+  },
+  "top10_overlap": {
+    "baseline": 2,
+    "per_tract": 3,
+    "delta": 1
+  }
+}

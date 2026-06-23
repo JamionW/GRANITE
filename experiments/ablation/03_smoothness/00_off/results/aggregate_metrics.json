@@ -1,0 +1,32 @@
+{
+  "sage": {
+    "n_tracts": 20,
+    "constraint_error_mean": 2.05e-08,
+    "constraint_error_median": 1e-08,
+    "spatial_std_mean": 0.0823208,
+    "spatial_std_median": 0.072263,
+    "spatial_std_std": 0.047202834220883505,
+    "morans_i_mean": 0.8775895,
+    "morans_i_median": 0.9158675000000001,
+    "morans_i_std": 0.11377619475994365,
+    "bg_r_mean": 0.17016551851016948,
+    "bg_r_median": 0.42790822792738503,
+    "between_tract_variance": 0.08302970833713116,
+    "cross_tract_signal_r": 0.9999999999999968
+  },
+  "gcn_gat": {
+    "n_tracts": 20,
+    "constraint_error_mean": 2e-08,
+    "constraint_error_median": 1e-08,
+    "spatial_std_mean": 0.08142490000000001,
+    "spatial_std_median": 0.076792,
+    "spatial_std_std": 0.03549668470790803,
+    "morans_i_mean": 0.84904515,
+    "morans_i_median": 0.8984080000000001,
+    "morans_i_std": 0.18946802572612417,
+    "bg_r_mean": 0.053671687952864,
+    "bg_r_median": 0.2813409042695466,
+    "between_tract_variance": 0.08302970535710871,
+    "cross_tract_signal_r": 0.9999999999999962
+  }
+}

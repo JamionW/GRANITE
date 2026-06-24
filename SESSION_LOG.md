@@ -1,5 +1,14 @@
 # GRANITE Session Log
 
+## 2026-06-24: M5 ruler reconciliation -- SpatialLearningDiagnostics per-tract k=8, autocorrelation knob recalibrated
+
+**Files modified:** `granite/synthetic/generator.py`
+**Files created:** `graveyard/generator_k16_exp_ruler.old`
+
+Moran's I ruler in the synthetic generator replaced from the prior k=16 exponential-decay COO implementation to `SpatialLearningDiagnostics.compute_spatial_autocorrelation` (inverse-distance k=8 weights, per-tract, aggregated as a simple unweighted mean), matching the ruler used in step05 and step05b scoring. `_build_knn_weights` and `_morans_i` (k=16, exp decay) retired to `graveyard/generator_k16_exp_ruler.old`. Constants `_GLOBAL_K`, `_GLOBAL_MAX_DIST_M`, `_CALIB_K`, `_CALIB_MAX_DIST_M` removed. `_SPATIAL_DIAG` module-level singleton added. `_morans_i_canonical` method added to `SyntheticTargetGenerator`. `_calibrate_length_scale` guard changed from `len(rows)==0` to `len(xy_cal)<9`. Diagnostics now record `morans_i_per_tract`, `n_tracts_scored`, `n_tracts_skipped`, `morans_i_ruler`. Ruler tag flows into `metadata.json` via diagnostics key. `_AUTOCORR_TARGETS` held at 0.10/0.40/0.70 (Option A); all three smoke configs in band at seed=42 (weak=0.0925, medium=0.3956, strong=0.6861). Both WTVR guards silent. Repeat-run determinism confirmed. The weak level carries the least floor headroom (~0.04 floor at ls=5m); a weak-level calibration flag during M6 is expected behavior and not a generator bug. Pre-reconciliation run dirs do not match new output for the same (level, seed) by design.
+
+**Cache invalidation:** length-scale calibration is rerun on first use; existing `data/synthetic/run_*/` outputs from before this commit are NOT regenerated automatically.
+
 ## 2026-06-23: M5 patch -- between-tract variance injection, two-sided WTVR guard, regeneration contract
 
 **Files modified:**

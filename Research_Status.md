@@ -4,7 +4,7 @@
 
 **Codename:** GRANITE
 
-**Last updated:** 2026-06-23 (M5 patch: between-tract variance injection, two-sided WTVR guard, regeneration contract)
+**Last updated:** 2026-06-24 (M5 ruler reconciliation: SpatialLearningDiagnostics per-tract k=8 Moran's I ruler, autocorrelation knob recalibrated; ruler reconciled to match step05/05b scoring; targets held at 0.10/0.40/0.70; weak level carries least floor headroom and a weak-level calibration flag during M6 is expected behavior not a generator bug; pre-reconciliation run dirs do not match new output for the same level and seed by design)
 
 **Active branch:** `main`
 

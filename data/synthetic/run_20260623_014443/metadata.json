@@ -1,0 +1,53 @@
+{
+  "timestamp": "20260623_014443",
+  "seed": 42,
+  "generator_commit": "b0f71f2f6bf8c956dbcadf957fde87825af1a67a",
+  "params": {
+    "signal_source": "latent",
+    "signal_type": "linear",
+    "spatial_autocorrelation": "strong",
+    "snr": "medium",
+    "tract_list_source": "auto"
+  },
+  "diagnostics": {
+    "morans_i_achieved": 0.6971699942467439,
+    "morans_i_target": 0.7,
+    "morans_i_y_true": 0.7593544968277209,
+    "wtvr_achieved": 0.3274657135519084,
+    "wtvr_target": 0.3348442463404814,
+    "sigma_between": 1.9990465601863665,
+    "tract_effect_variance": 3.996187149792943,
+    "signal_variance": 1.0,
+    "residual_variance": 1.0,
+    "noise_variance": 1.0,
+    "length_scale_per_tract": {
+      "47065000600": 84.765625,
+      "47065000700": 133.203125,
+      "47065001200": 84.765625,
+      "47065001800": 119.140625,
+      "47065001900": 94.921875,
+      "47065002400": 94.140625,
+      "47065003400": 59.1796875,
+      "47065010431": 105.859375,
+      "47065010433": 108.203125,
+      "47065010435": 114.453125,
+      "47065011311": 93.359375,
+      "47065011321": 109.765625,
+      "47065011324": 6000.0,
+      "47065011325": 104.296875,
+      "47065011326": 69.7265625,
+      "47065011402": 104.296875,
+      "47065011413": 150.390625,
+      "47065011444": 103.515625,
+      "47065011447": 155.078125,
+      "47065011900": 62.6953125
+    },
+    "n_addresses": 39535,
+    "n_tracts": 20
+  },
+  "address_id_column": "address_hash",
+  "raw_address_id_column": "hash",
+  "feature_cache_path": "data/raw/address_features/combined_address_features.csv",
+  "proj_crs": "EPSG:32616",
+  "n20_tract_list_source": "output/m2_n20_recovery/summary/n20_tract_list.txt"
+}

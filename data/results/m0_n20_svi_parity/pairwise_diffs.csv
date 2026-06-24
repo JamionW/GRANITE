@@ -1,0 +1,4 @@
+pair,obs_median_diff,ci_low_95,ci_high_95,n_pairs,separable
+granite_vs_dasymetric,-0.1207,-0.5356,0.108,19,False
+granite_vs_pycno,0.0163,-0.1068,0.2067,19,False
+dasymetric_vs_pycno,0.4027,0.0435,0.6398,19,True

@@ -7,7 +7,9 @@ autocorrelation levels (weak/medium/strong), and three SNR levels.
 
 Spatial autocorrelation is injected per-tract via Gaussian process sampling
 with a Matern nu=1.5 kernel. Length scales are calibrated by binary search
-to hit target Moran's I values within +/-0.05 tolerance.
+to hit target Moran's I values within +/-0.05 tolerance. Moran's I ruler:
+SpatialLearningDiagnostics.compute_spatial_autocorrelation, k=8 inverse-distance
+weights, per-tract, aggregated as a simple unweighted mean; matches step05/05b.
 
 Usage:
     gen = SyntheticTargetGenerator(seed=42, params={...})
@@ -30,6 +32,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from sklearn.neighbors import NearestNeighbors
 from sklearn.gaussian_process.kernels import Matern
+
+from granite.evaluation.spatial_diagnostics import SpatialLearningDiagnostics
 
 warnings.filterwarnings('ignore')
 
@@ -58,12 +62,9 @@ _SNR_NOISE_FRACTION = {
     'high':   0.25,
 }
 
-# k-NN graph parameters matching _create_geographic_fallback_graph
-# use same k and max_dist for calibration and global MI to ensure consistency
-_GLOBAL_K = 16
-_GLOBAL_MAX_DIST_M = 1000.0
-_CALIB_K = 16       # must match _GLOBAL_K for MI-length-scale relationship to transfer
-_CALIB_MAX_DIST_M = 1000.0
+# module-level singleton for Moran's I scoring; matches the ruler used in step05/05b.
+# compute_spatial_autocorrelation: inverse-distance k=8, per-tract, scalar return.
+_SPATIAL_DIAG = SpatialLearningDiagnostics(verbose=False)
 
 # numeric columns to exclude from feature matrix (coordinates, identifiers, raw values)
 _FEAT_EXCLUDE = frozenset({
@@ -168,77 +169,8 @@ def _load_addresses(tract_list, feat_df):
     return joined
 
 
-# ---------------------------------------------------------------------------
-# spatial weight matrix
-# ---------------------------------------------------------------------------
-
-def _build_knn_weights(xy, k=8, max_dist_m=1000.0):
-    """
-    Build a symmetrized k-NN weight matrix in COO format.
-
-    Returns (rows, cols, weights) as numpy int/float arrays.
-    Weights use the same exponential decay as _create_geographic_fallback_graph.
-    """
-    n = len(xy)
-    if n < 2:
-        return np.array([], dtype=int), np.array([], dtype=int), np.array([], dtype=float)
-
-    k_actual = min(k + 1, n)
-    nbrs = NearestNeighbors(n_neighbors=k_actual, metric='euclidean').fit(xy)
-    distances, indices = nbrs.kneighbors(xy)
-
-    # collect directed edges
-    edge_dict = {}
-    for i in range(n):
-        for j_pos in range(1, k_actual):
-            j = indices[i, j_pos]
-            d = distances[i, j_pos]
-            if d > max_dist_m:
-                continue
-            w = np.exp(-d / 300.0)
-            key = (min(i, j), max(i, j))
-            if key in edge_dict:
-                edge_dict[key] = (edge_dict[key] + w) / 2.0
-            else:
-                edge_dict[key] = w
-
-    if not edge_dict:
-        return np.array([], dtype=int), np.array([], dtype=int), np.array([], dtype=float)
-
-    rows, cols, weights = [], [], []
-    for (i, j), w in edge_dict.items():
-        rows.extend([i, j])
-        cols.extend([j, i])
-        weights.extend([w, w])
-
-    return np.array(rows, dtype=int), np.array(cols, dtype=int), np.array(weights, dtype=float)
-
-
-# ---------------------------------------------------------------------------
-# Moran's I
-# ---------------------------------------------------------------------------
-
-def _morans_i(values, rows, cols, weights):
-    """
-    Compute Moran's I given variable values and a COO weight matrix.
-    Returns 0.0 if weights or variance are degenerate.
-    """
-    n = len(values)
-    if len(weights) == 0:
-        return 0.0
-
-    xbar = np.mean(values)
-    z = values - xbar
-    w_sum = np.sum(weights)
-    if w_sum == 0:
-        return 0.0
-
-    denom = np.sum(z ** 2)
-    if denom == 0:
-        return 0.0
-
-    numer = np.sum(weights * z[rows] * z[cols])
-    return float((n / w_sum) * (numer / denom))
+# _build_knn_weights and _morans_i (k=16, exponential decay) retired to
+# graveyard/generator_k16_exp_ruler.old; replaced by _SPATIAL_DIAG per-tract k=8.
 
 
 # ---------------------------------------------------------------------------
@@ -295,10 +227,8 @@ def _calibrate_length_scale(
     else:
         xy_cal = xy
 
-    rows, cols, weights = _build_knn_weights(xy_cal, k=_CALIB_K, max_dist_m=_CALIB_MAX_DIST_M)
-
-    if len(rows) == 0:
-        # no edges; spatial structure cannot be calibrated
+    if len(xy_cal) < 9:
+        # fewer than k_neighbors+1 points; spatial structure cannot be calibrated
         return 500.0, 0.0
 
     def estimate_mi(ls):
@@ -306,7 +236,12 @@ def _calibrate_length_scale(
         for s_idx in range(n_samples):
             rng = np.random.default_rng(rng_seed + s_idx * 31)
             r = _sample_gp_residual(xy_cal, ls, rng)
-            values_list.append(_morans_i(r, rows, cols, weights))
+            try:
+                mi = _SPATIAL_DIAG.compute_spatial_autocorrelation(
+                    r, xy_cal, k_neighbors=8)
+            except Exception:
+                mi = 0.0
+            values_list.append(mi)
         return float(np.mean(values_list))
 
     # coarse scan to bracket the target.
@@ -327,7 +262,12 @@ def _calibrate_length_scale(
         best_ls = ls_grid[-1] if mi_grid[-1] < target_morans_i else ls_grid[0]
         final_rng = np.random.default_rng(rng_seed)
         r = _sample_gp_residual(xy_cal, best_ls, final_rng)
-        return best_ls, _morans_i(r, rows, cols, weights)
+        try:
+            cal_mi = _SPATIAL_DIAG.compute_spatial_autocorrelation(
+                r, xy_cal, k_neighbors=8)
+        except Exception:
+            cal_mi = 0.0
+        return best_ls, cal_mi
 
     # binary search
     for _ in range(n_bisect):
@@ -343,7 +283,12 @@ def _calibrate_length_scale(
     best_ls = (lo_ls + hi_ls) / 2.0
     final_rng = np.random.default_rng(rng_seed)
     r = _sample_gp_residual(xy_cal, best_ls, final_rng)
-    return best_ls, _morans_i(r, rows, cols, weights)
+    try:
+        cal_mi = _SPATIAL_DIAG.compute_spatial_autocorrelation(
+            r, xy_cal, k_neighbors=8)
+    except Exception:
+        cal_mi = 0.0
+    return best_ls, cal_mi
 
 
 # ---------------------------------------------------------------------------
@@ -609,17 +554,13 @@ class SyntheticTargetGenerator:
                 f"params: {params}"
             )
 
-        # global Moran's I on full n20 address set, computed on the GP residuals.
-        # the residuals are what the per-tract calibration targets; computing on y_true
-        # would always reduce MI below target due to noise and uncorrelated signal mixing.
-        # morans_i_achieved reflects the spatial structure actually injected.
-        print(f"  computing global Moran's I ({n_total} addresses) ...")
-        g_rows, g_cols, g_weights = _build_knn_weights(
-            xy, k=_GLOBAL_K, max_dist_m=_GLOBAL_MAX_DIST_M
-        )
-        achieved_mi = _morans_i(r, g_rows, g_cols, g_weights)
-        # also record MI of final y_true for reference
-        mi_y_true = _morans_i(y_true, g_rows, g_cols, g_weights)
+        # per-tract Moran's I on GP residuals, using canonical SpatialLearningDiagnostics ruler.
+        # calibration targets the per-tract mean; computing on y_true is recorded for reference.
+        print(f"  computing per-tract Moran's I ({n_total} addresses) ...")
+        mi_per_tract, achieved_mi = self._morans_i_canonical(r, addr_gdf)
+        mi_y_true_per_tract, mi_y_true = self._morans_i_canonical(y_true, addr_gdf)
+        n_tracts_scored = len(mi_per_tract)
+        n_tracts_skipped = addr_gdf['fips'].nunique() - n_tracts_scored
 
         # variance decomposition
         signal_var = float(np.var(s))
@@ -627,9 +568,13 @@ class SyntheticTargetGenerator:
         noise_var = float(sigma_noise_sq)
 
         diagnostics = {
-            'morans_i_achieved': achieved_mi,    # MI of GP residuals (calibrated component)
+            'morans_i_achieved': achieved_mi,            # per-tract mean MI on GP residuals
             'morans_i_target': target_mi,
-            'morans_i_y_true': mi_y_true,        # MI of final y_true (for reference)
+            'morans_i_per_tract': mi_per_tract.tolist(), # per-tract MI vector on GP residuals
+            'morans_i_y_true': mi_y_true,                # per-tract mean MI on final y_true
+            'morans_i_ruler': 'spatial_diagnostics_k8_per_tract_mean',
+            'n_tracts_scored': n_tracts_scored,
+            'n_tracts_skipped': n_tracts_skipped,
             'wtvr_achieved': wtvr_ratio,
             'wtvr_target': wtvr_target,
             'sigma_between': float(sigma_between),
@@ -808,6 +753,47 @@ class SyntheticTargetGenerator:
             residual[idx] = r_tract
 
         return residual, ls_per_tract
+
+    # ------------------------------------------------------------------
+    # canonical Moran's I (matches step05/05b ruler)
+    # ------------------------------------------------------------------
+
+    def _morans_i_canonical(self, values, addr_gdf):
+        """
+        Compute per-tract Moran's I using the canonical scoring ruler and
+        return (per_tract_array, simple_unweighted_mean).
+
+        Ruler: SpatialLearningDiagnostics.compute_spatial_autocorrelation,
+        inverse-distance k=8 weights, matches step05 / step05b scoring.
+
+        Tracts with fewer than 9 addresses (k_neighbors+1) are skipped.
+        Returns (numpy array of finite per-tract values, float mean or nan).
+        """
+        xy_all = addr_gdf[['x', 'y']].values
+        per_tract = []
+        n_skipped = 0
+
+        for fips, grp in addr_gdf.groupby('fips'):
+            idx = grp.index.tolist()
+            if len(idx) < 9:
+                n_skipped += 1
+                continue
+            tract_vals = values[np.array(idx)]
+            coords = xy_all[np.array(idx)]
+            try:
+                mi = _SPATIAL_DIAG.compute_spatial_autocorrelation(
+                    tract_vals, coords, k_neighbors=8)
+            except Exception:
+                n_skipped += 1
+                continue
+            if np.isfinite(mi):
+                per_tract.append(float(mi))
+            else:
+                n_skipped += 1
+
+        per_tract_arr = np.array(per_tract, dtype=float)
+        mean_mi = float(np.mean(per_tract_arr)) if len(per_tract_arr) > 0 else float('nan')
+        return per_tract_arr, mean_mi
 
     # ------------------------------------------------------------------
     # variance diagnostics

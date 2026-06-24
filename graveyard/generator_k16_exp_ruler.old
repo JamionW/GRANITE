@@ -1,0 +1,67 @@
+# retired from granite/synthetic/generator.py in M5 ruler reconciliation (commit after 685a2db).
+# replaced by SpatialLearningDiagnostics.compute_spatial_autocorrelation per-tract k=8.
+# _CALIB_K=16 / _GLOBAL_K=16, exponential decay weights exp(-d/300), max_dist_m=1000.
+
+def _build_knn_weights(xy, k=8, max_dist_m=1000.0):
+    """
+    Build a symmetrized k-NN weight matrix in COO format.
+
+    Returns (rows, cols, weights) as numpy int/float arrays.
+    Weights use the same exponential decay as _create_geographic_fallback_graph.
+    """
+    n = len(xy)
+    if n < 2:
+        return np.array([], dtype=int), np.array([], dtype=int), np.array([], dtype=float)
+
+    k_actual = min(k + 1, n)
+    nbrs = NearestNeighbors(n_neighbors=k_actual, metric='euclidean').fit(xy)
+    distances, indices = nbrs.kneighbors(xy)
+
+    # collect directed edges
+    edge_dict = {}
+    for i in range(n):
+        for j_pos in range(1, k_actual):
+            j = indices[i, j_pos]
+            d = distances[i, j_pos]
+            if d > max_dist_m:
+                continue
+            w = np.exp(-d / 300.0)
+            key = (min(i, j), max(i, j))
+            if key in edge_dict:
+                edge_dict[key] = (edge_dict[key] + w) / 2.0
+            else:
+                edge_dict[key] = w
+
+    if not edge_dict:
+        return np.array([], dtype=int), np.array([], dtype=int), np.array([], dtype=float)
+
+    rows, cols, weights = [], [], []
+    for (i, j), w in edge_dict.items():
+        rows.extend([i, j])
+        cols.extend([j, i])
+        weights.extend([w, w])
+
+    return np.array(rows, dtype=int), np.array(cols, dtype=int), np.array(weights, dtype=float)
+
+
+def _morans_i(values, rows, cols, weights):
+    """
+    Compute Moran's I given variable values and a COO weight matrix.
+    Returns 0.0 if weights or variance are degenerate.
+    """
+    n = len(values)
+    if len(weights) == 0:
+        return 0.0
+
+    xbar = np.mean(values)
+    z = values - xbar
+    w_sum = np.sum(weights)
+    if w_sum == 0:
+        return 0.0
+
+    denom = np.sum(z ** 2)
+    if denom == 0:
+        return 0.0
+
+    numer = np.sum(weights * z[rows] * z[cols])
+    return float((n / w_sum) * (numer / denom))

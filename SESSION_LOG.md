@@ -1,5 +1,11 @@
 # GRANITE Session Log
 
+## 2026-06-24: M5 between-tract variance as swept axis
+
+**Files modified:** `granite/synthetic/generator.py`
+
+Added `_BETWEEN_TRACT_LEVELS = {'low': 0.45, 'high': 0.85}` constant. New `between_tract` param (default `'default'`) resolves: `'default'` uses `self._calibration['ratio_between']` (~0.665 for n20 SVI); `'low'`/`'high'` use the mapping; a float in (0,1) is used directly; else raises with allowed values. `wtvr_target = 1 - resolved_ratio` unchanged in meaning. New diagnostics fields: `between_tract_level` (level name or `'custom'`), `between_tract_ratio` (resolved float). Validation at seed=42, autocorr=medium, snr=medium: low wtvr_achieved=0.5430 (target 0.55), default wtvr_achieved=0.3275 (target 0.3348), high wtvr_achieved=0.1453 (target 0.15). Both WTVR guards silent at all three levels. Determinism confirmed (default, two runs, y_true identical). No cache invalidation.
+
 ## 2026-06-24: M5 ruler reconciliation -- SpatialLearningDiagnostics per-tract k=8, autocorrelation knob recalibrated
 
 **Files modified:** `granite/synthetic/generator.py`

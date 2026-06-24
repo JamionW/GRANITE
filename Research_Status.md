@@ -4,7 +4,7 @@
 
 **Codename:** GRANITE
 
-**Last updated:** 2026-06-24 (M5 ruler reconciliation: SpatialLearningDiagnostics per-tract k=8 Moran's I ruler, autocorrelation knob recalibrated; ruler reconciled to match step05/05b scoring; targets held at 0.10/0.40/0.70; weak level carries least floor headroom and a weak-level calibration flag during M6 is expected behavior not a generator bug; pre-reconciliation run dirs do not match new output for the same level and seed by design)
+**Last updated:** 2026-06-24 (M5 between-tract variance parameterized as swept axis: low=0.45/default~0.665/high=0.85 ratio_between; wtvr_target derived from resolved ratio; both guards silent at all three levels; diagnostics record between_tract_level and between_tract_ratio per run)
 
 **Active branch:** `main`
 

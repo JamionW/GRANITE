@@ -58,6 +58,9 @@ data/processed/
 *.cpg
 *.csv
 !experiments/**/*.csv
+!data/results/m0_n20_svi_parity/per_tract.csv
+!data/results/m0_n20_svi_parity/aggregate.csv
+!data/results/m0_n20_svi_parity/pairwise_diffs.csv
 !requirements.txt
 !config/*.yaml
 *.zip

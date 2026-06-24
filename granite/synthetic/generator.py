@@ -54,6 +54,11 @@ _AUTOCORR_TARGETS = {
     'strong': {'morans_i': 0.70, 'tolerance': 0.05},
 }
 
+# between-tract variance levels as a fraction of total variance.
+# 'default' resolves at runtime to self._calibration['ratio_between'] (~0.665 for n20 SVI).
+# low: mild between-tract contrast (wtvr ~0.55); high: strong contrast (wtvr ~0.15).
+_BETWEEN_TRACT_LEVELS = {'low': 0.45, 'high': 0.85}
+
 # noise fraction of total variance by SNR level
 # sigma_noise^2 / (sigma_pre^2 + sigma_noise^2) = noise_fraction
 _SNR_NOISE_FRACTION = {
@@ -459,6 +464,7 @@ class SyntheticTargetGenerator:
         signal_type = params.get('signal_type', 'linear')
         autocorr = params.get('spatial_autocorrelation', 'medium')
         snr_level = params.get('snr', 'medium')
+        between_tract = params.get('between_tract', 'default')
         tract_list_source = params.get('tract_list_source', 'auto')
         feature_indices = params.get('feature_indices', [0, 1, 2])
 
@@ -524,8 +530,22 @@ class SyntheticTargetGenerator:
         eps = rng.normal(0.0, sigma_noise, n_total)
         y_within = y_pre + eps
 
-        # inject between-tract effect calibrated to real SVI variance decomposition
-        wtvr_target = 1.0 - float(self._calibration['ratio_between'])
+        # resolve between_tract param to a ratio_between value, then derive wtvr_target
+        if between_tract == 'default':
+            resolved_ratio = float(self._calibration['ratio_between'])
+            between_tract_level = 'default'
+        elif between_tract in _BETWEEN_TRACT_LEVELS:
+            resolved_ratio = float(_BETWEEN_TRACT_LEVELS[between_tract])
+            between_tract_level = between_tract
+        elif isinstance(between_tract, float) and 0.0 < between_tract < 1.0:
+            resolved_ratio = between_tract
+            between_tract_level = 'custom'
+        else:
+            raise ValueError(
+                f"unknown between_tract '{between_tract}'; "
+                f"choose from {list(_BETWEEN_TRACT_LEVELS)}, 'default', or a float in (0, 1)"
+            )
+        wtvr_target = 1.0 - resolved_ratio
         y_true, sigma_between, tract_effect_var = self._inject_tract_effect(
             y_within, addr_gdf, wtvr_target, rng
         )
@@ -576,6 +596,8 @@ class SyntheticTargetGenerator:
             'n_tracts_scored': n_tracts_scored,
             'n_tracts_skipped': n_tracts_skipped,
             'wtvr_achieved': wtvr_ratio,
+            'between_tract_level': between_tract_level,
+            'between_tract_ratio': resolved_ratio,
             'wtvr_target': wtvr_target,
             'sigma_between': float(sigma_between),
             'tract_effect_variance': float(tract_effect_var),

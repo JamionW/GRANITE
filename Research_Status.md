@@ -351,3 +351,62 @@ experiments/recovery/
 GRANITE m0/soft GraphSAGE seed=42, 150 epochs, apply_post_correction=True.
 Provenance guard passed (tol=0.005): GRANITE delta=3.5e-5, Dasymetric=1.4e-5, Pycnophylactic=4.9e-5.
 Index alignment: fips + address_idx (0-based within tract); row order matches n20_feature_matrix.csv.
+---
+
+## M6 recovery grid runner: smoke complete (2026-06-24)
+
+**Runner:** `experiments/m6_recovery_grid/run_grid.py`. Full grid wired: 81 draws for coordinates_only/sage (3 autocorr x 3 snr x 3 between_tract x 3 seeds), plus diagonal additions (coordinates_only/gcn_gat, full/sage, random_noise/sage, coords_plus_noise/sage at snr=medium, between_tract=default). Resume via scratch markers.
+
+**Smoke cell:** latent, autocorr=medium, snr=medium, between_tract=default, seed=42, --tracts-limit 3.
+
+**Smoke results** (rescaled y_true, constraints in [0,1]):
+
+| tract | constraint | dasymetric r | pycno r | granite/coords_only/sage r | morans_i_output |
+|---|---|---|---|---|---|
+| 47065000600 | 0.587 | -0.013 | -0.001 | -0.052 | 0.990 |
+| 47065000700 | 0.502 | -0.015 | +0.018 | +0.030 | 0.987 |
+| 47065001200 | 0.449 | -0.022 | -0.076 | -0.024 | 0.986 |
+
+All recovery_r finite. morans_i_output near 1.0 for coordinates_only (expected: coordinate-based GNN learns spatial structure), near 0.05-0.11 for random_noise (expected: no signal). Full feature mode shows morans_i_output 0.82-0.93 but near-zero recovery_r, consistent with the model learning spatial patterns unrelated to the latent target.
+
+**Key finding from smoke:** At medium autocorr and medium SNR, recovery_r is near zero for all methods. The latent signal at this parameter combination does not produce detectable within-tract recovery above noise. The full grid (not yet run) will map where recovery rises with autocorr and SNR.
+
+**Artifacts:**
+- `experiments/m6_recovery_grid/run_grid.py` (runner, full grid)
+- `data/results/m6_recovery_grid/recovery_grid.csv` (21 rows, smoke cell only)
+- `experiments/m6_recovery_grid/scratch/draw_latent__medium__medium__default__42.json` (draw marker, ignored)
+
+---
+
+## M6 ceiling probe: coordinate ceiling vs GRANITE recovery (2026-06-25)
+
+**Question:** Does GRANITE reach the within-tract coordinate ceiling as autocorr rises, or does it stay near zero?
+
+**Method:** Part A -- 5-fold CV GBM (lat/lon -> y_true) per tract; Part B -- GRANITE coordinates_only/sage with svi_override. Fixed snr=medium, between_tract=default, seed=42, 3 smoke tracts. Draws: weak=run_20260624_170206, medium=run_20260624_121918, strong=run_20260624_170403.
+
+**Result table:**
+
+| autocorr | supervised ceiling r | GRANITE coords_only r |
+|----------|----------------------|-----------------------|
+| weak     | 0.034                | -0.007                |
+| medium   | 0.081                | -0.015                |
+| strong   | 0.182                | -0.058                |
+
+**Finding 1:** Supervised ceiling rises monotonically with autocorr (0.034 -> 0.081 -> 0.182). Even at strong, the ceiling is modest (0.18), reflecting weak within-tract coordinate signal at WTVR ~33%.
+
+**Finding 2:** GRANITE coordinates_only recovery stays near zero across all three levels and does not track the ceiling. The constraint-enforcement architecture removes all within-tract supervision. The model's output Moran's I is near 1.0 (it learns between-tract spatial structure) but recovery_r scatters around zero (-0.078 to +0.030). Increasing autocorr of the target provides no benefit to GRANITE because it has no access to within-tract labels.
+
+**Implication:** The null recovery seen in smoke is not a calibration artifact of medium autocorr -- it persists at strong. GRANITE's failure mode is structural: tract-mean constraint as the sole supervision is insufficient for within-tract disaggregation when features carry no privileged within-tract signal.
+
+**Script:** `experiments/m6_recovery_grid/run_ceiling_probe.py`
+**Results JSON:** `experiments/m6_recovery_grid/ceiling_probe_results.json`
+
+---
+
+## M6 runner: ceiling_gbm integrated (2026-06-25)
+
+`ceiling_gbm` added to `run_grid.py` as a comparator-class method (one row per draw-tract, alongside dasymetric and pycnophylactic). The gap surface -- supervised coordinate ceiling vs GRANITE recovery -- will be captured in the deliverable CSV at every grid cell.
+
+Smoke check at medium autocorr: ceiling_gbm recovery_r = 0.115 / 0.084 / 0.083 (3 tracts). Approximately reproduces probe values (0.097 / 0.080 / 0.067); modest numeric difference from EPSG:4326 vs UTM coordinate source. All existing rows unchanged. CSV now 24 rows. Schema unchanged.
+
+**2026-06-26 coordinate fix:** ceiling_gbm corrected to use UTM (x, y) from the generator frame (`addr_df`), matching the exact coordinate space the GP drew the synthetic field in (EPSG:32616). Address sets confirmed identical (100% hash match, zero divergence for all three smoke tracts). Discrepancy was coordinate-system-only: EPSG:4326 inflated two of three tracts 10-24% due to projection nonlinearity at tract scale. After fix: 0.0967 / 0.0798 / 0.0674 (probe: 0.0967 / 0.0798 / 0.0669, <1% difference, CV noise). All other rows unchanged.

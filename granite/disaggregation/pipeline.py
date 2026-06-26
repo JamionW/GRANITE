@@ -180,7 +180,7 @@ class GRANITEPipeline:
         
         return data
 
-    def _process_single_tract(self, target_fips, data):
+    def _process_single_tract(self, target_fips, data, svi_override=None):
         """Process single tract or multiple tracts with accessibility -> SVI approach"""
 
         # determine disaggregation target
@@ -248,6 +248,8 @@ class GRANITEPipeline:
                 target_fips, data['svi'], target=active_target,
                 tract_addresses=tract_addresses
             )
+            if svi_override is not None:
+                target_tract_svi = float(svi_override)
             tract_svis = {target_fips: target_tract_svi}
 
         # get address-level truth vector (non-None for property_value target)

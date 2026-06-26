@@ -337,7 +337,8 @@ def _assemble_csv(completed_draw_keys):
         print('[m6] WARNING: no rows to assemble into CSV')
         return
 
-    with open(OUTPUT_CSV, 'w', newline='') as f:
+    tmp_path = OUTPUT_CSV.parent / (OUTPUT_CSV.name + '.tmp')
+    with open(tmp_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
         for row in all_rows:
@@ -350,6 +351,7 @@ def _assemble_csv(completed_draw_keys):
                     v = ''
                 csv_row[k] = v
             writer.writerow(csv_row)
+    os.replace(tmp_path, OUTPUT_CSV)
 
     print(f"[m6] CSV written: {OUTPUT_CSV} ({len(all_rows)} rows)")
 

@@ -131,6 +131,12 @@ granite_model.pth
 # Cache directory
 granite_cache/
 
+# M6 recovery grid scratch (generator per-run state, draw markers)
+/experiments/m6_recovery_grid/scratch/
+
+# synthetic generator run output dirs (large; calibration/ stays tracked)
+/data/synthetic/run_*/
+
 # Large raster data
 *.tif
 *.tiff

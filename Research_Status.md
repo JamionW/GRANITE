@@ -4,7 +4,7 @@
 
 **Codename:** GRANITE
 
-**Last updated:** 2026-06-24 (M5 between-tract variance parameterized as swept axis: low=0.45/default~0.665/high=0.85 ratio_between; wtvr_target derived from resolved ratio; both guards silent at all three levels; diagnostics record between_tract_level and between_tract_ratio per run)
+**Last updated:** 2026-06-28 (M6 recovery grid sweep complete: 81 of 81 draws, 7200 rows, generator_commit cdc860a, CSV committed to main at `data/results/m6_recovery_grid/recovery_grid.csv`)
 
 **Active branch:** `main`
 

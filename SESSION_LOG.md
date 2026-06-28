@@ -1,5 +1,15 @@
 # GRANITE Session Log
 
+## 2026-06-28: M6 recovery grid sweep complete
+
+**Files changed:** none (data commit only)
+
+**What:** All 81 draws completed. `data/results/m6_recovery_grid/recovery_grid.csv` committed to main (7200 rows + header). Generator commit: cdc860a. Force-added with `git add -f` due to blanket `*.csv` gitignore rule at `.gitignore:59`.
+
+**Cache invalidation:** none.
+
+---
+
 ## 2026-06-24: M5 between-tract variance as swept axis
 
 **Files modified:** `granite/synthetic/generator.py`

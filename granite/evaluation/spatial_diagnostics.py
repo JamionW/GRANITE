@@ -38,44 +38,18 @@ class SpatialLearningDiagnostics:
     
     def compute_spatial_autocorrelation(self, predictions, coordinates, k_neighbors=8):
         """
-        Original method - compute Moran's I spatial autocorrelation
-        Values near 1 = strong positive spatial correlation
-        Values near -1 = strong negative spatial correlation  
-        Values near 0 = no spatial correlation (random)
+        Moran's I with row-standardized k=8 k-NN weights.
+        Matches esda.Moran(transform='r') on the same coordinates.
+        No pre-symmetrization; row-standardize the raw k-NN adjacency directly.
         """
+        import libpysal.weights as lw
+        import esda as _esda
         n = len(predictions)
-        
-        # Build spatial weights matrix using k-nearest neighbors
-        nbrs = NearestNeighbors(n_neighbors=k_neighbors + 1).fit(coordinates)
-        distances, indices = nbrs.kneighbors(coordinates)
-        
-        # Create weights matrix
-        W = np.zeros((n, n))
-        for i in range(n):
-            for j_idx in range(1, len(indices[i])):  # Skip self
-                j = indices[i][j_idx]
-                distance = distances[i][j_idx]
-                if distance > 0:
-                    W[i, j] = 1.0 / distance  # Inverse distance weighting
-        
-        # symmetrize before row-normalizing (k-NN graphs are asymmetric)
-        W = (W + W.T) / 2
-
-        # Row-normalize weights
-        row_sums = W.sum(axis=1)
-        W = W / row_sums[:, np.newaxis]
-        W[np.isnan(W)] = 0
-        
-        # Compute Moran's I
-        predictions_centered = predictions - np.mean(predictions)
-        numerator = np.sum(W * np.outer(predictions_centered, predictions_centered))
-        denominator = np.sum(predictions_centered**2)
-        
-        if denominator == 0:
+        if n < k_neighbors + 1:
             return 0.0
-        
-        moran_i = (n / np.sum(W)) * (numerator / denominator)
-        return moran_i
+        w = lw.KNN.from_array(np.asarray(coordinates, dtype=float), k=k_neighbors)
+        w.transform = 'r'
+        return _esda.Moran(np.asarray(predictions, dtype=float), w, permutations=0).I
     
     def evaluate_accessibility_correlation(self, predictions, accessibility_features):
         """Original method - test if predictions correlate with accessibility patterns"""

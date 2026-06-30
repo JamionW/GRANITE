@@ -1,5 +1,13 @@
 # GRANITE Session Log
 
+## 2026-06-30: Fix Moran's I estimator (esda parity)
+
+**Files changed:** `granite/evaluation/spatial_diagnostics.py`
+
+**What:** Replaced hand-rolled `compute_spatial_autocorrelation` with `esda.Moran(transform='r')` via `libpysal.weights.KNN.from_array(coords, k=8)`. The old estimator symmetrized the inverse-distance k-NN matrix before row-normalizing, producing a non-doubly-stochastic W where `z^T W z / z^T z` is unbounded. 333 granite rows in `recovery_grid.csv` had `morans_i_output > 1` (max 1.261). New estimator row-standardizes raw k-NN adjacency with no pre-symmetrize, matching esda exactly (parity 0.00e+00 on 10 cells). morans_i_output column in recovery_grid.csv requires regeneration (per-address predictions not persisted; seeded rerun needed).
+
+**Cache invalidation:** none. `recovery_r` unaffected.
+
 ## 2026-06-28: M6 recovery grid sweep complete
 
 **Files changed:** none (data commit only)

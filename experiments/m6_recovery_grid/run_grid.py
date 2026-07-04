@@ -66,6 +66,7 @@ BASE_CONFIG_PATH = (
 )
 SCRATCH_DIR = REPO_ROOT / 'experiments' / 'm6_recovery_grid' / 'scratch'
 PIPELINE_SCRATCH = SCRATCH_DIR / 'pipeline'
+PRED_DIR = SCRATCH_DIR / 'predictions'
 OUTPUT_CSV = REPO_ROOT / 'data' / 'results' / 'm6_recovery_grid' / 'recovery_grid.csv'
 
 CSV_FIELDS = [
@@ -357,6 +358,195 @@ def _assemble_csv(completed_draw_keys):
 
 
 # ---------------------------------------------------------------------------
+# prediction persistence
+# ---------------------------------------------------------------------------
+
+def _pred_path(draw_key, fips, feature_mode, arch):
+    """Path for persisted per-cell predictions and EPSG:4326 coordinates.
+
+    Key schema: (draw_key, fips, feature_mode, arch)
+    File: scratch/predictions/{draw_key}__{fips}__{feature_mode}__{arch}.npz
+    Contains arrays 'predictions' (1-D float) and 'coords' (N x 2 float, EPSG:4326).
+    """
+    return PRED_DIR / f'{draw_key}__{fips}__{feature_mode}__{arch}.npz'
+
+
+def _save_pred(draw_key, fips, feature_mode, arch, preds, coords):
+    """Atomically write prediction vector and EPSG:4326 coordinate array to disk."""
+    PRED_DIR.mkdir(parents=True, exist_ok=True)
+    path = _pred_path(draw_key, fips, feature_mode, arch)
+    # np.savez appends .npz if not present, so name the temp file to already end in .npz
+    tmp = path.with_name(path.stem + '.tmp.npz')
+    np.savez(tmp, predictions=preds, coords=coords)
+    os.replace(tmp, path)
+
+
+# ---------------------------------------------------------------------------
+# recompute pass: re-infer and recompute morans_i_output for all granite cells
+# ---------------------------------------------------------------------------
+
+def _recompute_morans_pass(all_draw_keys, cfg_base, pipeline, data, verbose=True):
+    """
+    Re-run GRANITE inference for every granite cell across all completed draws.
+
+    For each draw:
+      - Reload generator addresses from marker's generator_output_dir.
+      - Reconstruct rescaled y_true and per-tract SVI constraints.
+      - For each (fips, feature_mode, arch) granite cell:
+          * Re-run pipeline._process_single_tract.
+          * Persist predictions and EPSG:4326 coordinates via _save_pred.
+          * Compute new morans_i_output with the fixed estimator.
+          * Compute new recovery_r for the determinism gate.
+      - Update the marker's rows in place and rewrite the marker.
+
+    Returns:
+      parity_rows : list of (draw_key, fips, fm, arch, old_rr, new_rr) for gate
+    """
+    parity_rows = []
+
+    for draw_key in all_draw_keys:
+        mp = _marker_path(draw_key)
+        if not mp.exists():
+            continue
+        try:
+            marker = json.loads(mp.read_text())
+        except Exception as e:
+            print(f'[recompute] WARNING: failed to read {mp}: {e}')
+            continue
+
+        # resume skip: if all granite rows already have _new_recovery_r, skip re-inference
+        granite_rows_all = [r for r in marker.get('rows', []) if r.get('method') == 'granite']
+        if granite_rows_all and all('_new_recovery_r' in r for r in granite_rows_all):
+            for r in granite_rows_all:
+                parity_rows.append((draw_key, r['tract_fips'], r['feature_mode'], r['arch'],
+                                    r['recovery_r'], r['_new_recovery_r']))
+            print(f'[recompute] {draw_key}: already recomputed ({len(granite_rows_all)} cells), skipping')
+            continue
+
+        gen_dir = Path(marker['generator_output_dir'])
+        addr_csv = gen_dir / 'addresses.csv'
+        if not addr_csv.exists():
+            print(f'[recompute] WARNING: generator output missing for {draw_key}: {addr_csv}')
+            continue
+
+        addr_df = pd.read_csv(addr_csv)
+        addr_df['fips'] = addr_df['fips'].astype(str)
+        y_min = marker['ytrue_rescale_min']
+        y_max = marker['ytrue_rescale_max']
+        addr_df = addr_df.copy()
+        addr_df['y_true'] = (addr_df['y_true'] - y_min) / (y_max - y_min)
+        tract_means = addr_df.groupby('fips')['y_true'].mean().to_dict()
+
+        set_random_seed(marker['seed'])
+
+        # group granite rows by fips, preserving original (feature_mode, arch) order
+        fips_cells = {}  # fips -> [(feature_mode, arch, old_rr), ...]
+        for row in marker['rows']:
+            if row['method'] != 'granite':
+                continue
+            fips = row['tract_fips']
+            if fips not in fips_cells:
+                fips_cells[fips] = []
+            fips_cells[fips].append((row['feature_mode'], row['arch'], row['recovery_r']))
+
+        # map (fips, fm, arch) -> (new_mi, new_rr)
+        cell_updates = {}
+
+        for fips, cells in fips_cells.items():
+            if fips not in tract_means:
+                print(f'[recompute]   {draw_key}/{fips}: missing from tract_means, skip')
+                continue
+            svi_constraint = float(tract_means[fips])
+            y_true_ref = None
+
+            for feature_mode, arch, old_rr in cells:
+                run_cfg = _make_run_cfg(cfg_base, fips, feature_mode, arch)
+                pipeline.config = run_cfg
+                pipeline.data_loader.config['processing'] = run_cfg['processing']
+
+                try:
+                    result = pipeline._process_single_tract(
+                        fips, data, svi_override=svi_constraint
+                    )
+                except Exception as e:
+                    print(f'[recompute]   ERROR {draw_key}/{fips}/{feature_mode}/{arch}: '
+                          f'{str(e)[:120]}')
+                    continue
+
+                if not result.get('success'):
+                    print(f'[recompute]   FAILED {draw_key}/{fips}/{feature_mode}/{arch}: '
+                          f'{result.get("error","?")[:80]}')
+                    continue
+
+                preds = result['predictions']['mean'].values.astype(float)
+                cur_gdf = result['address_gdf']
+                coords = np.array([[g.x, g.y] for g in cur_gdf.geometry])
+
+                _save_pred(draw_key, fips, feature_mode, arch, preds, coords)
+
+                if y_true_ref is None:
+                    y_true_ref = _align_ytrue(addr_df, fips, cur_gdf)
+
+                new_mi = _compute_morans_i_output(preds, cur_gdf)
+                new_rr = _recovery_r(preds, y_true_ref)
+
+                cell_updates[(fips, feature_mode, arch)] = (new_mi, new_rr)
+                parity_rows.append((draw_key, fips, feature_mode, arch, old_rr, new_rr))
+
+                if verbose:
+                    print(f'[recompute]   {draw_key}/{fips}/{feature_mode}/{arch}: '
+                          f'mi={new_mi:.4f} rr_new={new_rr:.4f} rr_old={old_rr:.4f}')
+
+        # update marker rows with new morans_i_output (recovery_r updated after gate)
+        new_rows = []
+        for row in marker['rows']:
+            r = dict(row)
+            if r['method'] == 'granite':
+                key = (r['tract_fips'], r['feature_mode'], r['arch'])
+                if key in cell_updates:
+                    r['morans_i_output'] = cell_updates[key][0]
+                    r['_new_recovery_r'] = cell_updates[key][1]  # gate scratch, stripped below
+            new_rows.append(r)
+
+        marker['rows'] = new_rows
+        _marker_path(draw_key).write_text(
+            json.dumps(marker, indent=2, default=_json_default)
+        )
+        n_updated = len(cell_updates)
+        print(f'[recompute] {draw_key}: {n_updated} granite cells recomputed, marker updated')
+
+    return parity_rows
+
+
+def _apply_parity_verdict(all_draw_keys, parity_rows, drift):
+    """
+    Apply the parity verdict to marker rows.
+
+    PASS (drift=False): strip _new_recovery_r, keep original recovery_r.
+    DRIFT (drift=True): replace recovery_r with _new_recovery_r, then strip.
+    Rewrite each marker after update.
+    """
+    for draw_key in all_draw_keys:
+        mp = _marker_path(draw_key)
+        if not mp.exists():
+            continue
+        try:
+            marker = json.loads(mp.read_text())
+        except Exception:
+            continue
+        changed = False
+        for r in marker['rows']:
+            if '_new_recovery_r' in r:
+                if drift:
+                    r['recovery_r'] = r.pop('_new_recovery_r')
+                else:
+                    del r['_new_recovery_r']
+                changed = True
+        if changed:
+            mp.write_text(json.dumps(marker, indent=2, default=_json_default))
+
+
+# ---------------------------------------------------------------------------
 # single draw execution
 # ---------------------------------------------------------------------------
 
@@ -444,6 +634,13 @@ def run_draw(draw_spec, tract_list, cfg_base, pipeline, data, generator_commit):
 
             preds = result['predictions']['mean'].values.astype(float)
             cur_gdf = result['address_gdf']
+
+            # persist per-cell predictions and EPSG:4326 coordinates
+            _save_pred(
+                draw_key, fips, feature_mode, arch,
+                preds,
+                np.array([[g.x, g.y] for g in cur_gdf.geometry]),
+            )
 
             # on first success: cache address_gdf for comparators and y_true alignment
             if address_gdf_ref is None:
@@ -538,6 +735,14 @@ def main():
         help='limit tract list to first N tracts',
     )
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument(
+        '--recompute-morans', action='store_true',
+        help=(
+            'recompute morans_i_output for all completed granite cells using '
+            'the fixed estimator; runs GRANITE re-inference, persists predictions, '
+            'gates on recovery_r parity (<= 1e-6), rewrites markers and CSV'
+        ),
+    )
     args = parser.parse_args()
 
     ts_start = datetime.now()
@@ -596,6 +801,38 @@ def main():
     except Exception as e:
         print(f"[m6] HALT: spatial data loading failed: {e}")
         sys.exit(1)
+
+    if args.recompute_morans:
+        print('[m6] recompute-morans mode: re-inferring all granite cells')
+        ts_rc = datetime.now()
+        completed_draw_keys_rc = [k for k in all_draw_keys if _marker_path(k).exists()]
+        print(f'[m6] {len(completed_draw_keys_rc)} completed draws to recompute')
+
+        parity_rows = _recompute_morans_pass(
+            completed_draw_keys_rc, cfg_base, pipeline, data, verbose=args.verbose
+        )
+
+        # determinism gate
+        import numpy as _np_gate
+        diffs = [abs(new - old) for _, _, _, _, old, new in parity_rows
+                 if old is not None and new is not None
+                 and math.isfinite(old) and math.isfinite(new)]
+        max_diff = max(diffs) if diffs else 0.0
+        print(f'[m6] recovery_r parity: n_cells={len(parity_rows)} max_abs_diff={max_diff:.2e}')
+
+        drift = max_diff > 1e-6
+        if drift:
+            print(f'[m6] DRIFT (max_diff={max_diff:.2e} > 1e-6): '
+                  f'updating recovery_r to re-inferred values in all markers')
+        else:
+            print('[m6] PASS: recovery_r parity confirmed, keeping original recovery_r')
+
+        _apply_parity_verdict(completed_draw_keys_rc, parity_rows, drift=drift)
+        _assemble_csv(completed_draw_keys_rc)
+
+        elapsed_rc = (datetime.now() - ts_rc).total_seconds() / 60
+        print(f'[m6] recompute-morans complete in {elapsed_rc:.1f} min')
+        return
 
     # main loop
     completed_draw_keys = []

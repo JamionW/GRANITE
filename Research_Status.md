@@ -410,3 +410,9 @@ All recovery_r finite. morans_i_output near 1.0 for coordinates_only (expected: 
 Smoke check at medium autocorr: ceiling_gbm recovery_r = 0.115 / 0.084 / 0.083 (3 tracts). Approximately reproduces probe values (0.097 / 0.080 / 0.067); modest numeric difference from EPSG:4326 vs UTM coordinate source. All existing rows unchanged. CSV now 24 rows. Schema unchanged.
 
 **2026-06-26 coordinate fix:** ceiling_gbm corrected to use UTM (x, y) from the generator frame (`addr_df`), matching the exact coordinate space the GP drew the synthetic field in (EPSG:32616). Address sets confirmed identical (100% hash match, zero divergence for all three smoke tracts). Discrepancy was coordinate-system-only: EPSG:4326 inflated two of three tracts 10-24% due to projection nonlinearity at tract scale. After fix: 0.0967 / 0.0798 / 0.0674 (probe: 0.0967 / 0.0798 / 0.0669, <1% difference, CV noise). All other rows unchanged.
+
+---
+
+## M6 prediction files committed (2026-07-05)
+
+2,340 per-cell .npz files (113M) relocated from gitignored `scratch/predictions/` to committed `data/results/m6_recovery_grid/predictions/`. Recompute anchor survives container rebuilds. `PRED_DIR` in `run_grid.py` updated accordingly. `recovery_grid.csv` unchanged. Verification: max abs diff 1.11e-16 across all 2,340 granite rows.

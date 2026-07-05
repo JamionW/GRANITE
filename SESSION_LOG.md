@@ -1226,3 +1226,15 @@ Per-tract detail:
 Reproduction within CV noise (<1%). All 21 existing granite and comparator rows reproduce exactly to the digit.
 
 **Cache invalidation:** none.
+
+## 2026-07-05: M6 prediction files relocated to committed path
+
+**Files changed:** `experiments/m6_recovery_grid/run_grid.py`, `data/results/m6_recovery_grid/predictions/` (2,340 .npz files added)
+
+**What changed:** Moved 2,340 per-cell prediction .npz files (113M) from the gitignored `experiments/m6_recovery_grid/scratch/predictions/` to the committed path `data/results/m6_recovery_grid/predictions/`. Updated `PRED_DIR` constant in `run_grid.py` (line 69) from `SCRATCH_DIR / 'predictions'` to `REPO_ROOT / 'data' / 'results' / 'm6_recovery_grid' / 'predictions'`. Updated the path comment in `_pred_path` docstring. Function names and signatures unchanged.
+
+**Why:** `scratch/` is gitignored, so .npz files survived container disconnect but would vanish on rebuild. The committed path survives rebuilds and anchors the recompute pass.
+
+**Verification:** Reloaded all 2,340 .npz files from new path, recomputed `morans_i_output` with fixed esda estimator (k=8 row-standardized), compared to committed `recovery_grid.csv`. Max abs diff: 1.11e-16 (machine epsilon). `recovery_grid.csv` byte-identical (zero git diff).
+
+**Cache invalidation:** none. File contents unchanged, only path relocated.

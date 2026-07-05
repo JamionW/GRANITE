@@ -66,7 +66,7 @@ BASE_CONFIG_PATH = (
 )
 SCRATCH_DIR = REPO_ROOT / 'experiments' / 'm6_recovery_grid' / 'scratch'
 PIPELINE_SCRATCH = SCRATCH_DIR / 'pipeline'
-PRED_DIR = SCRATCH_DIR / 'predictions'
+PRED_DIR = REPO_ROOT / 'data' / 'results' / 'm6_recovery_grid' / 'predictions'
 OUTPUT_CSV = REPO_ROOT / 'data' / 'results' / 'm6_recovery_grid' / 'recovery_grid.csv'
 
 CSV_FIELDS = [
@@ -365,7 +365,7 @@ def _pred_path(draw_key, fips, feature_mode, arch):
     """Path for persisted per-cell predictions and EPSG:4326 coordinates.
 
     Key schema: (draw_key, fips, feature_mode, arch)
-    File: scratch/predictions/{draw_key}__{fips}__{feature_mode}__{arch}.npz
+    File: data/results/m6_recovery_grid/predictions/{draw_key}__{fips}__{feature_mode}__{arch}.npz
     Contains arrays 'predictions' (1-D float) and 'coords' (N x 2 float, EPSG:4326).
     """
     return PRED_DIR / f'{draw_key}__{fips}__{feature_mode}__{arch}.npz'

@@ -148,3 +148,4 @@ granite_inline_diagnostics.py
 !data/example/
 !data/README.md
 .claude/
+*.out

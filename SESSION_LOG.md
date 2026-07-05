@@ -1,5 +1,13 @@
 # GRANITE Session Log
 
+## 2026-07-05: M6 morans_i_output recompute -- corrected recovery_grid.csv
+
+**Files changed:** `data/results/m6_recovery_grid/recovery_grid.csv`, `graveyard/topology_specificity_metrics_presymmetrize_20260612.json`
+
+**What:** Re-ran GRANITE inference across all 81 M6 draws (20 tracts each) using the fixed esda row-standardized estimator (commit 28d042b). Per-cell predictions and EPSG:4326 coordinates now persisted to `experiments/m6_recovery_grid/scratch/predictions/` (2227 npz files, ~2 files per granite cell). recovery_r parity: PASS (max_abs_diff=1.94e-16), confirming bit-reproducible inference under seeded runs. Old recovery_r column unchanged. Corrected morans_i_output: min=-0.145, max=0.999, mean=0.803, abs>1 count=0 (was: max=1.261, abs>1=333). Old CSV retired to `graveyard/recovery_grid_presymmetrize_20260628.csv` (gitignored). New CSV written atomically to canonical path. Runtime: 72.7 min (warm OSRM cache). 5b topology_specificity used the shared estimator; old results retired to graveyard as `topology_specificity_metrics_presymmetrize_20260612.json`; re-inference deferred (no persisted predictions, sweep ~8h, values all <1 under old estimator so qualitative conclusions robust).
+
+**Cache invalidation:** none. OSRM cache unaffected. Predictions directory in scratch (gitignored).
+
 ## 2026-06-30: Fix Moran's I estimator (esda parity)
 
 **Files changed:** `granite/evaluation/spatial_diagnostics.py`

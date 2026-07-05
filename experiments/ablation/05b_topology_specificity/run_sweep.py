@@ -58,6 +58,12 @@ BASE_CONFIG_PATH = (
 )
 BG_SVI_PATH = REPO_ROOT / 'data' / 'processed' / 'national_bg_svi.csv'
 
+# canonical output paths (committed, not scratch)
+CANONICAL_DIR         = REPO_ROOT / 'data' / 'results' / 'm6_topology_5b'
+PRED_DIR              = CANONICAL_DIR / 'predictions'
+CANONICAL_METRICS     = CANONICAL_DIR / 'topology_specificity_metrics.json'
+CANONICAL_TRIALS_CSV  = CANONICAL_DIR / 'trials_incremental.csv'
+
 ARCHITECTURES = ['sage', 'gcn_gat']
 ARCH_LABELS = {'sage': 'GRANITE-SAGE', 'gcn_gat': 'GRANITE-GCNGAT'}
 TRAINING_SEEDS = [42, 17, 123, 2024, 7]
@@ -167,6 +173,28 @@ def _git_sha():
         ).decode().strip()
     except Exception:
         return 'unknown'
+
+
+def _pred_path(condition, arch, training_seed, graph_draw_seed, fips):
+    """npz path for persisted (predictions, coords) for one trial×fips cell."""
+    return PRED_DIR / (
+        f'{condition}__{arch}__ts{training_seed}__gs{graph_draw_seed}__{fips}.npz'
+    )
+
+
+def _save_pred_atomic(path, preds, coords):
+    """atomically write predictions and EPSG:4326 coords to an npz file."""
+    import os
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.tmp.npz')
+    try:
+        np.savez(tmp, predictions=np.asarray(preds, dtype=float),
+                 coords=np.asarray(coords, dtype=float))
+        os.replace(str(tmp), str(path))
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
 
 
 def _write_preflight(cond_dir, cfg, tract_list):
@@ -421,7 +449,8 @@ def run_preflight_check(cfg_base, tract_list):
 # ---------------------------------------------------------------------------
 
 def run_seed(condition, arch, training_seed, graph_draw_seed,
-             cfg_base, pipeline, data, bg_gdf, validator, tract_list):
+             cfg_base, pipeline, data, bg_gdf, validator, tract_list,
+             persist_preds=False):
     """
     Run one (condition, arch, seed) combination over all tracts.
     Returns dict with per-seed aggregate metrics.
@@ -473,6 +502,14 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
         address_gdf = result['address_gdf']
         preds_arr = result['predictions']['mean'].values.astype(float)
         tract_svi = float(result['tract_svi'])
+
+        if persist_preds:
+            pp = _pred_path(condition, arch, training_seed, graph_draw_seed, fips)
+            if not pp.exists():
+                _save_pred_atomic(
+                    pp, preds_arr,
+                    np.array([[g.x, g.y] for g in address_gdf.geometry])
+                )
 
         constr_err = abs(np.mean(preds_arr) - tract_svi)
         sp_std = float(np.std(preds_arr))
@@ -570,7 +607,8 @@ def _append_trial_csv(csv_path, condition, arch, seed_result):
 
 
 def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=False,
-                  incremental_csv=None, archs=None, completed_trials=None):
+                  incremental_csv=None, archs=None, completed_trials=None,
+                  persist_preds=False):
     """Run all (arch, seed) combinations for one condition. Returns nested results dict."""
     if archs is None:
         archs = ARCHITECTURES
@@ -624,7 +662,8 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
             t0 = time.time()
             seed_result = run_seed(
                 condition, arch, training_seed, graph_draw_seed,
-                cfg_base, pipeline, data, bg_gdf, validator, tract_list
+                cfg_base, pipeline, data, bg_gdf, validator, tract_list,
+                persist_preds=persist_preds
             )
             seed_result['runtime_s'] = round(time.time() - t0, 1)
             arch_seed_results.append(seed_result)
@@ -701,6 +740,13 @@ def main():
                         help='validate setup without running training')
     parser.add_argument('--check-only', action='store_true',
                         help='run preflight (degree/jaccard/swap-guard) on all tracts and exit')
+    parser.add_argument('--rerun-fresh', action='store_true',
+                        help=(
+                            'rerun all conditions under the fixed esda estimator; '
+                            'persist per-trial predictions and coords to '
+                            'data/results/m6_topology_5b/predictions/ (committed); '
+                            'write corrected metrics to data/results/m6_topology_5b/'
+                        ))
     args = parser.parse_args()
 
     ts_start = datetime.now()
@@ -769,19 +815,33 @@ def main():
 
     conditions_to_run = CONDITIONS if args.condition == 'all' else [args.condition]
 
-    results_path = STEP5B_ROOT / 'results' / 'topology_specificity_metrics.json'
-    results_path.parent.mkdir(exist_ok=True)
-    incremental_csv = STEP5B_ROOT / 'results' / 'trials_incremental.csv'
-    if results_path.exists():
-        with open(results_path) as f:
-            all_results = json.load(f)
-        print(f'[step05b] loaded existing results from {results_path}')
-    else:
+    if args.rerun_fresh:
+        results_path = CANONICAL_METRICS
+        results_path.parent.mkdir(parents=True, exist_ok=True)
+        incremental_csv = CANONICAL_TRIALS_CSV
         all_results = {}
+        persist_preds = True
+        print(f'[step05b] rerun-fresh: output -> {results_path}')
+        print(f'[step05b] rerun-fresh: predictions -> {PRED_DIR}')
+    else:
+        results_path = STEP5B_ROOT / 'results' / 'topology_specificity_metrics.json'
+        results_path.parent.mkdir(exist_ok=True)
+        incremental_csv = STEP5B_ROOT / 'results' / 'trials_incremental.csv'
+        persist_preds = False
+        if results_path.exists():
+            with open(results_path) as f:
+                all_results = json.load(f)
+            print(f'[step05b] loaded existing results from {results_path}')
+        else:
+            all_results = {}
 
-    completed_trials = _load_completed_trials(incremental_csv)
-    if completed_trials:
-        print(f'[step05b] {len(completed_trials)} completed trial(s) found in CSV; will skip')
+    if args.rerun_fresh and incremental_csv.exists():
+        completed_trials = _load_completed_trials(incremental_csv)
+        print(f'[step05b] rerun-fresh resume: {len(completed_trials)} trial(s) already done')
+    else:
+        completed_trials = _load_completed_trials(incremental_csv)
+        if completed_trials:
+            print(f'[step05b] {len(completed_trials)} completed trial(s) found in CSV; will skip')
 
     # preflight gate: run before sweep, write once, abort on failure
     parity_path = STEP5B_ROOT / 'results' / 'preflight.json'
@@ -808,17 +868,19 @@ def main():
             incremental_csv=incremental_csv,
             archs=archs_needed,
             completed_trials=completed_trials,
+            persist_preds=persist_preds,
         )
         # merge new arch results with any already-persisted arches for this condition
         merged = dict(all_results.get(cond, {}))
         merged.update(cond_results)
         all_results[cond] = merged
 
-        cond_results_path = STEP5B_ROOT / cond / 'results' / f'{cond}_metrics.json'
-        with open(cond_results_path, 'w') as f:
-            json.dump(merged, f, indent=2,
-                      default=lambda x: None if (isinstance(x, float) and math.isnan(x)) else x)
-        print(f'[step05b] {cond} results written to {cond_results_path}')
+        if not args.rerun_fresh:
+            cond_results_path = STEP5B_ROOT / cond / 'results' / f'{cond}_metrics.json'
+            with open(cond_results_path, 'w') as f:
+                json.dump(merged, f, indent=2,
+                          default=lambda x: None if (isinstance(x, float) and math.isnan(x)) else x)
+            print(f'[step05b] {cond} results written to {cond_results_path}')
 
         with open(results_path, 'w') as f:
             json.dump(all_results, f, indent=2,

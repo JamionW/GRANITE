@@ -34,14 +34,14 @@ of the message-passing graph used during training.
 
 ```
 condition             arch       n   mean    min    max    std
-spatial_knn_uniform   sage       5  0.883  0.863  0.904  0.013
-spatial_knn_uniform   gcn_gat    5  0.896  0.869  0.917  0.017
-road_network_uniform  sage       5  0.847  0.814  0.883  0.028
-road_network_uniform  gcn_gat    5  0.836  0.825  0.856  0.011
-production            sage       5  0.857  0.821  0.888  0.024
-production            gcn_gat    5  0.837  0.809  0.871  0.021
-randomized            sage       5  0.446  0.431  0.464  0.012
-randomized            gcn_gat    5  0.083  0.080  0.087  0.002
+spatial_knn_uniform   sage       5  0.872  0.859  0.888  0.013
+spatial_knn_uniform   gcn_gat    5  0.885  0.869  0.897  0.012
+road_network_uniform  sage       5  0.835  0.799  0.866  0.028
+road_network_uniform  gcn_gat    5  0.817  0.801  0.833  0.012
+production            sage       5  0.848  0.824  0.872  0.018
+production            gcn_gat    5  0.826  0.812  0.855  0.017
+randomized            sage       5  0.422  0.403  0.440  0.015  (supersedes 0.446 +/- 0.012)
+randomized            gcn_gat    5  0.075  0.071  0.077  0.003  (supersedes 0.083 +/- 0.002)
 ```
 
 ---
@@ -49,7 +49,7 @@ randomized            gcn_gat    5  0.083  0.080  0.087  0.002
 ## Primary finding: edge structure carries within-tract spatial coherence
 
 At fixed degree, scrambling edge placement collapses Moran's I. Structured
-conditions hold 0.81 to 0.92; randomized SAGE drops to 0.45, randomized GCN-GAT
+conditions hold 0.817 to 0.885 (production SAGE 0.848, GCN-GAT 0.826); randomized SAGE drops to 0.45, randomized GCN-GAT
 drops to 0.08. The bands do not overlap between any structured condition and
 randomized. Because spatial_knn_uniform and randomized share the exact per-node
 degree sequence and differ only in which nodes those edges connect, the gap

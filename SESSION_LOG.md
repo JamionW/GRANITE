@@ -1260,3 +1260,17 @@ Reproduction within CV noise (<1%). All 21 existing granite and comparator rows 
 **Wall time:** 365 min (~6h5m) for 30 new trials (10 carried over). ~12 min/trial.
 
 **Cache invalidation:** none. Feature/routing logic unchanged; only output metric corrected.
+
+## 2026-07-06: 5b provenance sidecar and RESULTS.md value purge
+
+**Files changed:** `data/results/m6_topology_5b/topology_specificity_metrics_meta.json` (created), `experiments/ablation/05b_topology_specificity/RESULTS.md` (4 value replacements)
+
+**What changed:**
+1. Provenance sidecar: records estimator (row-standardized binary k=8 k-NN, esda.Moran transform='r', no pre-symmetrize), weights independence, parity claim (1e-6), metrics commit (5c54c9dc), date (committer clock, unverified), n_trials 40, n_seeds 5, four condition names, and explicit retirement of 0.446/0.083. Metrics JSON untouched (md5 12c091b0 pre and post).
+2. RESULTS.md: replaced 0.446 with 0.4217 +/- 0.0153, 0.083 with 0.0745 +/- 0.0027 (both with "supersedes" annotations); replaced "0.81 to 0.92" with "0.817 to 0.885" in primary finding text; added "production SAGE 0.848, GCN-GAT 0.826" in primary finding passage. Old values remain only in parenthetical supersedes annotations.
+
+**Why:** Frozen metrics JSON carried no estimator provenance; sidecar adds it alongside without rewriting. RESULTS.md carried the biased pre-symmetrize values; exact replacements correct them.
+
+**Scope note:** PROJECT_PREAMBLE.md not touched; DEFENSE_FRAMING does not exist as a standalone file. Preamble line 27 (Jamion quote) verbatim: "We proved a sophisticated model disaggregates vulnerability scores no more accurately than simple proportional allocation, and its only distinctive contribution, spatial coherence, is wholly a function of graph structure rather than learning." Held for strategic review.
+
+**Cache invalidation:** none.

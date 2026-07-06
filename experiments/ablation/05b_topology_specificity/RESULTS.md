@@ -49,8 +49,8 @@ randomized            gcn_gat    5  0.075  0.071  0.077  0.003  (supersedes 0.08
 ## Primary finding: edge structure carries within-tract spatial coherence
 
 At fixed degree, scrambling edge placement collapses Moran's I. Structured
-conditions hold 0.817 to 0.885 (production SAGE 0.848, GCN-GAT 0.826); randomized SAGE drops to 0.45, randomized GCN-GAT
-drops to 0.08. The bands do not overlap between any structured condition and
+conditions hold 0.817 to 0.885 (production SAGE 0.848, GCN-GAT 0.826); randomized SAGE drops to 0.42, randomized GCN-GAT
+drops to 0.075. The bands do not overlap between any structured condition and
 randomized. Because spatial_knn_uniform and randomized share the exact per-node
 degree sequence and differ only in which nodes those edges connect, the gap
 attributes to edge structure alone.

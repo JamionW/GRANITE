@@ -24,7 +24,7 @@ geopandas==1.1.2
 geopy==2.4.1
 gitdb==4.0.12
 GitPython==3.1.41
--e git+https://github.com/JamionW/GRANITE@49a052b024fc5525702a4514d08b775cac1017de#egg=granite_svi
+-e git+https://github.com/JamionW/GRANITE@57cb144ee9e090e968034dece38f27ec626a5dad#egg=granite_svi
 idna==3.11
 iniconfig==2.3.0
 Jinja2==3.1.6

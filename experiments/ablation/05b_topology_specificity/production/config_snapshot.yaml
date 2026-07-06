@@ -59,7 +59,7 @@ processing:
   enable_caching: true
   random_seed: 42
   skip_importance: true
-  verbose: false
+  verbose: true
 recovery:
   output_dir: ./output/recovery
   standardize_target: true

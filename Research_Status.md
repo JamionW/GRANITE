@@ -416,3 +416,16 @@ Smoke check at medium autocorr: ceiling_gbm recovery_r = 0.115 / 0.084 / 0.083 (
 ## M6 prediction files committed (2026-07-05)
 
 2,340 per-cell .npz files (113M) relocated from gitignored `scratch/predictions/` to committed `data/results/m6_recovery_grid/predictions/`. Recompute anchor survives container rebuilds. `PRED_DIR` in `run_grid.py` updated accordingly. `recovery_grid.csv` unchanged. Verification: max abs diff 1.11e-16 across all 2,340 granite rows.
+
+---
+
+## 5b topology specificity re-sweep complete (2026-07-06)
+
+Re-ran all 40 trials under fixed esda Moran's I estimator (k=8 row-standardized, no pre-symmetrization). Per-trial predictions persisted to `data/results/m6_topology_5b/predictions/` (800 .npz files); canonical metrics at `data/results/m6_topology_5b/topology_specificity_metrics.json`.
+
+**New results (mean Moran's I):**
+- Structured (spatial_knn / road_network): 0.82–0.88 both architectures
+- Randomized SAGE: 0.42 | Randomized GCN_GAT: 0.074
+- Production SAGE: 0.848 | Production GCN_GAT: 0.826
+
+**Ordering preserved:** structured >> randomized-SAGE >> randomized-GCN_GAT. No rank or sign changes. Old biased values (structured 0.81–0.92, rand-sage 0.446, rand-gcn 0.083) slightly overstated but conclusions unchanged. This is the last re-inference 5b needs; future recomputes load persisted .npz files.

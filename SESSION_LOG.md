@@ -1238,3 +1238,25 @@ Reproduction within CV noise (<1%). All 21 existing granite and comparator rows 
 **Verification:** Reloaded all 2,340 .npz files from new path, recomputed `morans_i_output` with fixed esda estimator (k=8 row-standardized), compared to committed `recovery_grid.csv`. Max abs diff: 1.11e-16 (machine epsilon). `recovery_grid.csv` byte-identical (zero git diff).
 
 **Cache invalidation:** none. File contents unchanged, only path relocated.
+
+## 2026-07-06: 5b topology specificity re-sweep under fixed Moran's I estimator
+
+**Files changed:** `data/results/m6_topology_5b/topology_specificity_metrics.json` (new canonical artifact), `data/results/m6_topology_5b/trials_incremental.csv` (40 trial rows), `data/results/m6_topology_5b/predictions/` (800 .npz files, all 40 trials × 20 tracts)
+
+**What changed:** Re-ran all 40 trials of the 5b topology specificity sweep (4 conditions × 2 architectures × 5 seeds) under the fixed `compute_spatial_autocorrelation` estimator (esda Moran's I, k=8 k-NN row-standardized, no pre-symmetrization; commits 23cd969/fc212d4). Predictions had not been persisted in the prior run, so full GRANITE re-inference was required. Per-trial predictions and EPSG:4326 coordinates are now persisted to `data/results/m6_topology_5b/predictions/{condition}__{arch}__ts{ts}__gs{gs}__{fips}.npz`. Resume logic (incremental CSV + condition-level JSON gate) allowed reconnection mid-sweep without restarting; `spatial_knn_uniform` (10 trials) was carried over from the prior session.
+
+**Why:** The original 5b run used a biased Moran's I estimator (pre-symmetrized weights, incorrect transform). This pass corrects the output metric and anchors future recomputes against persisted predictions, so no re-inference is needed again.
+
+**Results (new fixed estimator, mean ± std across 5 seeds):**
+- spatial_knn_uniform SAGE: 0.8723 ± 0.013 | GCN_GAT: 0.8845 ± 0.012
+- road_network_uniform SAGE: 0.8348 ± 0.028 | GCN_GAT: 0.8167 ± 0.012
+- randomized SAGE: 0.4217 ± 0.015 | GCN_GAT: 0.0745 ± 0.003
+- production SAGE: 0.8479 ± 0.018 | GCN_GAT: 0.8261 ± 0.017
+
+**Ordering verdict:** Structured conditions (0.82–0.88) >> randomized SAGE (0.42) >> randomized GCN_GAT (0.07). No rank or sign changes from old run. The estimator fix slightly reduced all values (old biased range 0.81–0.92 structured, randomized sage 0.446, randomized gcn_gat 0.083) but preserves all conclusions.
+
+**Seeding:** structured conditions vary `training_seed` in [42,17,123,2024,7] with `graph_draw_seed=42` fixed; randomized condition fixes `training_seed=42` and varies `graph_draw_seed`. `set_random_seed(training_seed)` called per trial in `run_seed()`.
+
+**Wall time:** 365 min (~6h5m) for 30 new trials (10 carried over). ~12 min/trial.
+
+**Cache invalidation:** none. Feature/routing logic unchanged; only output metric corrected.

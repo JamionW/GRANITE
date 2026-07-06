@@ -1,0 +1,16 @@
+{
+  "estimator": "row-standardized binary k=8 k-NN, esda.Moran transform='r', no pre-symmetrize",
+  "weights_spec": "external fixed k=8 coordinate weights, independent of the message-passing graph",
+  "parity": "matches esda.Moran to 1e-6",
+  "metrics_commit": "5c54c9dc58cf0c471f39c71a80891031e8d20ea9",
+  "date": "2026-07-06 02:22:49 +0000 (committer clock, unverified against wall time)",
+  "n_trials": 40,
+  "n_seeds": 5,
+  "conditions": [
+    "spatial_knn_uniform",
+    "road_network_uniform",
+    "randomized",
+    "production"
+  ],
+  "retires": "0.446 and 0.083 from topology_specificity_metrics_presymmetrize_20260612.json"
+}

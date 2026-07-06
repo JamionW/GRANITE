@@ -127,3 +127,25 @@ are in each condition's `results/<condition>_metrics.json` and in the consolidat
 for honest topology parity); the result artifacts are committed here in this README
 commit. Degree calibration artifacts trace to commit `f16c01c`.
 Per-tract Moran's I values for the randomized 42/42 draw trace to `results/sweep_run.log`.
+
+---
+
+## Interpretation
+
+Output coherence requires structured input and structured topology. M6 fixes
+topology and degrades input (coords_plus_noise, Moran's I 0.092); 5b fixes input
+and degrades topology (randomized gcn_gat, 0.075). Either leg alone fails, with
+one exception. Randomized SAGE holds at 0.42 while randomized GCN-GAT falls to
+0.075. GraphSAGE concatenates the node's own representation with the neighbor
+aggregate, so the identity channel passes structured input through even when
+topology is scrambled; GCN-GAT mixes through neighbors only and loses it. This
+is the mechanism consistent with the data; the data does not isolate it. An
+ablation zeroing the SAGE self-term, showing randomized SAGE dropping toward
+GCN-GAT, would isolate it.
+
+Pooled BG r holds flat across all four topology conditions, 0.763 to 0.772,
+while output Moran's I spans 0.885 to 0.075. Randomized GCN-GAT posts 0.075
+coherence and 0.765 bg_r, against canonical GRANITE 0.769. One method, coherence
+destroyed by scrambling topology, the aggregate metric unmoved. This is the
+single-exhibit form of Finding 6: pooled BG r is invariant to within-tract
+quality by construction.

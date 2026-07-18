@@ -1274,3 +1274,5 @@ Reproduction within CV noise (<1%). All 21 existing granite and comparator rows 
 **Scope note:** PROJECT_PREAMBLE.md not touched; DEFENSE_FRAMING does not exist as a standalone file. Preamble line 27 (Jamion quote) verbatim: "We proved a sophisticated model disaggregates vulnerability scores no more accurately than simple proportional allocation, and its only distinctive contribution, spatial coherence, is wholly a function of graph structure rather than learning." Held for strategic review.
 
 **Cache invalidation:** none.
+
+2026-07-18: Section 5 verification manifest generated.

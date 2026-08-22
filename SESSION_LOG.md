@@ -1276,3 +1276,5 @@ Reproduction within CV noise (<1%). All 21 existing granite and comparator rows 
 **Cache invalidation:** none.
 
 2026-07-18: Section 5 verification manifest generated.
+
+2026-08-22: Section 4/5 figure trace (read-only). All 16 inserted figures traced to committed artifacts with command and raw output; all reproduce (pass), 4 carry prose caveats. Phantom check (0.844, 11.742, 0.671) clean. Report at `docs/reviews/section4_5_figure_trace.md`. Cache invalidation: none.

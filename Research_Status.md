@@ -439,3 +439,7 @@ Sidecar at `data/results/m6_topology_5b/topology_specificity_metrics_meta.json`:
 RESULTS.md corrected: randomized SAGE 0.4217 +/- 0.0153 (was 0.446), randomized GCN-GAT 0.0745 +/- 0.0027 (was 0.083), structured band "0.817 to 0.885" (was "0.81 to 0.92"), production 0.848 SAGE / 0.826 GCN-GAT added where conditions listed. Old values retained only in "supersedes" annotations.
 
 PROJECT_PREAMBLE.md line 27 (Jamion quote) held verbatim, pending strategic review of coherence precision.
+
+## Section 4/5 figure trace (2026-08-22)
+
+Read-only verification of the 16 figures inserted into Sections 4 and 5. All 16 reproduce against committed artifacts (recovery grid, topology 5b, delinquency pilot, variance decomposition); 4 carry prose caveats (figures 5, 8, 15, 16). No phantom stand-ins. Report at `docs/reviews/section4_5_figure_trace.md`.

@@ -6,22 +6,26 @@ addresses in Hamilton County, Tennessee (FIPS 47065).
 
 ## Primary research question
 
-Under what conditions does hard aggregate constraint enforcement improve or
-degrade the accuracy of learned spatial disaggregation models, and which
-feature classes survive constraint correction?
+Under what conditions does a constraint-preserving graph neural network recover
+the within-tract variation a tract average hides, and by what mechanism does it
+fail when it does not; and which feature classes survive constraint correction
+across architectures?
 
 ## Contribution
 
-1. Constraint-preserving GNN architecture treating tract-level SVI as a
-   hard aggregate constraint rather than a prediction target.
+1. Constraint-preserving GNN architecture treating tract-level SVI as an
+   aggregate constraint rather than a prediction target, enforced as a soft
+   training penalty plus exact mean reconciliation at inference.
 2. 73-feature address-level input: parcel attributes, Microsoft building
    footprints, FEMA flood zones, NLCD land cover (impervious, canopy, land
    cover class), multi-modal accessibility, socioeconomic controls.
-3. Evaluation against IDW and kriging mapping boundary conditions of learned
-   disaggregation versus proximity-weighted baselines.
+3. A synthetic recovery testbed and a ceiling-referenced validation protocol
+   for disaggregation where no target-resolution truth exists, with dasymetric
+   and pycnophylactic interpolation as the classical comparison baselines.
 4. Dual-architecture comparison (GraphSAGE vs. GCN-GAT) showing constraint
    enforcement interacts with model inductive bias to determine which
-   features survive. GraphSAGE currently stronger.
+   features survive. The observed 0-vs-14 feature-survival split is treated as
+   architecture-dependent pending the Study 4 artifact controls.
 
 ## Framing note
 
@@ -34,14 +38,23 @@ PDFM (Agarwal et al., 2024) is positioned as the unconstrained complement.
 
 ## Empirical framing
 
-IDW outperforms GRANITE on block-group validation (r=0.558 vs r=0.469).
-This null result is a defensible dissertation contribution establishing
-boundary conditions under which constrained GNN disaggregation collapses
-toward proximity-weighted allocation.
+IDW and kriging were retired to `graveyard/` (2026-04-18) as a degenerate
+proximity floor; the legacy r=0.558/0.469 pair is retired with them and must
+not be cited (unknown holdout, legacy context; see
+`experiments/audits/baseline_metric_provenance.md`). The current empirical
+spine: pooled block-group parity is a tie (framework 0.769, dasymetric 0.802,
+pycnophylactic 0.768) because the tract-mean constraint settles aggregate
+agreement before any learning; methods separate only within tracts, where the
+20-tract comparison is descriptive and underpowered. On the coordinate-only
+synthetic grid, within-tract recovery is near zero against a supervised ceiling
+of r=0.13, while output coherence stays high (Moran's I ~0.94), which locates a
+boundary rather than a bare null. The null-as-boundary contribution rests on
+the synthetic testbed and the ceiling-referenced protocol, not on the retired
+baseline comparison.
 
 ## Critical constraint: aggregate preservation
 
-Address-level predictions must average back to the known tract-level SVI value. This is a hard constraint, not a regularization term. Do not remove, weaken, or reroute around this logic. It is the methodological core of the framework.
+Address-level predictions must reconcile to the known tract-level SVI value. As shipped this is enforced as a soft training penalty on tract-mean deviation plus an exact mean reconciliation at inference (`constraint_mode='soft'`, `apply_post_correction=True`), not as a hard architectural constraint and not as an ordinary regularization term. The aggregate-preservation logic is the methodological core of the framework: do not remove, weaken, or reroute around it. Note that the inference-time reconciliation is an affine per-tract transform and is therefore rank-preserving within a tract, so it cannot change the primary within-tract correlation.
 
 ## Repo structure
 
@@ -91,7 +104,7 @@ granite --fips 47065000600 --no-cache
 
 ## Feature matrix
 
-72+ features per address: 30 base accessibility features, 15 modal features (now per-address from OSRM drive/walk times), 9 socioeconomic features, 18+ address-level attributes (building, parcel, flood, NLCD). Of these, 9 are tract-level constants (socioeconomic controls).
+73 features per address: 30 base accessibility features, 15 modal features (now per-address from OSRM drive/walk times), 9 socioeconomic features, 19 address-level attributes (building, parcel, flood, NLCD). Of these, 9 are tract-level constants (socioeconomic controls).
 
 ## Code conventions
 
@@ -103,14 +116,25 @@ granite --fips 47065000600 --no-cache
 
 ## Validation ground truth
 
-Block-group-level ACS-derived SVI (11 variables across 4 CDC SVI themes). This is derived independently from ACS components, not from pipeline predictions. Do not substitute IDW-interpolated values as ground truth.
+Block-group-level ACS-derived SVI (12 variables across 4 CDC SVI themes). This is derived independently from ACS components, not from pipeline predictions. Do not substitute IDW-interpolated values as ground truth.
 
 National BG SVI data (242,335 block groups, 239,346 with complete SVI) is cached at `data/processed/national_bg_acs_raw.csv` and `data/processed/national_bg_svi.csv`. These are fetched from Census ACS 5-year estimates and ranked nationally. Use `svi_ranking_scope='national'` in `BlockGroupLoader.get_block_groups_with_demographics()` to rank Hamilton County BGs against the full US distribution instead of county-only.
 
 ## Key result reference points
 
-- IDW block-group correlation: r = 0.558
-- GRANITE block-group correlation: r = 0.469
+Current (proposal-aligned; verify against committed artifacts before citing):
+
+- Pooled block-group parity (69 BGs): framework 0.769, dasymetric 0.802,
+  pycnophylactic 0.768; bootstrap CIs overlap (constraint pins aggregate agreement)
+- Per-tract median r (19 tracts): framework 0.390, dasymetric 0.787,
+  pycnophylactic 0.208; paired diff median -0.121, 95% CI [-0.536, 0.108]
+- Coordinate-only synthetic ceiling: r = 0.13 (0.23 under strong autocorrelation)
+- Output coherence on the coordinate grid: Moran's I median ~0.94
+- Power (framework vs dasymetric): mean d 0.29, ~22% at n=19, ~76% at n=85
+  (reproduce with `scripts/power_analysis_parity.py`)
+
+Retired, do not cite: IDW r = 0.558, GRANITE r = 0.469 (legacy holdout, see
+`experiments/audits/baseline_metric_provenance.md`).
 
 ## Session logging
 

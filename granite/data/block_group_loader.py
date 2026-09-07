@@ -402,7 +402,7 @@ class BlockGroupLoader:
         """
         Compute SVI using CDC percentile ranking methodology.
         
-        Simplified version using 11 variables available at block group level:
+        Simplified version using 12 variables available at block group level:
         - Theme 1: MHI, PCI, Unemployment, Education (4 vars) [income replaces poverty]
         - Theme 2: Age 65+, Age 17-, Single Parent (3 vars)
         - Theme 3: Minority (1 var)

@@ -1,0 +1,52 @@
+{
+  "artifact": "data/results/m6_recovery_grid/recovery_grid.csv",
+  "n_pairs": 1620,
+  "n_tracts": 20,
+  "n_draws_per_tract": 81,
+  "estimator": "one-way random-effects ANOVA, balanced, moment estimator",
+  "mde_convention": {
+    "alpha": 0.05,
+    "power_target": 0.8,
+    "z_alpha": 1.959963984540054,
+    "z_beta": 0.8416212335729143,
+    "multiplier": 2.8015852181129683,
+    "approximation": "normal (z), matching power_analysis_parity.py convention"
+  },
+  "grand_mean_diff": -0.004142661631437453,
+  "ms_between": 0.18505571246121144,
+  "ms_within": 0.007824976124842127,
+  "sigma_tract": 0.04677642335547349,
+  "sigma_seed": 0.0884588951142966,
+  "combined_sd": 0.10006502839040526,
+  "n_tracts_target": 85,
+  "mde_by_seed_count": {
+    "3": {
+      "mde": 0.021045062627631252,
+      "seed_variance_share": 0.5438136072873319
+    },
+    "5": {
+      "mde": 0.018615955621510194,
+      "seed_variance_share": 0.4169952382706375
+    },
+    "9": {
+      "mde": 0.01680257615673206,
+      "seed_variance_share": 0.28436589948982194
+    },
+    "15": {
+      "mde": 0.015818120824015493,
+      "seed_variance_share": 0.19251773076453127
+    }
+  },
+  "seed_count_seed_share_below_0.25": {
+    "continuous": 10.728777849953776,
+    "smallest_integer": 11
+  },
+  "sigma_tract_unreachability_check": {
+    "mde_target": 0.15,
+    "n_tracts": 85,
+    "threshold_sigma_tract": 0.49362470206257675,
+    "reference_threshold_in_spec": 0.494,
+    "observed_sigma_tract": 0.04677642335547349,
+    "sigma_tract_exceeds_threshold": false
+  }
+}

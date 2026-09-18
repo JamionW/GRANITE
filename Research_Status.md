@@ -443,3 +443,44 @@ PROJECT_PREAMBLE.md line 27 (Jamion quote) held verbatim, pending strategic revi
 ## Section 4/5 figure trace (2026-08-22)
 
 Read-only verification of the 16 figures inserted into Sections 4 and 5. All 16 reproduce against committed artifacts (recovery grid, topology 5b, delinquency pilot, variance decomposition); 4 carry prose caveats (figures 5, 8, 15, 16). No phantom stand-ins. Report at `docs/reviews/section4_5_figure_trace.md`.
+
+## Proposal number trace and Study 1 variance components -- Milestone A closed (2026-09-18)
+
+Read-only trace of five disputed proposal figures, plus one new artifact answering the open
+Milestone A variance-components question for the Study 1 sizing criterion. `granite_roadmap_status.md`
+does not exist in the repo; traced against this file and `SESSION_LOG.md` instead.
+
+**Confirmed exactly:** building class variance decomposition (19 features, within-tract share
+median 0.906, `experiments/ecological_fallacy/variance_decomposition.csv` commit 458cf42); M6
+recovery grid design (81 draws, 27 cells, seeds [42,17,123], 20 tracts, 7,200 rows, 2,340
+GRANITE / 1,620 each dasymetric/pycnophylactic/ceiling_gbm, `data/results/m6_recovery_grid/recovery_grid.csv`
+commit fc212d4); all M0 parity difference statistics (medians 0.787/0.390/0.208, paired diff
+median -0.121 CI [-0.536, 0.108], mean -0.27 sd 0.92, projected CI at n=85 [-0.47,-0.07],
+`data/results/m0_n20_svi_parity/` commit 5859ed0, reproduced via `scripts/power_analysis_parity.py`).
+
+**Corrected / clarified:** (1) the proposal's "97.9% median, 97.86-97.88% range, across grid
+draws" is not a draws-based statistic -- it is the eta_sq of two coordinate features (lat, lon)
+in a single static pass over the real n20 feature matrix; the numbers match, but there is no
+draws axis in that artifact. The actual between-tract share of coordinate signal across the 81
+M6 grid draws (coordinates_only/sage, `1 - wtvr_achieved`) is median 0.687, range [0.457, 0.867]
+-- lower and far more variable. (2) The mean (-0.27) and median (-0.121) paired-difference
+figures are the mean and median of the *same* 19 paired per-tract diffs, not two different
+quantities; the 0.397 figure is the difference of the two methods' separate per-method medians
+(0.7867 - 0.3901), a distinct statistic that should not be conflated with the median of the
+paired difference. (3) The training-objective's first term is not a "prediction loss" -- no
+address-level SVI target exists to predict against. It is the variation/spread hinge regularizer
+(`granite/models/gnn.py:626-701` single-tract, `:1293-1395` multi-tract/production), summed with
+the soft tract-mean constraint loss (weight 2.0), bounds hinge (weight 1.0), and (multi-tract)
+optional block-group constraint and ordering losses. `_compute_cross_tract_smoothness` confirmed
+fully removed from `granite/`.
+
+**New result (Milestone A closed):** one-way random-effects ANOVA on the GRANITE
+(coordinates_only/sage) minus Dasymetric paired per-tract recovery_r difference (1,620 rows =
+20 tracts x 81 draws, balanced) gives sigma_tract=0.0468, sigma_seed=0.0885, combined
+sd=0.1001. At 85 tracts, MDE is 0.0211/0.0186/0.0168/0.0158 for 3/5/9/15 seeds; the seed
+variance share falls below 25% of total at 11 seeds. The threshold sigma_tract above which a
+0.15 MDE target is unreachable at 85 tracts regardless of seed count is 0.4936 (matches the
+0.494 reference); the observed sigma_tract (0.0468) is well under it, so the 0.15 target is
+reachable at 85 tracts, comfortably, even at 3 seeds. Artifact:
+`data/results/variance_components/study1_variance_components.json`, script
+`scripts/variance_components_study1.py`.

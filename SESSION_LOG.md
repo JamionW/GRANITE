@@ -1,5 +1,23 @@
 # GRANITE Session Log
 
+## 2026-09-18: Proposal number trace and Study 1 variance components (read-only + one artifact)
+
+**Files changed:** `scripts/variance_components_study1.py` (new), `data/results/variance_components/study1_variance_components.json` (new), `data/results/variance_components/README.md` (new). No frozen artifact rewritten; no code under `granite/` touched.
+
+**Scope:** read-only trace of five disputed proposal figures against committed artifacts, plus one new computed artifact closing the open Milestone A variance-components question. `granite_roadmap_status.md` does not exist in the repo or git history; traced against `Research_Status.md` and `SESSION_LOG.md` instead.
+
+**Trace 1 (variance decomposition):** `experiments/ecological_fallacy/variance_decomposition.csv` (commit 458cf42) confirms building class, 19 features, within-tract share median 0.906. The proposal's "97.9% median, range 97.86-97.88% across grid draws" does not describe a draws-based computation: the artifact is a single static pass over the n20 real-address feature matrix (20 tracts, no repetition), and the "median"/"range" are just the two coordinate features (lat eta_sq=0.978582, lon eta_sq=0.978823) -- median 0.97870, range [0.97858, 0.97882], which does numerically match the proposal's figures, but "across grid draws" is the wrong description; there is no draws axis in this artifact. Computing an actual between-tract share across the M6 recovery grid's 81 draws (coordinates_only/sage, `1 - wtvr_achieved`) gives a materially different and much more variable result: median 0.687, range [0.457, 0.867]. Flagged as a mismatch in framing (see report for full detail).
+
+**Trace 2 (grid design):** `data/results/m6_recovery_grid/recovery_grid.csv` (commit fc212d4) confirms 81 draws, 27 cells, seeds [42, 17, 123], 20 tracts, 7,200 rows, 2,340 GRANITE rows, 1,620 each for dasymetric/pycnophylactic/ceiling_gbm. All confirmed exactly.
+
+**Trace 3 (variance components, Milestone A):** New artifact. One-way random-effects ANOVA on the GRANITE(coordinates_only/sage)-minus-Dasymetric paired per-tract recovery_r diff (1,620 rows, 20 tracts x 81 draws, balanced). sigma_tract=0.0468, sigma_seed=0.0885, combined sd=0.1001. MDE at 85 tracts: 0.0211/0.0186/0.0168/0.0158 for 3/5/9/15 seeds. Seed variance share drops below 25% at 11 seeds. Threshold sigma_tract above which a 0.15 MDE target is unreachable at 85 tracts: 0.4936 (spec reference 0.494, matches). Observed sigma_tract does not exceed this threshold -- the 0.15 target is reachable, comfortably, even at 3 seeds.
+
+**Trace 4 (parity difference statistics):** `data/results/m0_n20_svi_parity/{per_tract,aggregate,pairwise_diffs}.csv` (commit 5859ed0), reproduced via `scripts/power_analysis_parity.py`. All proposal figures confirmed exactly: per-method medians 0.7867/0.3901/0.2078, paired diff median -0.1207 CI [-0.5356, 0.108], mean -0.2699 sd 0.9231, projected CI at 85 tracts [-0.47, -0.07]. -0.27 (mean) and -0.121 (median) are both computed on the same 19 paired per-tract diffs -- mean and median of one quantity, not two. The difference of the two methods' separate medians (0.7867 - 0.3901 = 0.3966, matches 0.397) is a different statistic from the median of the paired per-tract differences (-0.1207) and differs in both magnitude and sign convention; the two should not be conflated.
+
+**Trace 5 (loss composition):** `granite/models/gnn.py:626-701` (single-tract) and `granite/models/gnn.py:1293-1395` (multi-tract, production path). The objective sums constraint_loss (soft MSE of predicted tract mean vs. target SVI, weight 2.0), variation_loss (hinge floor on tract-level prediction std, weight 0.8 multi-tract / 1.5 single-tract), bounds_loss (weight 1.0), plus range_loss/min_spread_loss (single-tract only) or bg_constraint_loss/ordering_loss (multi-tract, if provided). No term is a supervised prediction loss against any address-level target -- none exists. The proposal's "prediction loss + soft tract-mean penalty" framing is inaccurate; the first term the proposal labels "prediction loss" is actually the variation/spread hinge regularizer, not a loss against ground truth. `_compute_cross_tract_smoothness` confirmed fully removed from `granite/` (grep returns zero matches), consistent with the prior locked finding.
+
+**Cache invalidation:** none.
+
 ## 2026-07-05: M6 morans_i_output recompute -- corrected recovery_grid.csv
 
 **Files changed:** `data/results/m6_recovery_grid/recovery_grid.csv`, `graveyard/topology_specificity_metrics_presymmetrize_20260612.json`
@@ -1278,3 +1296,6 @@ Reproduction within CV noise (<1%). All 21 existing granite and comparator rows 
 2026-07-18: Section 5 verification manifest generated.
 
 2026-08-22: Section 4/5 figure trace (read-only). All 16 inserted figures traced to committed artifacts with command and raw output; all reproduce (pass), 4 carry prose caveats. Phantom check (0.844, 11.742, 0.671) clean. Report at `docs/reviews/section4_5_figure_trace.md`. Cache invalidation: none.
+
+## 2026-09-07 RECON-XT1: cross-tract edge audit (read-only)
+Added scripts/diag/xt_edge_audit.py and claude_XT_Edge_Audit.md. Measured cross-tract edges via the shipped builder (create_spatial_accessibility_graph). m0 (run_m0_parity.py:247) and m6 (run_grid.py:193) both set neighbor_tracts=0 -> per-tract graphs: 0/480808 cross-tract edges (0.0000%). Concatenated neighbor_tracts>0 path (unused by m0/m6): 5014/481002 (1.0424%), no FIPS edge filter present. Verdict A (zero cross-tract by construction). No production code changed; no cache keys touched.

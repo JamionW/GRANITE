@@ -150,3 +150,9 @@ granite_inline_diagnostics.py
 !data/README.md
 .claude/
 *.out
+
+# Personal review/working docs (not for release)
+docs/reviews/
+claude_XT_Edge_Audit.md
+scripts/diag/
+*.docx

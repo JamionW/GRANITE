@@ -24,8 +24,10 @@ across architectures?
    and pycnophylactic interpolation as the classical comparison baselines.
 4. Dual-architecture comparison (GraphSAGE vs. GCN-GAT) showing constraint
    enforcement interacts with model inductive bias to determine which
-   features survive. The observed 0-vs-14 feature-survival split is treated as
-   architecture-dependent pending the Study 4 artifact controls.
+   features survive. The observed feature-survival asymmetry (GraphSAGE retains
+   none at any screening threshold; the GCN-GAT hybrid retains a threshold-dependent
+   handful, between five and fourteen features) is treated as architecture-dependent
+   pending the Study 4 artifact controls.
 
 ## Framing note
 
@@ -54,7 +56,7 @@ baseline comparison.
 
 ## Critical constraint: aggregate preservation
 
-Address-level predictions must reconcile to the known tract-level SVI value. As shipped this is enforced as a soft training penalty on tract-mean deviation plus an exact mean reconciliation at inference (`constraint_mode='soft'`, `apply_post_correction=True`), not as a hard architectural constraint and not as an ordinary regularization term. The aggregate-preservation logic is the methodological core of the framework: do not remove, weaken, or reroute around it. Note that the inference-time reconciliation is an affine per-tract transform and is therefore rank-preserving within a tract, so it cannot change the primary within-tract correlation.
+Address-level predictions must reconcile to the known tract-level SVI value. As shipped this is enforced as a soft training penalty on tract-mean deviation plus an exact mean reconciliation at inference (`constraint_mode='soft'`, `apply_post_correction=True`), not as a hard architectural constraint and not as an ordinary regularization term. The aggregate-preservation logic is the methodological core of the framework: do not remove, weaken, or reroute around it. Note that the inference-time reconciliation is a per-tract additive shift followed by a clip to the unit interval (`pipeline.py`, iterated bounded projection): rank-preserving within a tract wherever the clip does not bind, so on interior tracts it cannot change the primary within-tract correlation, but at tracts whose mean lies near 0 or 1 the clip can tie boundary addresses and alter within-tract order (the primary metric is reported on the pre-clip ordering).
 
 ## Repo structure
 

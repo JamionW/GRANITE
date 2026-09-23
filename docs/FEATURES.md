@@ -4,15 +4,15 @@ Complete inventory of features used by the GNN, organized by source and group.
 
 ## Summary
 
-72+ features per address (variable depending on property type coverage), organized in four groups:
+73 features per address (may be fewer if a source layer is entirely missing for a tract), organized in four groups:
 
 | Group | Count | Varies within tract? | Source |
 |---|---|---|---|
 | Base accessibility | 30 | Yes | OSRM travel times |
 | Modal accessibility | 15 | Yes | Per-address OSRM drive + walk times |
 | Socioeconomic controls | 9 | No (tract-level) | CDC SVI / ACS |
-| Address-level attributes | 18 (variable) | Yes | Parcel, building, flood, land cover |
-| **Total** | **72+** | | |
+| Address-level attributes | 19 (variable) | Yes | Parcel, building, flood, land cover |
+| **Total** | **73** | | |
 
 Of these, 9 are tract-level constants (socioeconomic controls). Modal features were previously tract-level constants but are now computed per address from OSRM driving and walking travel times, giving them within-tract variance.
 
@@ -89,7 +89,7 @@ Tract-level ACS variables from the CDC Social Vulnerability Index, applied unifo
 
 ---
 
-## Group 4: Address-Level Attributes (up to 18 features)
+## Group 4: Address-Level Attributes (up to 19 features)
 
 Extracted from `combined_address_features.csv`. Feature count varies per tract depending on data availability (particularly PROPTYPE coverage).
 

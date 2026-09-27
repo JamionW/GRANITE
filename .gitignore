@@ -149,6 +149,7 @@ granite_inline_diagnostics.py
 !data/example/
 !data/README.md
 .claude/
+.remember/
 *.out
 
 # Personal review/working docs (not for release)
@@ -156,3 +157,9 @@ docs/reviews/
 claude_XT_Edge_Audit.md
 scripts/diag/
 *.docx
+
+# Agentic/AI-context helper files (kept locally, not for release)
+CLAUDE.md
+SESSION_LOG.md
+PROJECT_PREAMBLE.md
+Research_Status.md

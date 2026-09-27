@@ -8,8 +8,9 @@ autocorrelation levels (weak/medium/strong), and three SNR levels.
 Spatial autocorrelation is injected per-tract via Gaussian process sampling
 with a Matern nu=1.5 kernel. Length scales are calibrated by binary search
 to hit target Moran's I values within +/-0.05 tolerance. Moran's I ruler:
-SpatialLearningDiagnostics.compute_spatial_autocorrelation, k=8 inverse-distance
-weights, per-tract, aggregated as a simple unweighted mean; matches step05/05b.
+SpatialLearningDiagnostics.compute_spatial_autocorrelation, row-standardized
+binary k=8 k-NN weights, per-tract, aggregated as a simple unweighted mean;
+matches step05/05b.
 
 Usage:
     gen = SyntheticTargetGenerator(seed=42, params={...})
@@ -68,7 +69,7 @@ _SNR_NOISE_FRACTION = {
 }
 
 # module-level singleton for Moran's I scoring; matches the ruler used in step05/05b.
-# compute_spatial_autocorrelation: inverse-distance k=8, per-tract, scalar return.
+# compute_spatial_autocorrelation: row-standardized binary k-NN (k=8), per-tract, scalar return.
 _SPATIAL_DIAG = SpatialLearningDiagnostics(verbose=False)
 
 # numeric columns to exclude from feature matrix (coordinates, identifiers, raw values)
@@ -786,7 +787,7 @@ class SyntheticTargetGenerator:
         return (per_tract_array, simple_unweighted_mean).
 
         Ruler: SpatialLearningDiagnostics.compute_spatial_autocorrelation,
-        inverse-distance k=8 weights, matches step05 / step05b scoring.
+        row-standardized binary k=8 k-NN weights, matches step05 / step05b scoring.
 
         Tracts with fewer than 9 addresses (k_neighbors+1) are skipped.
         Returns (numpy array of finite per-tract values, float mean or nan).

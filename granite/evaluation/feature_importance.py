@@ -37,10 +37,10 @@ class FeatureImportanceAnalyzer:
         Compute permutation importance for each feature.
         
         Args:
-            accessibility_features: [N, 54] input features
+            accessibility_features: [N, 73] input features
             edge_index: Graph edges
             true_svi: Ground truth tract SVI
-            feature_names: Names of all 54 features
+            feature_names: Names of all 73 features
             n_repeats: Number of permutation repeats per feature
             
         Returns:
@@ -151,9 +151,9 @@ class FeatureImportanceAnalyzer:
         Measures sensitivity of output to each input feature.
         
         Args:
-            accessibility_features: [N, 54] input features
+            accessibility_features: [N, 73] input features
             edge_index: Graph edges
-            feature_names: Names of all 54 features
+            feature_names: Names of all 73 features
             
         Returns:
             Dictionary with gradient-based importance scores

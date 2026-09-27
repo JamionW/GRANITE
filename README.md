@@ -1,5 +1,7 @@
 # GRANITE
 
+> Direction note (2026-09-27): this document predates the post-proposal direction in DIRECTION.md. Results remain valid; framing and priorities here are superseded.
+
 Constraint-preserving graph neural network for spatial disaggregation of
 the CDC Social Vulnerability Index from census tract resolution to individual
 addresses in Hamilton County, Tennessee (FIPS 47065).

@@ -70,7 +70,7 @@ Training uses a multi-component loss: constraint satisfaction (tract mean preser
 
 ## Baselines
 
-The headline baseline is **Dasymetric disaggregation** (single-attribute, NLCD impervious surface ancillary, following Nguyen et al. 2021). It allocates tract SVI proportionally to impervious surface percentage, satisfying the aggregate constraint by construction. The secondary mass-preserving baseline is **Pycnophylactic disaggregation** (Tobler 1979), which iteratively smooths the predicted surface while preserving tract totals.
+The headline baseline is **Dasymetric disaggregation** (single-attribute, NLCD impervious surface ancillary, in the dasymetric tradition of Mennis 2003). It adds to the tract SVI a bounded multiple of each address's deviation from the tract-mean impervious surface percentage, with the multiplier set as the largest value keeping predictions in [0, 1]; the tract mean is preserved by construction. The secondary mass-preserving baseline is **Pycnophylactic disaggregation** (Tobler 1979), which iteratively smooths the predicted surface while preserving tract totals.
 
 IDW and Kriging are retired to `graveyard/` and are not used in the current pipeline. Under single-centroid interpolation (one point per tract), point interpolation methods collapse to the tract mean and contribute no within-tract signal; they function as a degenerate proximity floor rather than a spatial disaggregation method. They remain in `graveyard/` as frozen artifacts for ablation runs that recorded them.
 

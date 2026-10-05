@@ -18,6 +18,7 @@ sample-size figures to match the proposal text, noncentral-t for power and mde.
 """
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,7 @@ import pandas as pd
 from scipy import stats
 
 ARTIFACT = Path("data/results/m0_n20_svi_parity/per_tract.csv")
+OUTPUT_JSON = Path("data/results/m0_n20_svi_parity/power_analysis.json")
 ALPHA = 0.05
 MIN_BGS = 2  # per-tract correlation is undefined below two block groups
 
@@ -78,6 +80,7 @@ def z_ci(center: float, sd: float, n: int) -> tuple:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--artifact", type=Path, default=ARTIFACT)
+    ap.add_argument("--output", type=Path, default=OUTPUT_JSON)
     args = ap.parse_args()
 
     diff = load_paired_differences(args.artifact)
@@ -117,6 +120,61 @@ def main() -> None:
     print(f"observed 95% CI at n=19, on the median         "
           f"[{lo19_med:+.2f}, {hi19_med:+.2f}]  (table 2 reports a "
           f"tract-clustered bootstrap of the median)")
+    print()
+
+    # rank-based sensitivity: distribution-free alternatives to the mean-based
+    # cohen's d / t-test power analysis above. wilcoxon drops exact-zero
+    # differences (zero_method='wilcox' default); n_nonzero records the count
+    # actually used by the test statistic.
+    n_zero = int((diff == 0).sum())
+    n_nonzero = n - n_zero
+    wilcoxon_stat, wilcoxon_p = stats.wilcoxon(diff, alternative="two-sided")
+    n_pos = int((diff > 0).sum())
+    n_neg = int((diff < 0).sum())
+    sign_test = stats.binomtest(n_pos, n_pos + n_neg, p=0.5, alternative="two-sided")
+
+    print(f"wilcoxon signed-rank (two-sided)  statistic={wilcoxon_stat:.4f}  "
+          f"p={wilcoxon_p:.4f}  n_nonzero={n_nonzero}  (n_zero_dropped={n_zero})")
+    print(f"exact sign test (two-sided)       n_pos={n_pos}  n_neg={n_neg}  "
+          f"p={sign_test.pvalue:.4f}")
+
+    results = {
+        "artifact": str(args.artifact),
+        "n_tracts": n,
+        "mean_paired_diff": mean_d,
+        "median_paired_diff": median_d,
+        "sd_of_differences": sd,
+        "cohens_d_mean": d,
+        "power_at_n19": p19,
+        "power_at_n85": p85,
+        "mde_at_n19_80pct_power": {"d": mde19, "diff_units": mde19 * sd},
+        "n_for_80pct_power": n80,
+        "projected_ci_n85_mean": [lo_mean, hi_mean],
+        "descriptive_ci_n85_median": [lo_med, hi_med],
+        "observed_ci_n19_median": [lo19_med, hi19_med],
+        "rank_based_sensitivity": {
+            "wilcoxon_signed_rank": {
+                "alternative": "two-sided",
+                "zero_method": "wilcox",
+                "statistic": float(wilcoxon_stat),
+                "p": float(wilcoxon_p),
+                "n_total": n,
+                "n_zero_dropped": n_zero,
+                "n_nonzero": n_nonzero,
+            },
+            "exact_sign_test": {
+                "alternative": "two-sided",
+                "n_pos": n_pos,
+                "n_neg": n_neg,
+                "n_zero": n_zero,
+                "p": float(sign_test.pvalue),
+            },
+        },
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    with open(args.output, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nwrote {args.output}")
 
 
 if __name__ == "__main__":

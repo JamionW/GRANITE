@@ -1,0 +1,105 @@
+{
+  "acs_vintage": {
+    "year": 2020,
+    "estimate_type": "5-year",
+    "source": "block_group_loader.py:28 comment, fetch_national_acs_data default year=2020 (block_group_loader.py:491)"
+  },
+  "acs_source_url_template": "https://api.census.gov/data/{year}/acs/acs5",
+  "url_template_citation": "block_group_loader.py:237-238 (_fetch_raw_acs_data), reused at block_group_loader.py:516-517 (fetch_national_acs_data)",
+  "row_counts": {
+    "fetched_raw": 242335,
+    "svi_non_null_ranked": 233338,
+    "svi_complete_flag_true": 239346,
+    "svi_complete_flag_true_but_svi_nan": 6008
+  },
+  "svi_complete_flag_caveat": "svi_complete (block_group_loader.py:474-475) checks only 4 of the 12 EP_* variables (EP_MHI, EP_UNEMP, EP_NOHSDP, EP_NOVEH). themes_sum uses skipna=False across all 4 themes (block_group_loader.py:462), so any BG missing one of the other 8 variables still gets SVI=NaN despite svi_complete=True. This is known and unpatched; see README.md.",
+  "national_csv_sha256": {
+    "data/processed/national_bg_acs_raw.csv": "38f778ba472d6c60aed4eb1c28d8ba0d1f9d0549ba881074dc61e3e297de0100",
+    "data/processed/national_bg_svi.csv": "ed21878c3ab043ca9df7077a1a03822aa430467eb653a1f1aeb08c7fc941b8d8"
+  },
+  "national_csv_git_status": "both gitignored, never committed (see docs/paper1/number_trace.md A5)",
+  "hamilton_county_c2": {
+    "geoid_prefix_filter": "47065",
+    "total_bgs": 278,
+    "svi_non_null": 263,
+    "svi_complete_flag_true": 269,
+    "svi_complete_flag_true_but_svi_nan": 6,
+    "m0_pooled_bg_filter": {
+      "citation": "granite/scripts/run_m0_parity.py:76-95 (_aggregate_to_bg, _bg_metrics)",
+      "filter_column": "n_addresses (aggregated address count per BG from the n20 subset), threshold MIN_ADDRESSES_PER_BG_POOLED=10 (run_m0_parity.py:40,196)",
+      "svi_null_guard": "_bg_metrics drops SVI-null rows before merge: svi_lookup = bg_gdf[['GEOID','SVI']].dropna(subset=['SVI']) (run_m0_parity.py:89)",
+      "pooled_n_bgs": 69,
+      "all_69_have_non_null_svi": true
+    }
+  },
+  "ep_variable_direction_c3": {
+    "EP_MHI": {
+      "theme": "theme1_socioeconomic",
+      "direction": "inverted",
+      "line": "block_group_loader.py:441-442"
+    },
+    "EP_PCI": {
+      "theme": "theme1_socioeconomic",
+      "direction": "inverted",
+      "line": "block_group_loader.py:441-442"
+    },
+    "EP_UNEMP": {
+      "theme": "theme1_socioeconomic",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    },
+    "EP_NOHSDP": {
+      "theme": "theme1_socioeconomic",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    },
+    "EP_AGE65": {
+      "theme": "theme2_household",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    },
+    "EP_AGE17": {
+      "theme": "theme2_household",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    },
+    "EP_SNGPNT": {
+      "theme": "theme2_household",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    },
+    "EP_MINRTY": {
+      "theme": "theme3_minority",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    },
+    "EP_MUNIT": {
+      "theme": "theme4_housing",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    },
+    "EP_MOBILE": {
+      "theme": "theme4_housing",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    },
+    "EP_CROWD": {
+      "theme": "theme4_housing",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    },
+    "EP_NOVEH": {
+      "theme": "theme4_housing",
+      "direction": "ascending",
+      "line": "block_group_loader.py:443-445"
+    }
+  },
+  "tract_level_svi_supervision_c4": {
+    "role": "training/validation supervision target (RPL_THEMES), distinct from the BG-level ACS-derived SVI reference above",
+    "vintage": "CDC SVI 2020",
+    "source_path": "data/raw/SVI_2020_US.csv",
+    "column": "RPL_THEMES",
+    "load_citation": "granite/data/loaders.py:93 (load_svi_data), used at loaders.py:119,123,138,202,251-256,313,816,822",
+    "git_status": "gitignored, never committed (data/raw/ not tracked per CLAUDE.md)"
+  }
+}

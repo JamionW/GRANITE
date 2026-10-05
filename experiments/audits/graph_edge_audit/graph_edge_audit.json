@@ -1,0 +1,632 @@
+{
+  "tracts": [
+    "47065011324",
+    "47065000700",
+    "47065011447",
+    "47065011325",
+    "47065000600",
+    "47065011413",
+    "47065011900",
+    "47065010431",
+    "47065010433",
+    "47065011326",
+    "47065001800",
+    "47065011402",
+    "47065011321",
+    "47065011444",
+    "47065010435",
+    "47065011311",
+    "47065003400",
+    "47065002400",
+    "47065001200",
+    "47065001900"
+  ],
+  "n_tracts": 20,
+  "config": {
+    "graph_knn_k": 10,
+    "road_knn_k": 9,
+    "graph_draw_seed": 42
+  },
+  "conditions": {
+    "production": {
+      "n_nodes": 39535,
+      "n_directed_edges": 480808,
+      "n_undirected_edges": 240404,
+      "mean_degree": 12.161578348298976,
+      "both_dir_ok_all": true,
+      "cross_tract_edges": 0,
+      "per_tract": [
+        {
+          "fips": "47065011324",
+          "n_nodes": 18,
+          "undirected_edges": 106,
+          "directed_edges": 212,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065000700",
+          "n_nodes": 1784,
+          "undirected_edges": 11616,
+          "directed_edges": 23232,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011447",
+          "n_nodes": 853,
+          "undirected_edges": 5297,
+          "directed_edges": 10594,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011325",
+          "n_nodes": 1099,
+          "undirected_edges": 7052,
+          "directed_edges": 14104,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065000600",
+          "n_nodes": 2089,
+          "undirected_edges": 13162,
+          "directed_edges": 26324,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011413",
+          "n_nodes": 1442,
+          "undirected_edges": 8937,
+          "directed_edges": 17874,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011900",
+          "n_nodes": 348,
+          "undirected_edges": 2251,
+          "directed_edges": 4502,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010431",
+          "n_nodes": 3394,
+          "undirected_edges": 20613,
+          "directed_edges": 41226,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010433",
+          "n_nodes": 2307,
+          "undirected_edges": 14457,
+          "directed_edges": 28914,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011326",
+          "n_nodes": 2738,
+          "undirected_edges": 14579,
+          "directed_edges": 29158,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001800",
+          "n_nodes": 1411,
+          "undirected_edges": 8892,
+          "directed_edges": 17784,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011402",
+          "n_nodes": 2858,
+          "undirected_edges": 17510,
+          "directed_edges": 35020,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011321",
+          "n_nodes": 3756,
+          "undirected_edges": 21734,
+          "directed_edges": 43468,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011444",
+          "n_nodes": 1934,
+          "undirected_edges": 11953,
+          "directed_edges": 23906,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010435",
+          "n_nodes": 2780,
+          "undirected_edges": 17346,
+          "directed_edges": 34692,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011311",
+          "n_nodes": 2358,
+          "undirected_edges": 13109,
+          "directed_edges": 26218,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065003400",
+          "n_nodes": 2559,
+          "undirected_edges": 14870,
+          "directed_edges": 29740,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065002400",
+          "n_nodes": 1918,
+          "undirected_edges": 12477,
+          "directed_edges": 24954,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001200",
+          "n_nodes": 1420,
+          "undirected_edges": 8576,
+          "directed_edges": 17152,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001900",
+          "n_nodes": 2469,
+          "undirected_edges": 15867,
+          "directed_edges": 31734,
+          "both_dir_ok": true
+        }
+      ]
+    },
+    "spatial_knn_uniform": {
+      "n_nodes": 39535,
+      "n_directed_edges": 464218,
+      "n_undirected_edges": 232109,
+      "mean_degree": 11.741950170734793,
+      "both_dir_ok_all": true,
+      "cross_tract_edges": 0,
+      "per_tract": [
+        {
+          "fips": "47065011324",
+          "n_nodes": 18,
+          "undirected_edges": 111,
+          "directed_edges": 222,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065000700",
+          "n_nodes": 1784,
+          "undirected_edges": 10255,
+          "directed_edges": 20510,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011447",
+          "n_nodes": 853,
+          "undirected_edges": 4910,
+          "directed_edges": 9820,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011325",
+          "n_nodes": 1099,
+          "undirected_edges": 6285,
+          "directed_edges": 12570,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065000600",
+          "n_nodes": 2089,
+          "undirected_edges": 12132,
+          "directed_edges": 24264,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011413",
+          "n_nodes": 1442,
+          "undirected_edges": 8484,
+          "directed_edges": 16968,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011900",
+          "n_nodes": 348,
+          "undirected_edges": 2037,
+          "directed_edges": 4074,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010431",
+          "n_nodes": 3394,
+          "undirected_edges": 19866,
+          "directed_edges": 39732,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010433",
+          "n_nodes": 2307,
+          "undirected_edges": 13281,
+          "directed_edges": 26562,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011326",
+          "n_nodes": 2738,
+          "undirected_edges": 15862,
+          "directed_edges": 31724,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001800",
+          "n_nodes": 1411,
+          "undirected_edges": 8190,
+          "directed_edges": 16380,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011402",
+          "n_nodes": 2858,
+          "undirected_edges": 16506,
+          "directed_edges": 33012,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011321",
+          "n_nodes": 3756,
+          "undirected_edges": 22442,
+          "directed_edges": 44884,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011444",
+          "n_nodes": 1934,
+          "undirected_edges": 11377,
+          "directed_edges": 22754,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010435",
+          "n_nodes": 2780,
+          "undirected_edges": 16506,
+          "directed_edges": 33012,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011311",
+          "n_nodes": 2358,
+          "undirected_edges": 13808,
+          "directed_edges": 27616,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065003400",
+          "n_nodes": 2559,
+          "undirected_edges": 16160,
+          "directed_edges": 32320,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065002400",
+          "n_nodes": 1918,
+          "undirected_edges": 10931,
+          "directed_edges": 21862,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001200",
+          "n_nodes": 1420,
+          "undirected_edges": 8464,
+          "directed_edges": 16928,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001900",
+          "n_nodes": 2469,
+          "undirected_edges": 14502,
+          "directed_edges": 29004,
+          "both_dir_ok": true
+        }
+      ]
+    },
+    "road_network_uniform": {
+      "n_nodes": 39535,
+      "n_directed_edges": 464152,
+      "n_undirected_edges": 232076,
+      "mean_degree": 11.740280763880106,
+      "both_dir_ok_all": true,
+      "cross_tract_edges": 0,
+      "per_tract": [
+        {
+          "fips": "47065011324",
+          "n_nodes": 18,
+          "undirected_edges": 89,
+          "directed_edges": 178,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065000700",
+          "n_nodes": 1784,
+          "undirected_edges": 10166,
+          "directed_edges": 20332,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011447",
+          "n_nodes": 853,
+          "undirected_edges": 4895,
+          "directed_edges": 9790,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011325",
+          "n_nodes": 1099,
+          "undirected_edges": 6196,
+          "directed_edges": 12392,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065000600",
+          "n_nodes": 2089,
+          "undirected_edges": 12127,
+          "directed_edges": 24254,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011413",
+          "n_nodes": 1442,
+          "undirected_edges": 8308,
+          "directed_edges": 16616,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011900",
+          "n_nodes": 348,
+          "undirected_edges": 2097,
+          "directed_edges": 4194,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010431",
+          "n_nodes": 3394,
+          "undirected_edges": 19989,
+          "directed_edges": 39978,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010433",
+          "n_nodes": 2307,
+          "undirected_edges": 13410,
+          "directed_edges": 26820,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011326",
+          "n_nodes": 2738,
+          "undirected_edges": 16173,
+          "directed_edges": 32346,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001800",
+          "n_nodes": 1411,
+          "undirected_edges": 7985,
+          "directed_edges": 15970,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011402",
+          "n_nodes": 2858,
+          "undirected_edges": 16678,
+          "directed_edges": 33356,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011321",
+          "n_nodes": 3756,
+          "undirected_edges": 22685,
+          "directed_edges": 45370,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011444",
+          "n_nodes": 1934,
+          "undirected_edges": 11229,
+          "directed_edges": 22458,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010435",
+          "n_nodes": 2780,
+          "undirected_edges": 16187,
+          "directed_edges": 32374,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011311",
+          "n_nodes": 2358,
+          "undirected_edges": 14196,
+          "directed_edges": 28392,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065003400",
+          "n_nodes": 2559,
+          "undirected_edges": 15897,
+          "directed_edges": 31794,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065002400",
+          "n_nodes": 1918,
+          "undirected_edges": 10886,
+          "directed_edges": 21772,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001200",
+          "n_nodes": 1420,
+          "undirected_edges": 8451,
+          "directed_edges": 16902,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001900",
+          "n_nodes": 2469,
+          "undirected_edges": 14432,
+          "directed_edges": 28864,
+          "both_dir_ok": true
+        }
+      ]
+    },
+    "randomized": {
+      "n_nodes": 39535,
+      "n_directed_edges": 464218,
+      "n_undirected_edges": 232109,
+      "mean_degree": 11.741950170734793,
+      "both_dir_ok_all": true,
+      "cross_tract_edges": 0,
+      "per_tract": [
+        {
+          "fips": "47065011324",
+          "n_nodes": 18,
+          "undirected_edges": 111,
+          "directed_edges": 222,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065000700",
+          "n_nodes": 1784,
+          "undirected_edges": 10255,
+          "directed_edges": 20510,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011447",
+          "n_nodes": 853,
+          "undirected_edges": 4910,
+          "directed_edges": 9820,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011325",
+          "n_nodes": 1099,
+          "undirected_edges": 6285,
+          "directed_edges": 12570,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065000600",
+          "n_nodes": 2089,
+          "undirected_edges": 12132,
+          "directed_edges": 24264,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011413",
+          "n_nodes": 1442,
+          "undirected_edges": 8484,
+          "directed_edges": 16968,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011900",
+          "n_nodes": 348,
+          "undirected_edges": 2037,
+          "directed_edges": 4074,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010431",
+          "n_nodes": 3394,
+          "undirected_edges": 19866,
+          "directed_edges": 39732,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010433",
+          "n_nodes": 2307,
+          "undirected_edges": 13281,
+          "directed_edges": 26562,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011326",
+          "n_nodes": 2738,
+          "undirected_edges": 15862,
+          "directed_edges": 31724,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001800",
+          "n_nodes": 1411,
+          "undirected_edges": 8190,
+          "directed_edges": 16380,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011402",
+          "n_nodes": 2858,
+          "undirected_edges": 16506,
+          "directed_edges": 33012,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011321",
+          "n_nodes": 3756,
+          "undirected_edges": 22442,
+          "directed_edges": 44884,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011444",
+          "n_nodes": 1934,
+          "undirected_edges": 11377,
+          "directed_edges": 22754,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065010435",
+          "n_nodes": 2780,
+          "undirected_edges": 16506,
+          "directed_edges": 33012,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065011311",
+          "n_nodes": 2358,
+          "undirected_edges": 13808,
+          "directed_edges": 27616,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065003400",
+          "n_nodes": 2559,
+          "undirected_edges": 16160,
+          "directed_edges": 32320,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065002400",
+          "n_nodes": 1918,
+          "undirected_edges": 10931,
+          "directed_edges": 21862,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001200",
+          "n_nodes": 1420,
+          "undirected_edges": 8464,
+          "directed_edges": 16928,
+          "both_dir_ok": true
+        },
+        {
+          "fips": "47065001900",
+          "n_nodes": 2469,
+          "undirected_edges": 14502,
+          "directed_edges": 29004,
+          "both_dir_ok": true
+        }
+      ]
+    }
+  }
+}

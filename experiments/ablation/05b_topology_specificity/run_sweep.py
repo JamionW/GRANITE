@@ -11,15 +11,21 @@ Both architectures (SAGE, GCN-GAT). constraint_mode=soft, variation_weight=0.8.
 Primary metric: Moran's I (computed on fixed k=8 address-coordinate weights, not the
 message-passing graph).
 
-Seed handling:
+Seed handling (--design, default single_axis):
   structured conditions: 5 training seeds [42, 17, 123, 2024, 7], one fixed graph
-  randomized: training_seed=42, 5 graph_draw_seeds [42, 17, 123, 2024, 7]
+  randomized (single_axis): training_seed=42, 5 graph_draw_seeds [42, 17, 123, 2024, 7]
+  randomized (crossed): Cartesian product of 5 training seeds x 5 graph draws = 25
+    cells, paired on training seed with the structured spatial_knn_uniform arm
+    (Dr. Gao design, 2026-10-21). structured conditions are unaffected by --design.
+    crossed writes to data/results/m6_topology_5b_crossed/ (override with --out-dir);
+    never to the frozen data/results/m6_topology_5b/.
 
 Usage:
     python experiments/ablation/05b_topology_specificity/run_sweep.py
     python experiments/ablation/05b_topology_specificity/run_sweep.py --condition spatial_knn_uniform
     python experiments/ablation/05b_topology_specificity/run_sweep.py --dry-run
     python experiments/ablation/05b_topology_specificity/run_sweep.py --check-only
+    python experiments/ablation/05b_topology_specificity/run_sweep.py --condition randomized --design crossed
 """
 import argparse
 import csv
@@ -608,14 +614,16 @@ def _append_trial_csv(csv_path, condition, arch, seed_result):
 
 def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=False,
                   incremental_csv=None, archs=None, completed_trials=None,
-                  persist_preds=False):
+                  persist_preds=False, design='single_axis', out_dir=None):
     """Run all (arch, seed) combinations for one condition. Returns nested results dict."""
     if archs is None:
         archs = ARCHITECTURES
     if completed_trials is None:
         completed_trials = {}
     print(f'\n[step05b] === condition: {condition} ===')
-    cond_dir = STEP5B_ROOT / condition
+    # crossed runs keep the frozen single-axis provenance tree untouched: write
+    # the per-condition preflight/figures under the crossed out dir instead
+    cond_dir = (out_dir / condition) if out_dir is not None else (STEP5B_ROOT / condition)
     cond_dir.mkdir(parents=True, exist_ok=True)
     (cond_dir / 'results').mkdir(exist_ok=True)
     (cond_dir / 'figures').mkdir(exist_ok=True)
@@ -638,8 +646,13 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
 
     # determine seed iteration strategy
     if condition == 'randomized':
-        # training_seed fixed at 42; iterate over graph_draw_seeds
-        seed_pairs = [(42, gs) for gs in GRAPH_DRAW_SEEDS]
+        if design == 'crossed':
+            # cross training seeds with graph draws; paired on training seed with
+            # the structured spatial_knn_uniform arm (Dr. Gao design, 2026-10-21)
+            seed_pairs = [(ts, gs) for ts in TRAINING_SEEDS for gs in GRAPH_DRAW_SEEDS]
+        else:
+            # training_seed fixed at 42; iterate over graph_draw_seeds
+            seed_pairs = [(42, gs) for gs in GRAPH_DRAW_SEEDS]
         seed_label = 'graph_draw_seed'
     else:
         # training_seed varies; graph_draw_seed irrelevant (set to 42)
@@ -653,12 +666,16 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
 
         for training_seed, graph_draw_seed in seed_pairs:
             varying_seed = graph_draw_seed if condition == 'randomized' else training_seed
+            if condition == 'randomized' and design == 'crossed':
+                cell_label = f'tseed={training_seed}/gseed={graph_draw_seed}'
+            else:
+                cell_label = f'{seed_label}={varying_seed}'
             key = (condition, arch, training_seed, graph_draw_seed)
             if key in completed_trials:
-                print(f'[step05b] {seed_label}={varying_seed} already in CSV, skipping')
+                print(f'[step05b] {cell_label} already in CSV, skipping')
                 arch_seed_results.append(completed_trials[key])
                 continue
-            print(f'[step05b] {seed_label}={varying_seed}')
+            print(f'[step05b] {cell_label}')
             t0 = time.time()
             seed_result = run_seed(
                 condition, arch, training_seed, graph_draw_seed,
@@ -671,7 +688,7 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
                 _append_trial_csv(incremental_csv, condition, arch, seed_result)
                 print(f'[step05b] trial row appended to {incremental_csv.name}')
             print(
-                f'[step05b] {seed_label}={varying_seed} done: '
+                f'[step05b] {cell_label} done: '
                 f'std={seed_result["within_tract_std"]:.4f} '
                 f'moran={seed_result["morans_i"]:.4f} '
                 f'bg_r={seed_result["pooled_bg_r"]:.4f} '
@@ -683,9 +700,10 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
         finite_moran = [r['morans_i']         for r in arch_seed_results if math.isfinite(r['morans_i'])]
         finite_bg_r  = [r['pooled_bg_r']      for r in arch_seed_results if math.isfinite(r['pooled_bg_r'])]
 
-        # acceptance criterion 2: band from 5 seed values, not 20 tract values
-        assert len(finite_stds) == len(TRAINING_SEEDS), (
-            f'expected {len(TRAINING_SEEDS)} finite within_tract_std values for '
+        # acceptance criterion 2: band from the seed cells for this condition
+        # (5 for single-axis; 25 for the crossed randomized arm), not 20 tract values
+        assert len(finite_stds) == len(seed_pairs), (
+            f'expected {len(seed_pairs)} finite within_tract_std values for '
             f'{condition}/{arch}, got {len(finite_stds)}'
         )
 
@@ -736,6 +754,19 @@ def main():
     parser.add_argument('--sage-only', action='store_true',
                         help='restrict to SAGE architecture only')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--design', choices=['single_axis', 'crossed'], default='single_axis',
+                        help=(
+                            'seed design. single_axis (default): randomized iterates graph '
+                            'draws at training_seed=42 (reproduces committed results). crossed: '
+                            'randomized iterates the Cartesian product TRAINING_SEEDS x '
+                            'GRAPH_DRAW_SEEDS (25 cells). structured conditions are unaffected.'
+                        ))
+    parser.add_argument('--out-dir', default=None,
+                        help=(
+                            'output base dir for metrics/csv/predictions. crossed design '
+                            'defaults to data/results/m6_topology_5b_crossed/. never '
+                            'data/results/m6_topology_5b/ (frozen).'
+                        ))
     parser.add_argument('--dry-run', action='store_true',
                         help='validate setup without running training')
     parser.add_argument('--check-only', action='store_true',
@@ -776,6 +807,28 @@ def main():
             sys.exit(4)
         except ValueError as e:
             print(f'[step05b] ValueError correctly raised: {e}')
+
+        # enumerate the cells this invocation would run (condition, arch, tseed, gseed)
+        conds_dry = CONDITIONS if args.condition == 'all' else [args.condition]
+        archs_dry = ['sage'] if args.sage_only else ARCHITECTURES
+        cells = []
+        for cond in conds_dry:
+            if cond == 'randomized':
+                if args.design == 'crossed':
+                    pairs = [(ts, gs) for ts in TRAINING_SEEDS for gs in GRAPH_DRAW_SEEDS]
+                else:
+                    pairs = [(42, gs) for gs in GRAPH_DRAW_SEEDS]
+            else:
+                pairs = [(ts, 42) for ts in TRAINING_SEEDS]
+            for arch in archs_dry:
+                for ts, gs in pairs:
+                    cells.append((cond, arch, ts, gs))
+        print(f'[step05b] dry-run design={args.design}: {len(cells)} cell(s)')
+        n_rand = sum(1 for c in cells if c[0] == 'randomized')
+        print(f'[step05b] dry-run: {n_rand} randomized cell(s) '
+              f'({n_rand // max(1, len(archs_dry))} per architecture)')
+        for cond, arch, ts, gs in cells:
+            print(f'[step05b]   cell: {cond}/{arch}/tseed={ts}/gseed={gs}')
         print('[step05b] dry-run complete')
         return
 
@@ -815,7 +868,36 @@ def main():
 
     conditions_to_run = CONDITIONS if args.condition == 'all' else [args.condition]
 
-    if args.rerun_fresh:
+    # per-condition provenance dir; redirected away from the frozen tree for crossed
+    cond_out_dir = None
+
+    if args.design == 'crossed':
+        # crossed arm: redirect every output to a separate base dir; never the
+        # frozen canonical dir. mirror the fixed-estimator / persisted-prediction
+        # behavior of rerun_fresh so the (42,42) cell reproduces the committed value.
+        global PRED_DIR
+        out_base = Path(args.out_dir) if args.out_dir else (
+            REPO_ROOT / 'data' / 'results' / 'm6_topology_5b_crossed'
+        )
+        if out_base.resolve() == CANONICAL_DIR.resolve():
+            print('[step05b] HALT: crossed design must not write to canonical '
+                  f'{CANONICAL_DIR}')
+            sys.exit(2)
+        out_base.mkdir(parents=True, exist_ok=True)
+        cond_out_dir = out_base
+        PRED_DIR = out_base / 'predictions'
+        results_path = out_base / 'topology_specificity_metrics.json'
+        incremental_csv = out_base / 'trials_incremental.csv'
+        persist_preds = True
+        if results_path.exists():
+            with open(results_path) as f:
+                all_results = json.load(f)
+            print(f'[step05b] crossed: loaded existing results from {results_path}')
+        else:
+            all_results = {}
+        print(f'[step05b] crossed: output -> {results_path}')
+        print(f'[step05b] crossed: predictions -> {PRED_DIR}')
+    elif args.rerun_fresh:
         results_path = CANONICAL_METRICS
         results_path.parent.mkdir(parents=True, exist_ok=True)
         incremental_csv = CANONICAL_TRIALS_CSV
@@ -823,6 +905,21 @@ def main():
         persist_preds = True
         print(f'[step05b] rerun-fresh: output -> {results_path}')
         print(f'[step05b] rerun-fresh: predictions -> {PRED_DIR}')
+    elif args.out_dir:
+        out_base = Path(args.out_dir)
+        if out_base.resolve() == CANONICAL_DIR.resolve():
+            print(f'[step05b] HALT: --out-dir must not be canonical {CANONICAL_DIR}')
+            sys.exit(2)
+        out_base.mkdir(parents=True, exist_ok=True)
+        results_path = out_base / 'topology_specificity_metrics.json'
+        incremental_csv = out_base / 'trials_incremental.csv'
+        persist_preds = False
+        if results_path.exists():
+            with open(results_path) as f:
+                all_results = json.load(f)
+            print(f'[step05b] loaded existing results from {results_path}')
+        else:
+            all_results = {}
     else:
         results_path = STEP5B_ROOT / 'results' / 'topology_specificity_metrics.json'
         results_path.parent.mkdir(exist_ok=True)
@@ -869,13 +966,15 @@ def main():
             archs=archs_needed,
             completed_trials=completed_trials,
             persist_preds=persist_preds,
+            design=args.design,
+            out_dir=cond_out_dir,
         )
         # merge new arch results with any already-persisted arches for this condition
         merged = dict(all_results.get(cond, {}))
         merged.update(cond_results)
         all_results[cond] = merged
 
-        if not args.rerun_fresh:
+        if not args.rerun_fresh and args.design != 'crossed':
             cond_results_path = STEP5B_ROOT / cond / 'results' / f'{cond}_metrics.json'
             with open(cond_results_path, 'w') as f:
                 json.dump(merged, f, indent=2,

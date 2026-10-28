@@ -62,6 +62,7 @@ data/processed/
 !data/results/m0_n20_svi_parity/aggregate.csv
 !data/results/m0_n20_svi_parity/pairwise_diffs.csv
 !data/results/m6_topology_5b/trials_incremental.csv
+!data/results/m6_topology_5b_crossed/trials_incremental.csv
 !requirements.txt
 !config/*.yaml
 *.zip

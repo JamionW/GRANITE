@@ -7,6 +7,7 @@ for validating address-level predictions against known sub-tract aggregates.
 Extended to compute block-group-level SVI using CDC methodology.
 """
 import os
+import re
 import time
 import requests
 import numpy as np
@@ -119,6 +120,10 @@ class BlockGroupLoader:
         'B25044_010E': 'no_vehicle_renter',
     }
     
+    # census annotation sentinels are -111111111 .. -999999999; anything at or
+    # below this value is treated as missing
+    CENSUS_SENTINEL_MAX = -100000000
+
     def __init__(self, data_dir: str = './data', api_key: Optional[str] = None,
                  verbose: bool = False):
         self.data_dir = Path(data_dir)
@@ -287,8 +292,19 @@ class BlockGroupLoader:
         
         Note: This is a simplified SVI using variables available at block group level.
         Poverty rate (B17001) is suppressed at BG level, so we use income as proxy.
+
+        Census annotation sentinels (-111111111 through -999999999) in any ACS
+        estimate column become NaN before any rate is computed.
         """
-        
+
+        # census annotation values (e.g. -666666666) are codes, not estimates
+        df = df.copy()
+        est_cols = [c for c in df.columns
+                    if re.fullmatch(r'[BC]\d{5}[A-Z]?_\d{3}E', str(c))]
+        for col in est_cols:
+            vals = pd.to_numeric(df[col], errors='coerce')
+            df[col] = vals.where(~(vals <= self.CENSUS_SENTINEL_MAX))
+
         result = pd.DataFrame()
         result['GEOID'] = df['GEOID']
         result['population'] = df['B01001_001E']

@@ -489,3 +489,77 @@ unrelated legitimate values:
 `data/results/variance_components/` (`73e8638`) were read; the latter's five claims were
 independently re-recomputed in this pass rather than copied (none changed; A1-A3 above restate
 them under the Tier A/B numbering with fresh recompute commands).
+
+
+## Reference v2 (REF-FIX)
+
+The block-group SVI reference changed on 2026-10-31. v2 nulls Census annotation sentinels
+(values at or below -100000000) before rates are computed (`f5202e5`), and it computes EP_MINRTY
+as `100 * (1 - B03002_003E / B03002_001E)`, the block-group equivalent of the CDC/ATSDR SVI 2020
+DP05 minority sum (`4366521`). v1 stays selectable as a frozen, cache-only reference
+(`reference_version='v1'`, `8d32b78`). The entries above stay as written and record v1. This
+section lists every Paper 1 number that changes under v2.
+
+Reproduction: the v1 gate scores all 90 committed 5b and crossed cells to within 1e-12 of the
+committed `pooled_bg_r` (max absdiff 3.3e-16; `62a7dcd`,
+`data/results/bg_reference_v2/v1_reproduction_gate.csv`). M0 rescoring uses the persisted PATH B
+parquets (`experiments/recovery/per_address_predictions/`). Their v1 recompute matches every
+frozen M0 value at 4 decimals, so the v1 column below is the frozen value and the difference is
+taken against the like-for-like v1 recompute.
+
+Commands (results commit `3723706`):
+
+```
+python scripts/bg_reference_v2_manifest.py
+python scripts/rescore_bg_reference.py --gate
+python scripts/rescore_bg_reference.py --rescore
+python scripts/power_analysis_parity.py --reference-version v2
+python scripts/power_analysis_parity.py --reference-version v1 \
+    --artifact data/results/bg_reference_v2/m0_per_tract_v1.csv \
+    --output data/results/bg_reference_v2/power_analysis_v1_recompute.json
+```
+
+| ID | Number | v1 (frozen) | v2 | v2 minus v1 recompute | BGs v1 / v2 | Artifact |
+|---|---|---|---|---|---|---|
+| A1 | Pooled BG r, framework | 0.7692 [0.660, 0.853] | 0.7664 [0.656, 0.848] | -0.0028 | 69 / 67 | `bg_reference_v2/m0_aggregate_v1_v2.csv` |
+| A1 | Pooled BG r, Dasymetric | 0.8018 [0.712, 0.871] | 0.7966 [0.697, 0.872] | -0.0052 | 69 / 67 | same |
+| A1 | Pooled BG r, Pycnophylactic | 0.7678 [0.652, 0.858] | 0.7604 [0.644, 0.851] | -0.0074 | 69 / 67 | same |
+| A1 | CIs overlap | yes | yes | none | 69 / 67 | same |
+| A2 | Per-tract median r, framework | 0.3901 | 0.4610 | +0.0708 | 19 tracts | same |
+| A2 | Per-tract median r, Dasymetric | 0.7867 | 0.7912 | +0.0045 | 19 tracts | same |
+| A2 | Per-tract median r, Pycnophylactic | 0.2078 | 0.0139 | -0.1939 | 19 tracts | same |
+| A3 | Paired diff vs Dasymetric, median [95% CI] | -0.1207 [-0.5356, 0.1080] | -0.1632 [-0.4057, 0.0787] | -0.0425 | 19 pairs | `bg_reference_v2/m0_pairwise_diffs_v1_v2.csv` |
+| A3 | Paired diff, mean | -0.2699 | -0.2499 | +0.0200 | 19 pairs | `bg_reference_v2/power_analysis_v2.json` |
+| A5 | National BGs with non-null ranked SVI | 233,338 of 242,335 | 221,944 of 242,335 | -11,394 | n/a | `bg_reference_v2/manifest.json` |
+| A5 | Hamilton BGs with non-null SVI | 263 of 278 | 251 of 278 | -12 | n/a | same |
+| A6 | 5b pooled BG r, condition-mean range | [0.7628, 0.7716] | [0.7575, 0.7650] | about -0.005 | 69 / 67 | `bg_reference_v2/rescored_condition_means.csv` |
+| A6 | 5b randomized SAGE / GCN-GAT pooled r | 0.7716 / 0.7652 | 0.7650 / 0.7604 | -0.0065 / -0.0048 | 69 / 67 | same |
+| A6 | Crossed randomized SAGE / GCN-GAT pooled r (25 cells) | 0.7721 / 0.7645 | 0.7675 / 0.7601 | -0.0046 / -0.0045 | 69 / 67 | same |
+| A8 | Pooled r spread across methods | 0.0340 | 0.0362 | +0.0022 | 69 / 67 | `bg_reference_v2/m0_aggregate_v1_v2.csv` |
+| A12 | SD of differences | 0.9231 | 0.9089 | -0.0142 | 19 tracts | `bg_reference_v2/power_analysis_v2.json` |
+| A12 | Cohen's d | 0.2924 | 0.2750 | -0.0174 | 19 tracts | same |
+| A12 | Power at n=19 / n=85 | 22.7% / 76.0% | 20.6% / 70.8% | -2.1 / -5.2 points | 19 tracts | same |
+| A12 | MDE at n=19, 80% power | 0.627 | 0.618 | -0.009 | 19 tracts | same |
+| A12 | Projected CI at n=85, mean | [-0.47, -0.07] | [-0.44, -0.06] | shifts toward zero | 19 tracts | same |
+| A12 | Tracts for 80% power | 94 | 106 | +12 | 19 tracts | same |
+
+Unchanged under v2: every Moran's I value (A6, A7, A10, A14; no reference dependence), A4, A9,
+A11, A13, B1 to B3, and the CI-overlap verdict for A1. The 5b and crossed per-cell values are in
+`bg_reference_v2/rescored_cells.csv` (90 rows, v1 and v2 side by side).
+
+A12 rank-based tests. `scripts/power_analysis_parity.py` counts a paired difference as zero only
+at exactly 0.0. Tract 47065001800 has two block groups, so both methods score r = +/-1 and the
+difference is a tie in principle. The frozen run recorded 0.0. The parquet recompute records
++2.2e-16 under v1 and -2.2e-16 under v2, which the script counts as nonzero. Raw script output:
+v1 recompute Wilcoxon 53.0, p=0.1570, sign 7/11, p=0.4807; v2 Wilcoxon 52.0, p=0.1446, sign 6/12,
+p=0.2379. With ties at or below 1e-12 set to zero (computed outside the script, not committed),
+v1 recompute and v2 both give Wilcoxon 46.0, p=0.1488, sign 6/11, p=0.3323, identical to the
+frozen values. The reference change does not move the rank tests; the raw v2 figures reflect the
+float tie. Whether the script should snap ties is open for Dr. Gao.
+
+Hamilton reference comparison (`bg_reference_v2/manifest.json`): over the 67 scoring BGs both
+versions score, v1 and v2 SVI agree at Pearson 0.99889 and Spearman 0.99904. The mean absolute
+change is 0.018 and the maximum is 0.041 (470650114024, 0.463 to 0.504). 60 of the 67 rise,
+consistent with the 15,700 sentinel BGs leaving the top of the national MHI ranking (not
+isolated from the minority change). The two
+named BGs 470650104314 and 470650104333 carry the MHI sentinel and have NaN SVI under v2.

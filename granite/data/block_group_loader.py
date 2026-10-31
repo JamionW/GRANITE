@@ -89,13 +89,10 @@ class BlockGroupLoader:
         'B09002_015E': 'children_single_parent',
         
         # === THEME 3: Minority Status / Language ===
-        # Race - B02001
-        'B02001_001E': 'race_total',
-        'B02001_002E': 'race_white_alone',
-        
-        # Hispanic origin - B03003
-        'B03003_001E': 'hispanic_universe',
-        'B03003_003E': 'hispanic_or_latino',
+        # hispanic or latino origin by race - B03002 (block-group equivalent of
+        # the cdc svi 2020 DP05 minority sum: total minus white alone non-hispanic)
+        'B03002_001E': 'hisp_race_total',
+        'B03002_003E': 'white_alone_not_hispanic',
         
         # === THEME 4: Housing Type / Transportation ===
         # Housing units in structure - B25024
@@ -370,13 +367,13 @@ class BlockGroupLoader:
         # === THEME 3: Minority Status / Language ===
         
         # EP_MINRTY: Minority (all except white non-Hispanic)
+        # cdc svi 2020: DP05_0071E + DP05_0078E..0083E, i.e. total minus white
+        # alone non-hispanic; B03002 carries the same split at block group level
         result['EP_MINRTY'] = np.where(
-            df['B02001_001E'] > 0,
-            (1 - df['B02001_002E'] / df['B02001_001E']) * 100 + 
-            (df['B03003_003E'] / df['B03003_001E'].replace(0, np.nan) * 100).fillna(0),
+            df['B03002_001E'] > 0,
+            (1 - df['B03002_003E'] / df['B03002_001E']) * 100,
             np.nan
         )
-        result['EP_MINRTY'] = result['EP_MINRTY'].clip(upper=100)
         
         # === THEME 4: Housing Type / Transportation ===
         

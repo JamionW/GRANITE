@@ -64,6 +64,7 @@ data/processed/
 !data/results/m6_topology_5b/trials_incremental.csv
 !data/results/m6_topology_5b_crossed/trials_incremental.csv
 !data/results/bg_reference_v2/hamilton_v1_v2_comparison.csv
+!data/results/bg_reference_v2/v1_reproduction_gate.csv
 !requirements.txt
 !config/*.yaml
 *.zip

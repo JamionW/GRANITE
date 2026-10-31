@@ -27,6 +27,13 @@ from scipy import stats
 
 ARTIFACT = Path("data/results/m0_n20_svi_parity/per_tract.csv")
 OUTPUT_JSON = Path("data/results/m0_n20_svi_parity/power_analysis.json")
+# block-group reference version: v1 is the frozen m0 artifact; v2 is the
+# REF-FIX rescore from persisted predictions (scripts/rescore_bg_reference.py)
+REFERENCE_PATHS = {
+    "v1": (ARTIFACT, OUTPUT_JSON),
+    "v2": (Path("data/results/bg_reference_v2/m0_per_tract_v2.csv"),
+           Path("data/results/bg_reference_v2/power_analysis_v2.json")),
+}
 ALPHA = 0.05
 MIN_BGS = 2  # per-tract correlation is undefined below two block groups
 
@@ -79,9 +86,14 @@ def z_ci(center: float, sd: float, n: int) -> tuple:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--artifact", type=Path, default=ARTIFACT)
-    ap.add_argument("--output", type=Path, default=OUTPUT_JSON)
+    ap.add_argument("--reference-version", choices=sorted(REFERENCE_PATHS), default="v1",
+                    help="block-group reference; sets default --artifact and --output")
+    ap.add_argument("--artifact", type=Path, default=None)
+    ap.add_argument("--output", type=Path, default=None)
     args = ap.parse_args()
+    default_artifact, default_output = REFERENCE_PATHS[args.reference_version]
+    args.artifact = args.artifact or default_artifact
+    args.output = args.output or default_output
 
     diff = load_paired_differences(args.artifact)
     n = len(diff)

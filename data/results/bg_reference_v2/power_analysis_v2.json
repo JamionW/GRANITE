@@ -1,0 +1,45 @@
+{
+  "artifact": "data/results/bg_reference_v2/m0_per_tract_v2.csv",
+  "n_tracts": 19,
+  "mean_paired_diff": -0.2499456454905094,
+  "median_paired_diff": -0.16318079991414536,
+  "sd_of_differences": 0.9089284486291199,
+  "cohens_d_mean": -0.2749893524264609,
+  "power_at_n19": 0.20578597091136905,
+  "power_at_n85": 0.7075520525939903,
+  "mde_at_n19_80pct_power": {
+    "d": 0.6796836712189802,
+    "diff_units": 0.6177838248396125
+  },
+  "n_for_80pct_power": 106,
+  "projected_ci_n85_mean": [
+    -0.4431728740254025,
+    -0.0567184169556163
+  ],
+  "descriptive_ci_n85_median": [
+    -0.35640802844903846,
+    0.030046428620747745
+  ],
+  "observed_ci_n19_median": [
+    -0.5718773645539024,
+    0.24551576472561165
+  ],
+  "rank_based_sensitivity": {
+    "wilcoxon_signed_rank": {
+      "alternative": "two-sided",
+      "zero_method": "wilcox",
+      "statistic": 52.0,
+      "p": 0.14458247203258678,
+      "n_total": 19,
+      "n_zero_dropped": 1,
+      "n_nonzero": 18
+    },
+    "exact_sign_test": {
+      "alternative": "two-sided",
+      "n_pos": 6,
+      "n_neg": 12,
+      "n_zero": 1,
+      "p": 0.237884521484375
+    }
+  }
+}

@@ -36,6 +36,7 @@ REFERENCE_PATHS = {
 }
 ALPHA = 0.05
 MIN_BGS = 2  # per-tract correlation is undefined below two block groups
+TIE_TOL = 1e-12  # paired differences at or below this magnitude count as exact ties
 
 
 def load_paired_differences(path: Path) -> pd.Series:
@@ -137,12 +138,14 @@ def main() -> None:
     # rank-based sensitivity: distribution-free alternatives to the mean-based
     # cohen's d / t-test power analysis above. wilcoxon drops exact-zero
     # differences (zero_method='wilcox' default); n_nonzero records the count
-    # actually used by the test statistic.
-    n_zero = int((diff == 0).sum())
+    # actually used by the test statistic. float ties (two-bg tracts score
+    # r = +/-1 for both methods) are snapped to zero first.
+    rank_diff = diff.where(diff.abs() > TIE_TOL, 0.0)
+    n_zero = int((rank_diff == 0).sum())
     n_nonzero = n - n_zero
-    wilcoxon_stat, wilcoxon_p = stats.wilcoxon(diff, alternative="two-sided")
-    n_pos = int((diff > 0).sum())
-    n_neg = int((diff < 0).sum())
+    wilcoxon_stat, wilcoxon_p = stats.wilcoxon(rank_diff, alternative="two-sided")
+    n_pos = int((rank_diff > 0).sum())
+    n_neg = int((rank_diff < 0).sum())
     sign_test = stats.binomtest(n_pos, n_pos + n_neg, p=0.5, alternative="two-sided")
 
     print(f"wilcoxon signed-rank (two-sided)  statistic={wilcoxon_stat:.4f}  "

@@ -37,7 +37,7 @@ Neither starts until its prompt arrives.
 
 ## Known phantom figures (never reuse without a committed artifact)
 
-- 0.844: Dasymetric single-BG constrained_r from a different experiment; canonical aggregate is 0.802.
+- 0.844: Dasymetric single-BG constrained_r from a different experiment; canonical aggregate is 0.797 (v2 reference, commit 3723706).
 - 11.742: a measured spatial mean degree, not an external constant.
 - r=0.671: a prediction-to-prediction cross-mode correlation, not a feature-to-target statistic.
 - r=0.033: address-level accessibility correlation from a deleted experiment; retired in commit c8ec3b7.

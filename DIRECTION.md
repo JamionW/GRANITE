@@ -40,7 +40,7 @@ Neither starts until its prompt arrives.
 - 0.844: Dasymetric single-BG constrained_r from a different experiment; canonical aggregate is 0.802.
 - 11.742: a measured spatial mean degree, not an external constant.
 - r=0.671: a prediction-to-prediction cross-mode correlation, not a feature-to-target statistic.
-- r=0.033: address-level accessibility correlation from a deleted experiment; retired in commit 7dc0617.
+- r=0.033: address-level accessibility correlation from a deleted experiment; retired in commit c8ec3b7.
 
 ## Working rules
 

@@ -501,13 +501,40 @@ class BlockGroupLoader:
         '56', '72',
     ]
 
-    def fetch_national_acs_data(self, year: int = 2020) -> pd.DataFrame:
-        """Fetch block group ACS data for all US states. Caches to CSV."""
-        cache_file = self.data_dir / 'processed' / 'national_bg_acs_raw.csv'
+    # national reference versions. v1 is the frozen reference every result before
+    # REF-FIX was scored against (sentinels unhandled, B02001+B03003 minority); its
+    # rate code is retired, so v1 is cache-only. v2 nulls sentinels and uses the
+    # B03002 minority definition. v2 files sit beside v1; v1 files are never written.
+    REFERENCE_VERSIONS = ('v1', 'v2')
+    DEFAULT_REFERENCE_VERSION = 'v2'
+    NATIONAL_CACHE_FILES = {
+        'v1': {'raw': 'national_bg_acs_raw.csv', 'svi': 'national_bg_svi.csv'},
+        'v2': {'raw': 'national_bg_acs_raw_v2.csv', 'svi': 'national_bg_svi_v2.csv'},
+    }
+
+    def fetch_national_acs_data(self, year: int = 2020,
+                                reference_version: str = DEFAULT_REFERENCE_VERSION) -> pd.DataFrame:
+        """Fetch block group ACS data for all US states. Caches to CSV.
+
+        reference_version selects the cache file. v1 is read-only. v2 starts from
+        the v1 raw cache when present and fetches only ACS_VARIABLES it lacks,
+        merged one-to-one on GEOID.
+        """
+        if reference_version not in self.REFERENCE_VERSIONS:
+            raise ValueError(f"Invalid reference_version: {reference_version!r}. "
+                             f"Use one of {self.REFERENCE_VERSIONS}.")
+        processed = self.data_dir / 'processed'
+        cache_file = processed / self.NATIONAL_CACHE_FILES[reference_version]['raw']
         if cache_file.exists():
             df = pd.read_csv(cache_file, dtype={'GEOID': str})
-            print(f"Loading cached national ACS data ({len(df)} block groups)")
+            print(f"Loading cached national ACS data ({len(df)} block groups, {reference_version})")
             return df
+
+        if reference_version == 'v1':
+            raise FileNotFoundError(
+                f"{cache_file} missing. v1 is a frozen, cache-only reference; "
+                f"its fetch list is retired and cannot be rebuilt by this code."
+            )
 
         if self.api_key is None:
             raise ValueError(
@@ -515,9 +542,20 @@ class BlockGroupLoader:
                 "Set CENSUS_API_KEY environment variable."
             )
 
+        # reuse cached v1 columns; fetch only what is missing
+        base_file = processed / self.NATIONAL_CACHE_FILES['v1']['raw']
+        base_df = None
         var_list = list(self.ACS_VARIABLES.keys())
+        if base_file.exists():
+            base_df = pd.read_csv(base_file, dtype={'GEOID': str})
+            var_list = [v for v in var_list if v not in base_df.columns]
+            print(f"v2: reusing {base_file.name}; fetching {len(var_list)} missing "
+                  f"variables: {var_list}")
+
         chunk_size = 48
         all_states = []
+        n_calls = 0
+        failures = []
 
         for idx, state_fips in enumerate(self.ALL_STATE_FIPS, 1):
             state_data = None
@@ -534,11 +572,26 @@ class BlockGroupLoader:
                     f"&key={self.api_key}"
                 )
 
-                response = requests.get(url, timeout=120)
-                if response.status_code != 200:
+                # retry transient failures; record every failed attempt
+                response = None
+                for attempt in range(3):
+                    n_calls += 1
+                    try:
+                        response = requests.get(url, timeout=120)
+                    except requests.RequestException as e:
+                        failures.append((state_fips, attempt, repr(e)[:200]))
+                        response = None
+                        time.sleep(2.0)
+                        continue
+                    if response.status_code == 200:
+                        break
+                    failures.append((state_fips, attempt, response.status_code))
+                    time.sleep(2.0)
+                if response is None or response.status_code != 200:
                     raise RuntimeError(
                         f"Census API error for state {state_fips}: "
-                        f"{response.status_code}: {response.text}"
+                        f"{getattr(response, 'status_code', None)}: "
+                        f"{getattr(response, 'text', '')}"
                     )
 
                 data = response.json()
@@ -574,23 +627,52 @@ class BlockGroupLoader:
                 print(f"Fetched {idx}/{len(self.ALL_STATE_FIPS)} states ({n_so_far} block groups so far)")
 
         national_df = pd.concat(all_states, ignore_index=True)
+        print(f"Census API calls: {n_calls}, failed attempts: {len(failures)} {failures}")
 
-        cache_dir = self.data_dir / 'processed'
-        cache_dir.mkdir(exist_ok=True)
+        if base_df is not None:
+            # one-to-one join on GEOID; every row must match on both sides
+            fetched = national_df[['GEOID'] + var_list]
+            if fetched['GEOID'].duplicated().any():
+                raise RuntimeError("fetched GEOIDs are not unique")
+            unmatched_base = int((~base_df['GEOID'].isin(fetched['GEOID'])).sum())
+            unmatched_new = int((~fetched['GEOID'].isin(base_df['GEOID'])).sum())
+            if unmatched_base or unmatched_new:
+                raise RuntimeError(
+                    f"GEOID join not one-to-one: {unmatched_base} cached rows "
+                    f"unmatched, {unmatched_new} fetched rows unmatched"
+                )
+            national_df = base_df.merge(fetched, on='GEOID', how='left',
+                                        validate='one_to_one')
+            print(f"Merged on GEOID one-to-one: {len(national_df)} rows")
+
+        processed.mkdir(exist_ok=True)
         national_df.to_csv(cache_file, index=False)
-        print(f"Cached national ACS data: {len(national_df)} block groups")
+        print(f"Cached national ACS data: {len(national_df)} block groups -> {cache_file.name}")
 
         return national_df
 
-    def compute_national_svi(self) -> pd.DataFrame:
-        """Compute nationally-ranked SVI for all US block groups. Caches to CSV."""
-        cache_file = self.data_dir / 'processed' / 'national_bg_svi.csv'
+    def compute_national_svi(self, reference_version: str = DEFAULT_REFERENCE_VERSION) -> pd.DataFrame:
+        """Compute nationally-ranked SVI for all US block groups. Caches to CSV.
+
+        reference_version selects the cache file; v1 is read-only and cache-only.
+        """
+        if reference_version not in self.REFERENCE_VERSIONS:
+            raise ValueError(f"Invalid reference_version: {reference_version!r}. "
+                             f"Use one of {self.REFERENCE_VERSIONS}.")
+        cache_file = (self.data_dir / 'processed' /
+                      self.NATIONAL_CACHE_FILES[reference_version]['svi'])
         if cache_file.exists():
             df = pd.read_csv(cache_file, dtype={'GEOID': str})
-            self._log(f"Loading cached national SVI ({len(df)} block groups)")
+            self._log(f"Loading cached national SVI ({len(df)} block groups, {reference_version})")
             return df
 
-        national_raw = self.fetch_national_acs_data()
+        if reference_version == 'v1':
+            raise FileNotFoundError(
+                f"{cache_file} missing. v1 is a frozen, cache-only reference and "
+                f"cannot be recomputed by the current rate code."
+            )
+
+        national_raw = self.fetch_national_acs_data(reference_version=reference_version)
         rates_df = self._compute_demographic_rates(national_raw)
         svi_df = self._compute_block_group_svi(rates_df)
 
@@ -604,31 +686,37 @@ class BlockGroupLoader:
         cache_dir = self.data_dir / 'processed'
         cache_dir.mkdir(exist_ok=True)
         svi_df.to_csv(cache_file, index=False)
-        print(f"Cached national SVI: {len(svi_df)} block groups")
+        print(f"Cached national SVI: {len(svi_df)} block groups -> {cache_file.name}")
 
         return svi_df
 
-    def get_hamilton_county_national_svi(self) -> pd.DataFrame:
+    def get_hamilton_county_national_svi(self,
+                                         reference_version: str = DEFAULT_REFERENCE_VERSION) -> pd.DataFrame:
         """Get Hamilton County block groups with nationally-ranked SVI."""
-        national = self.compute_national_svi()
+        national = self.compute_national_svi(reference_version=reference_version)
         hamilton = national[national['GEOID'].str.startswith('47065')].copy()
         n_complete = hamilton['svi_complete'].sum() if 'svi_complete' in hamilton.columns else 0
-        print(f"Hamilton County: {len(hamilton)} block groups with national SVI, {n_complete} complete")
+        print(f"Hamilton County: {len(hamilton)} block groups with national SVI "
+              f"({reference_version}), {n_complete} complete")
         return hamilton
 
     def get_block_groups_with_demographics(self, state_fips: str = '47',
                                             county_fips: str = '065',
-                                            svi_ranking_scope: str = 'county') -> gpd.GeoDataFrame:
+                                            svi_ranking_scope: str = 'county',
+                                            reference_version: str = DEFAULT_REFERENCE_VERSION
+                                            ) -> gpd.GeoDataFrame:
         """Load block groups with both geometries and demographic indicators.
 
         Args:
             svi_ranking_scope: 'national' ranks BGs against all US BGs;
                                'county' ranks within county only (original behavior).
+            reference_version: national reference version ('v1' frozen, 'v2'
+                               sentinel-safe with B03002 minority). national scope only.
         """
         geometries = self.load_block_group_geometries(state_fips, county_fips)
 
         if svi_ranking_scope == 'national':
-            demographics = self.get_hamilton_county_national_svi()
+            demographics = self.get_hamilton_county_national_svi(reference_version=reference_version)
         elif svi_ranking_scope == 'county':
             demographics = self.fetch_acs_demographics(state_fips, county_fips)
         else:

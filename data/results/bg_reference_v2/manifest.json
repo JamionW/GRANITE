@@ -1,0 +1,208 @@
+{
+  "milestone": "REF-FIX",
+  "reference_versions": {
+    "v1": "frozen; census sentinels unhandled; EP_MINRTY = non-white-alone (B02001) + hispanic (B03003), capped at 100",
+    "v2": "sentinels (<= -100000000) nulled before rates; EP_MINRTY = 100 * (1 - B03002_003E / B03002_001E) (cdc svi 2020 DP05 minority sum, block-group equivalent)"
+  },
+  "cache_files": {
+    "v1": {
+      "data/processed/national_bg_acs_raw.csv": "38f778ba472d6c60aed4eb1c28d8ba0d1f9d0549ba881074dc61e3e297de0100",
+      "data/processed/national_bg_svi.csv": "ed21878c3ab043ca9df7077a1a03822aa430467eb653a1f1aeb08c7fc941b8d8"
+    },
+    "v2": {
+      "data/processed/national_bg_acs_raw_v2.csv": "c77593e7d531644212548998dc71e2b9e19e7362b9c7a1607c3024308fe7c4bc",
+      "data/processed/national_bg_svi_v2.csv": "4e8a06f89ba8f7e97c72f122f707af339d3e0e2687ba3f5f8d3c21721d0a668b"
+    }
+  },
+  "versions": {
+    "v1": {
+      "row_counts": {
+        "raw_rows": 242335,
+        "raw_unique_geoid": 242335,
+        "svi_rows": 242335,
+        "svi_non_null": 233338
+      },
+      "indicator_non_null_ranking_pool": {
+        "EP_MHI": 242335,
+        "EP_PCI": 242097,
+        "EP_UNEMP": 239695,
+        "EP_NOHSDP": 240019,
+        "EP_AGE65": 240096,
+        "EP_AGE17": 240096,
+        "EP_SNGPNT": 233373,
+        "EP_MINRTY": 240096,
+        "EP_MUNIT": 239554,
+        "EP_MOBILE": 239554,
+        "EP_CROWD": 239474,
+        "EP_NOVEH": 239474
+      },
+      "ep_negative_counts": {
+        "EP_MHI": 15700,
+        "EP_PCI": 2240,
+        "EP_UNEMP": 0,
+        "EP_NOHSDP": 0,
+        "EP_AGE65": 0,
+        "EP_AGE17": 0,
+        "EP_SNGPNT": 0,
+        "EP_MINRTY": 0,
+        "EP_MUNIT": 0,
+        "EP_MOBILE": 0,
+        "EP_CROWD": 0,
+        "EP_NOVEH": 0
+      },
+      "ep_sentinel_counts": {
+        "EP_MHI": 15700,
+        "EP_PCI": 2239,
+        "EP_UNEMP": 0,
+        "EP_NOHSDP": 0,
+        "EP_AGE65": 0,
+        "EP_AGE17": 0,
+        "EP_SNGPNT": 0,
+        "EP_MINRTY": 0,
+        "EP_MUNIT": 0,
+        "EP_MOBILE": 0,
+        "EP_CROWD": 0,
+        "EP_NOVEH": 0
+      },
+      "raw_sentinel_counts_by_column": {
+        "B19013_001E": 15700,
+        "B19301_001E": 2239
+      },
+      "ep_minrty_at_100": 30405,
+      "hamilton_county": {
+        "geoid_prefix": "47065",
+        "total_bgs": 278,
+        "svi_non_null": 263,
+        "scored": {
+          "5b_min3": {
+            "threshold": 3,
+            "bgs_meeting_threshold": 70,
+            "scored_bgs": 69
+          },
+          "m0_min10": {
+            "threshold": 10,
+            "bgs_meeting_threshold": 70,
+            "scored_bgs": 69
+          }
+        }
+      }
+    },
+    "v2": {
+      "row_counts": {
+        "raw_rows": 242335,
+        "raw_unique_geoid": 242335,
+        "svi_rows": 242335,
+        "svi_non_null": 221944
+      },
+      "indicator_non_null_ranking_pool": {
+        "EP_MHI": 226635,
+        "EP_PCI": 239858,
+        "EP_UNEMP": 239695,
+        "EP_NOHSDP": 240019,
+        "EP_AGE65": 240096,
+        "EP_AGE17": 240096,
+        "EP_SNGPNT": 233373,
+        "EP_MINRTY": 240096,
+        "EP_MUNIT": 239554,
+        "EP_MOBILE": 239554,
+        "EP_CROWD": 239474,
+        "EP_NOVEH": 239474
+      },
+      "ep_negative_counts": {
+        "EP_MHI": 0,
+        "EP_PCI": 1,
+        "EP_UNEMP": 0,
+        "EP_NOHSDP": 0,
+        "EP_AGE65": 0,
+        "EP_AGE17": 0,
+        "EP_SNGPNT": 0,
+        "EP_MINRTY": 0,
+        "EP_MUNIT": 0,
+        "EP_MOBILE": 0,
+        "EP_CROWD": 0,
+        "EP_NOVEH": 0
+      },
+      "ep_sentinel_counts": {
+        "EP_MHI": 0,
+        "EP_PCI": 0,
+        "EP_UNEMP": 0,
+        "EP_NOHSDP": 0,
+        "EP_AGE65": 0,
+        "EP_AGE17": 0,
+        "EP_SNGPNT": 0,
+        "EP_MINRTY": 0,
+        "EP_MUNIT": 0,
+        "EP_MOBILE": 0,
+        "EP_CROWD": 0,
+        "EP_NOVEH": 0
+      },
+      "raw_sentinel_counts_by_column": {
+        "B19013_001E": 15700,
+        "B19301_001E": 2239
+      },
+      "ep_minrty_at_100": 6309,
+      "hamilton_county": {
+        "geoid_prefix": "47065",
+        "total_bgs": 278,
+        "svi_non_null": 251,
+        "scored": {
+          "5b_min3": {
+            "threshold": 3,
+            "bgs_meeting_threshold": 70,
+            "scored_bgs": 67
+          },
+          "m0_min10": {
+            "threshold": 10,
+            "bgs_meeting_threshold": 70,
+            "scored_bgs": 67
+          }
+        }
+      }
+    }
+  },
+  "scored_bg_address_source": {
+    "npz_glob": "data/results/m6_topology_5b/predictions/production__sage__ts42__gs42__*.npz",
+    "n_files": 20,
+    "n_addresses": 39535,
+    "n_bgs_with_addresses": 70
+  },
+  "hamilton_v1_v2": {
+    "all_bgs_scored_by_both": {
+      "n_bgs": 251,
+      "pearson": 0.9985975130367951,
+      "spearman": 0.9982788844621513,
+      "mean_abs_diff": 0.01585752322391988,
+      "max_abs_diff": 0.054837371862405115
+    },
+    "scoring_set_min3_scored_by_both": {
+      "n_bgs": 67,
+      "pearson": 0.9988925741863561,
+      "spearman": 0.999042222044856,
+      "mean_abs_diff": 0.01800976997189837,
+      "max_abs_diff": 0.04125015273392918
+    },
+    "scoring_set_min10_scored_by_both": {
+      "n_bgs": 67,
+      "pearson": 0.9988925741863561,
+      "spearman": 0.999042222044856,
+      "mean_abs_diff": 0.01800976997189837,
+      "max_abs_diff": 0.04125015273392918
+    },
+    "named_bgs": [
+      {
+        "GEOID": "470650104314",
+        "SVI_v1": 0.10699500295708371,
+        "SVI_v2": null,
+        "EP_MHI_v1": -666666666,
+        "EP_MHI_v2": null
+      },
+      {
+        "GEOID": "470650104333",
+        "SVI_v1": 0.23725239780918667,
+        "SVI_v2": null,
+        "EP_MHI_v1": -666666666,
+        "EP_MHI_v2": null
+      }
+    ]
+  }
+}

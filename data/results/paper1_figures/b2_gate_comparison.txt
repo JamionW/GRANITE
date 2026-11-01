@@ -1,0 +1,37 @@
+B2 default-reproduction gate (FIG-P1), 2026-11-01
+
+Criterion (revised 2026-11-01): every GRANITE, Dasymetric and Pycnophylactic row matches the
+committed recovery_grid.csv within 1e-12 on recovery_r, and every GRANITE row within 1e-12 on
+morans_i_output. Result: PASS. Largest recovery_r difference on those rows 2.7755575615628914e-17;
+largest GRANITE morans_i_output difference 0.
+
+Known deviation, cause untraced: ceiling_gbm 47065000600 recovery_r 0.19532607497818591 committed,
+0.19538263298329922 rerun, abs diff 5.6558005113310772e-05. Outside the criterion. Figure 4a reads
+its ceiling line from the committed rows.
+
+morans_i_true is outside the criterion and not compared here: committed rows carry the
+pre-826c61a estimator value.
+
+Environment: venv built from requirements.txt at fa3ba45 (scikit-learn 1.8.0, numpy 2.4.2,
+pandas 3.0.1, geopandas 1.1.2, shapely 2.1.2, pyogrio 0.12.1).
+
+B2 gate: cell latent/strong/medium/default seed 42, stored field data/synthetic/run_20260628_030416, requirements.txt venv
+command: run_grid.py --cell strong medium default 42 --tracts-limit 2 --field-dir data/synthetic/run_20260628_030416 --out-dir /tmp/claude-1000/figp1/gate3
+
+ tract_fips         method      feature_mode    arch  recovery_r_committed      recovery_r_rerun    abs_diff_recovery_r  morans_i_output_committed  morans_i_output_rerun  abs_diff_morans_i_output
+47065000600     dasymetric                na      na -0.011584612281489447 -0.011584612281489447                      0                        NaN                    NaN                       NaN
+47065000600 pycnophylactic                na      na 0.0024364306135688948 0.0024364306135688965 1.7347234759768071e-18                        NaN                    NaN                       NaN
+47065000600    ceiling_gbm                na      na   0.19532607497818591   0.19538263298329922 5.6558005113310772e-05                        NaN                    NaN                       NaN
+47065000600        granite  coordinates_only    sage -0.077686225171478621 -0.077686225171478621                      0        0.98787969265196884    0.98787969265196884                         0
+47065000600        granite  coordinates_only gcn_gat -0.041030904877189071 -0.041030904877189078 6.9388939039072284e-18        0.97031241418017444    0.97031241418017444                         0
+47065000600        granite              full    sage   0.11608036365146275   0.11608036365146278 2.7755575615628914e-17        0.79541073044117527    0.79541073044117527                         0
+47065000600        granite      random_noise    sage 0.0099554428732937308 0.0099554428732937326 1.7347234759768071e-18       0.096848854782290592   0.096848854782290592                         0
+47065000600        granite coords_plus_noise    sage  0.033531975037211642  0.033531975037211649 6.9388939039072284e-18        0.10541646327761876    0.10541646327761876                         0
+47065000700     dasymetric                na      na  0.020224779942899552  0.020224779942899552                      0                        NaN                    NaN                       NaN
+47065000700 pycnophylactic                na      na   0.11486635746108403   0.11486635746108403                      0                        NaN                    NaN                       NaN
+47065000700    ceiling_gbm                na      na   0.24204424950661102   0.24204424950661108 5.5511151231257827e-17                        NaN                    NaN                       NaN
+47065000700        granite  coordinates_only    sage  -0.03667143845476345 -0.036671438454763436 1.3877787807814457e-17        0.98105579009071697    0.98105579009071697                         0
+47065000700        granite  coordinates_only gcn_gat  0.019836710632916654  0.019836710632916661 6.9388939039072284e-18         0.9694830427475204     0.9694830427475204                         0
+47065000700        granite              full    sage  0.030231411114135343  0.030231411114135343                      0        0.90953189373267285    0.90953189373267285                         0
+47065000700        granite      random_noise    sage   0.02985301773150666  0.029853017731506667 6.9388939039072284e-18        0.12810613751098329    0.12810613751098329                         0
+47065000700        granite coords_plus_noise    sage -0.030299353528742932 -0.030299353528742926 6.9388939039072284e-18      0.0086817973412616888  0.0086817973412616888                         0

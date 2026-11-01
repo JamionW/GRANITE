@@ -18,10 +18,26 @@ Output:
   scratch markers  -> experiments/m6_recovery_grid/scratch/   (gitignored)
   summary CSV      -> data/results/m6_recovery_grid/recovery_grid.csv (tracked)
 
+Graph and training-seed options (FIG-P1 B2; defaults reproduce the committed grid):
+  --graph-variant     graph_variant set on pipeline.data_loader.config (default: unset,
+                      the production graph)
+  --graph-draw-seed   graph_draw_seed for the randomized variant (default: unset)
+  --training-seed     processing.random_seed and the global seed set before training,
+                      separate from the data-generation seed (default: unset, the draw
+                      seed is set once before generation as before)
+  --cell / --fm-arch  restrict the run to one draw and to listed (feature_mode, arch) pairs
+  --out-dir           write scratch, predictions and CSV under this directory; required
+                      whenever a graph or training-seed option is set
+  --field-dir         load a stored generator output for the --cell draw instead of
+                      regenerating (the current generator no longer reproduces the June
+                      fields; see 826c61a)
+
 Usage:
     python experiments/m6_recovery_grid/run_grid.py --smoke --tracts-limit 3
     python experiments/m6_recovery_grid/run_grid.py --tracts-limit 5
     python experiments/m6_recovery_grid/run_grid.py
+    python experiments/m6_recovery_grid/run_grid.py --cell strong medium default 42 \
+        --tracts-limit 2 --out-dir /tmp/m6_gate
 """
 
 import argparse
@@ -61,6 +77,7 @@ SNRS = ['low', 'medium', 'high']
 BETWEEN_TRACTS = ['low', 'default', 'high']
 
 N20_LIST_PATH = REPO_ROOT / 'output' / 'm2_n20_recovery' / 'summary' / 'n20_tract_list.txt'
+TRACT_SELECTION = REPO_ROOT / 'experiments' / 'ablation' / '00_baseline' / 'tract_selection.txt'
 BASE_CONFIG_PATH = (
     REPO_ROOT / 'experiments' / 'ablation' / '03_smoothness' / '02_default' / 'config_snapshot.yaml'
 )
@@ -176,10 +193,21 @@ def _write_marker(draw_key, draw_spec, rows, gen_result, generator_commit,
 
 
 def _load_tract_list():
-    if not N20_LIST_PATH.exists():
-        raise FileNotFoundError(f"n20 tract list not found: {N20_LIST_PATH}")
-    with open(N20_LIST_PATH) as f:
-        return [line.strip() for line in f if line.strip()]
+    """
+    Read the 20 tracts from the committed tract_selection.txt, in sorted order.
+
+    Sorted order equals the order of the untracked n20_tract_list.txt the grid was
+    run from; when that file is present the two lists must match exactly.
+    """
+    if not TRACT_SELECTION.exists():
+        raise FileNotFoundError(f"tract selection not found: {TRACT_SELECTION}")
+    tracts = sorted(TRACT_SELECTION.read_text().split('fips_list:')[1].split())
+    if N20_LIST_PATH.exists():
+        with open(N20_LIST_PATH) as f:
+            n20 = [line.strip() for line in f if line.strip()]
+        if n20 != tracts:
+            raise ValueError(f"tract_selection.txt (sorted) differs from {N20_LIST_PATH}")
+    return tracts
 
 
 def _load_base_config():
@@ -306,8 +334,12 @@ def _align_ytrue(addr_df, fips, address_gdf):
     return np.pad(y, (0, n_pred - len(y)), constant_values=float('nan'))
 
 
-def _make_run_cfg(cfg_base, fips, feature_mode, arch):
-    """Return a shallow-copied config for one GRANITE run."""
+def _make_run_cfg(cfg_base, fips, feature_mode, arch, graph_opts=None):
+    """Return a shallow-copied config for one GRANITE run.
+
+    graph_opts: optional dict with graph_variant, graph_draw_seed, training_seed;
+    None-valued entries leave the base config untouched.
+    """
     cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in cfg_base.items()}
     cfg['data'] = dict(cfg_base['data'])
     cfg['model'] = dict(cfg_base['model'])
@@ -315,7 +347,23 @@ def _make_run_cfg(cfg_base, fips, feature_mode, arch):
     cfg['data']['target_fips'] = fips
     cfg['feature_mode'] = feature_mode
     cfg['model']['architecture'] = arch
+    graph_opts = graph_opts or {}
+    if graph_opts.get('training_seed') is not None:
+        cfg['processing']['random_seed'] = int(graph_opts['training_seed'])
+    if graph_opts.get('graph_variant') is not None:
+        cfg['graph_variant'] = graph_opts['graph_variant']
+    if graph_opts.get('graph_draw_seed') is not None:
+        cfg['graph_draw_seed'] = int(graph_opts['graph_draw_seed'])
     return cfg
+
+
+def _configure_pipeline(pipeline, run_cfg):
+    """Point the pipeline and its data loader at run_cfg (graph keys only when set)."""
+    pipeline.config = run_cfg
+    pipeline.data_loader.config['processing'] = run_cfg['processing']
+    for key in ('graph_variant', 'graph_draw_seed'):
+        if key in run_cfg:
+            pipeline.data_loader.config[key] = run_cfg[key]
 
 
 def _assemble_csv(completed_draw_keys):
@@ -550,19 +598,31 @@ def _apply_parity_verdict(all_draw_keys, parity_rows, drift):
 # single draw execution
 # ---------------------------------------------------------------------------
 
-def run_draw(draw_spec, tract_list, cfg_base, pipeline, data, generator_commit):
+def _load_stored_field(field_dir, draw_spec, gen_params):
     """
-    Execute one draw: generate y_true once, run comparators and GRANITE.
+    Load a stored generator output (addresses.csv, metadata.json) in place of
+    regenerating; seed and params must match the draw. Returns a gen_result dict.
+    """
+    field_dir = Path(field_dir).resolve()
+    meta = json.loads((field_dir / 'metadata.json').read_text())
+    if int(meta['seed']) != int(draw_spec['seed']) or meta['params'] != gen_params:
+        raise ValueError(f"stored field {field_dir} does not match draw {_draw_key(draw_spec)}: "
+                         f"seed={meta['seed']} params={meta['params']}")
+    addr = pd.read_csv(field_dir / 'addresses.csv', dtype={'fips': str, 'address_hash': str})
+    print(f"[m6]   loaded stored field {field_dir} (generator_commit={meta['generator_commit']})")
+    return {'addresses': addr, 'diagnostics': meta['diagnostics'], 'params': meta['params'],
+            'seed': meta['seed'], 'output_dir': str(field_dir)}
 
-    For each tract in tract_list:
-      - run comparators (Dasymetric, Pycnophylactic) once per tract per draw
-      - run GRANITE for each (feature_mode, arch) in draw_spec['fm_arch_list']
 
-    Returns (list of CSV row dicts, gen_result dict).
+def _generate_draw(draw_spec, field_dir=None):
+    """
+    Generate one draw's synthetic field and rescale y_true globally into [0, 1].
+
+    Sets the global seed to the data-generation seed first, as the grid always has.
+    field_dir: optional stored generator output to load in place of regenerating.
+    Returns (gen_result, addr_df, tract_means, y_min, y_max, wtvr).
     """
     draw_key = _draw_key(draw_spec)
-    print(f"\n[m6] draw {draw_key}")
-
     gen_params = {
         'signal_source': draw_spec['signal_source'],
         'spatial_autocorrelation': draw_spec['autocorr'],
@@ -571,10 +631,13 @@ def run_draw(draw_spec, tract_list, cfg_base, pipeline, data, generator_commit):
         'tract_list_source': 'auto',
     }
     set_random_seed(draw_spec['seed'])
-    print(f"[m6]   generating (seed={draw_spec['seed']}, autocorr={draw_spec['autocorr']}, "
-          f"snr={draw_spec['snr']}, between={draw_spec['between_tract']})")
-    gen = SyntheticTargetGenerator(seed=draw_spec['seed'], params=gen_params)
-    gen_result = gen.generate()
+    if field_dir is not None:
+        gen_result = _load_stored_field(field_dir, draw_spec, gen_params)
+    else:
+        print(f"[m6]   generating (seed={draw_spec['seed']}, autocorr={draw_spec['autocorr']}, "
+              f"snr={draw_spec['snr']}, between={draw_spec['between_tract']})")
+        gen = SyntheticTargetGenerator(seed=draw_spec['seed'], params=gen_params)
+        gen_result = gen.generate()
 
     addr_df = gen_result['addresses']          # fips, address_hash, x, y, y_true
 
@@ -592,6 +655,31 @@ def run_draw(draw_spec, tract_list, cfg_base, pipeline, data, generator_commit):
     wtvr = float(gen_result['diagnostics']['wtvr_achieved'])
     print(f"[m6]   wtvr={wtvr:.4f}  morans_i_achieved={gen_result['diagnostics']['morans_i_achieved']:.4f}")
     print(f"[m6]   y_true rescaled: y_min={y_min:.4f}  y_max={y_max:.4f}")
+    return gen_result, addr_df, tract_means, y_min, y_max, wtvr
+
+
+def run_draw(draw_spec, tract_list, cfg_base, pipeline, data, generator_commit,
+             graph_opts=None, field_dir=None):
+    """
+    Execute one draw: generate y_true once, run comparators and GRANITE.
+
+    graph_opts: optional dict (graph_variant, graph_draw_seed, training_seed). When
+    training_seed is set, the global seed is reset to it after generation, so the
+    data-generation seed and the training seed are separate.
+    field_dir: optional stored generator output loaded in place of regenerating.
+
+    For each tract in tract_list:
+      - run comparators (Dasymetric, Pycnophylactic) once per tract per draw
+      - run GRANITE for each (feature_mode, arch) in draw_spec['fm_arch_list']
+
+    Returns (list of CSV row dicts, gen_result dict).
+    """
+    draw_key = _draw_key(draw_spec)
+    print(f"\n[m6] draw {draw_key}")
+
+    gen_result, addr_df, tract_means, y_min, y_max, wtvr = _generate_draw(draw_spec, field_dir)
+    if graph_opts and graph_opts.get('training_seed') is not None:
+        set_random_seed(int(graph_opts['training_seed']))
 
     # fit baselines once per draw on real tract geometry
     dasy = DasymetricDisaggregation(ancillary_column='nlcd_impervious_pct')
@@ -614,9 +702,8 @@ def run_draw(draw_spec, tract_list, cfg_base, pipeline, data, generator_commit):
         address_coords_ref = None
 
         for feature_mode, arch in draw_spec['fm_arch_list']:
-            run_cfg = _make_run_cfg(cfg_base, fips, feature_mode, arch)
-            pipeline.config = run_cfg
-            pipeline.data_loader.config['processing'] = run_cfg['processing']
+            run_cfg = _make_run_cfg(cfg_base, fips, feature_mode, arch, graph_opts)
+            _configure_pipeline(pipeline, run_cfg)
 
             try:
                 result = pipeline._process_single_tract(
@@ -743,7 +830,49 @@ def main():
             'gates on recovery_r parity (<= 1e-6), rewrites markers and CSV'
         ),
     )
+    parser.add_argument(
+        '--graph-variant', default=None,
+        choices=['production', 'mlp_floor', 'spatial_knn_uniform',
+                 'road_network_uniform', 'randomized'],
+        help='graph_variant on pipeline.data_loader.config (default: unset, production)',
+    )
+    parser.add_argument('--graph-draw-seed', type=int, default=None,
+                        help='graph_draw_seed for the randomized variant (default: unset)')
+    parser.add_argument('--training-seed', type=int, default=None,
+                        help='training seed, separate from the data-generation seed '
+                             '(default: unset, current behavior)')
+    parser.add_argument('--cell', nargs=4, default=None,
+                        metavar=('AUTOCORR', 'SNR', 'BETWEEN_TRACT', 'SEED'),
+                        help='run only this draw')
+    parser.add_argument('--fm-arch', action='append', default=None, metavar='FM:ARCH',
+                        help='restrict the draw to these feature_mode:arch pairs (repeatable)')
+    parser.add_argument('--out-dir', type=Path, default=None,
+                        help='write scratch, predictions and CSV under this directory')
+    parser.add_argument('--field-dir', type=Path, default=None,
+                        help='load this stored generator output for the --cell draw '
+                             'instead of regenerating (requires --cell and --out-dir)')
     args = parser.parse_args()
+
+    graph_opts = {
+        'graph_variant': args.graph_variant,
+        'graph_draw_seed': args.graph_draw_seed,
+        'training_seed': args.training_seed,
+    }
+    non_default = any(v is not None for v in graph_opts.values())
+    if non_default and args.out_dir is None:
+        print('[m6] HALT: graph or training-seed options require --out-dir '
+              '(the canonical recovery_grid.csv and predictions are frozen)')
+        sys.exit(2)
+    if args.field_dir is not None and (args.cell is None or args.out_dir is None):
+        print('[m6] HALT: --field-dir requires --cell and --out-dir')
+        sys.exit(2)
+    if args.out_dir is not None:
+        global SCRATCH_DIR, PIPELINE_SCRATCH, PRED_DIR, OUTPUT_CSV
+        out_dir = args.out_dir.resolve()
+        SCRATCH_DIR = out_dir / 'scratch'
+        PIPELINE_SCRATCH = SCRATCH_DIR / 'pipeline'
+        PRED_DIR = out_dir / 'predictions'
+        OUTPUT_CSV = out_dir / 'recovery_grid.csv'
 
     ts_start = datetime.now()
     print(f"[m6] start {ts_start.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -767,7 +896,24 @@ def main():
           f"({len(AUTOCORRS)} autocorr x {len(SNRS)} snr x {len(BETWEEN_TRACTS)} between_tract "
           f"x {len(SEEDS)} seeds)")
 
-    if args.smoke:
+    if args.cell is not None:
+        autocorr, snr, between_tract, seed = args.cell
+        cell_key = f"latent__{autocorr}__{snr}__{between_tract}__{int(seed)}"
+        draws_to_run = [dict(d) for d in all_draws if _draw_key(d) == cell_key]
+        if not draws_to_run:
+            print(f"[m6] HALT: cell not found in grid (key={cell_key})")
+            sys.exit(1)
+        if args.fm_arch:
+            wanted = [tuple(x.split(':')) for x in args.fm_arch]
+            missing = [w for w in wanted if w not in draws_to_run[0]['fm_arch_list']]
+            if missing:
+                print(f"[m6] HALT: {missing} not in this draw's fm_arch_list")
+                sys.exit(1)
+            draws_to_run[0]['fm_arch_list'] = [
+                fa for fa in draws_to_run[0]['fm_arch_list'] if fa in wanted]
+        print(f"[m6] cell mode: {cell_key}, fm_arch_list={draws_to_run[0]['fm_arch_list']}, "
+              f"graph_opts={graph_opts}")
+    elif args.smoke:
         smoke_key = (
             f"latent__{SMOKE_AUTOCORR}__{SMOKE_SNR}"
             f"__{SMOKE_BETWEEN_TRACT}__{SMOKE_SEED}"
@@ -847,7 +993,8 @@ def main():
         t0 = datetime.now()
         try:
             rows, gen_result, y_min, y_max = run_draw(
-                draw_spec, tract_list, cfg_base, pipeline, data, generator_commit
+                draw_spec, tract_list, cfg_base, pipeline, data, generator_commit,
+                graph_opts=graph_opts, field_dir=args.field_dir,
             )
         except Exception as e:
             print(f"[m6] draw {draw_key} FAILED: {e}")

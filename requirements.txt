@@ -1,16 +1,17 @@
 # GRANITE: core dependencies
 
 # scientific computing
-numpy>=1.21.0
-pandas>=1.3.0
+numpy==2.4.2
+pandas==3.0.1
 scipy>=1.9.0
-scikit-learn>=1.0.0
+scikit-learn==1.8.0  # 1.9.1 changes production-graph k-NN tie-breaking
 pyarrow==26.0.0  # parquet engine for persisted m0 predictions
 
 # geospatial
-geopandas>=0.10.0
+geopandas==1.1.2
 fiona>=1.8.0
-shapely>=1.8.0
+pyogrio==0.12.1
+shapely==2.1.2
 pyproj>=3.0.0
 geopy>=2.3.0
 

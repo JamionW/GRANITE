@@ -1,0 +1,137 @@
+{
+  "milestone": "FIG-P1 B4",
+  "command": "python scripts/input_feature_morans_probe.py",
+  "commit": "9b14893cda9a6b08c2e946f0764b57e74c4b32d2",
+  "input": "experiments/ecological_fallacy/n20_feature_matrix.csv",
+  "estimator": "granite.evaluation.spatial_diagnostics.SpatialLearningDiagnostics.compute_spatial_autocorrelation; libpysal KNN k=8 on (lon, lat), transform 'r', esda.Moran permutations=0",
+  "aggregation": "unweighted mean of per-tract I across tracts; median of feature means by group",
+  "n_tracts": 20,
+  "n_features": 73,
+  "feature_tract_pairs": 1460,
+  "zero_variance_pairs_skipped": 265,
+  "zero_variance_rule": "max equals min within the tract (np.ptp == 0)",
+  "nan_feature_values": 0,
+  "group_sizes": {
+    "accessibility": 30,
+    "modal": 15,
+    "socioeconomic": 9,
+    "building": 2,
+    "flood": 1,
+    "land_cover": 3,
+    "parcel": 13
+  },
+  "group_median_mean_morans_i": {
+    "accessibility": 0.9198338919495994,
+    "modal": 0.8966308422482552,
+    "socioeconomic": null,
+    "building": 0.5415895934235795,
+    "flood": 0.40409040968606924,
+    "land_cover": 0.4195738099957539,
+    "parcel": 0.5737261374461757
+  },
+  "group_features_never_scored": {
+    "accessibility": 0,
+    "modal": 0,
+    "socioeconomic": 9,
+    "building": 0,
+    "flood": 0,
+    "land_cover": 0,
+    "parcel": 0
+  },
+  "reference_rows": {
+    "lat": {
+      "mean_morans_i": 0.9686866185393705,
+      "tracts_scored": 20
+    },
+    "lon": {
+      "mean_morans_i": 0.9648656185229767,
+      "tracts_scored": 20
+    }
+  },
+  "top10_sage_permutation_importance": {
+    "source": "experiments/ablation/00_baseline/results/feature_importance/sage_permutation_importance.csv",
+    "flag": "importance ranking computed on the production graph (00_baseline run); Moran's I here uses fixed k=8 k-NN weights on coordinates",
+    "features": [
+      {
+        "rank": 1,
+        "feature": "employment_count_10min",
+        "group": "accessibility",
+        "mean_drop": 0.0194909440346236,
+        "mean_morans_i": 0.920720316236776,
+        "tracts_scored": 20
+      },
+      {
+        "rank": 2,
+        "feature": "nlcd_tree_canopy_pct",
+        "group": "land_cover",
+        "mean_drop": 0.0032097930328745,
+        "mean_morans_i": 0.4195738099957539,
+        "tracts_scored": 20
+      },
+      {
+        "rank": 3,
+        "feature": "grocery_modal_access_gap",
+        "group": "modal",
+        "mean_drop": 0.0012342667614575,
+        "mean_morans_i": 0.9484678904315793,
+        "tracts_scored": 20
+      },
+      {
+        "rank": 4,
+        "feature": "employment_forced_walk_burden",
+        "group": "modal",
+        "mean_drop": 0.0011376628401194,
+        "mean_morans_i": 0.5004506026958541,
+        "tracts_scored": 20
+      },
+      {
+        "rank": 5,
+        "feature": "grocery_mean_time",
+        "group": "accessibility",
+        "mean_drop": 0.0004058835029468,
+        "mean_morans_i": 0.9246747362433675,
+        "tracts_scored": 20
+      },
+      {
+        "rank": 6,
+        "feature": "healthcare_count_10min",
+        "group": "accessibility",
+        "mean_drop": 0.0003285482489786,
+        "mean_morans_i": 0.8363670031887305,
+        "tracts_scored": 20
+      },
+      {
+        "rank": 7,
+        "feature": "healthcare_min_time",
+        "group": "accessibility",
+        "mean_drop": 0.0003207093365745,
+        "mean_morans_i": 0.9296172146046121,
+        "tracts_scored": 20
+      },
+      {
+        "rank": 8,
+        "feature": "lucode_residential",
+        "group": "parcel",
+        "mean_drop": 0.0002816003558223,
+        "mean_morans_i": 0.4641129232395052,
+        "tracts_scored": 20
+      },
+      {
+        "rank": 9,
+        "feature": "healthcare_percentile",
+        "group": "accessibility",
+        "mean_drop": 0.0002259069644082,
+        "mean_morans_i": 0.9364420302312902,
+        "tracts_scored": 20
+      },
+      {
+        "rank": 10,
+        "feature": "log_appvalue",
+        "group": "parcel",
+        "mean_drop": 0.0002165540978694,
+        "mean_morans_i": 0.5737261374461757,
+        "tracts_scored": 20
+      }
+    ]
+  }
+}

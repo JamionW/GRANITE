@@ -1,0 +1,58 @@
+{
+  "milestone": "FIG-P1 B1",
+  "command": "python scripts/build_figure1_artifacts.py --inset-fips 47065000600",
+  "commit": "6c7739333626768f8fec7e1a9d58678be59524f4",
+  "commit_note": "HEAD at build time; this script is committed together with its outputs",
+  "created_utc": "2026-11-01T13:56:25+00:00",
+  "tract_selection": "experiments/ablation/00_baseline/tract_selection.txt",
+  "inset_rule": "paper1 tract nearest the median address count (2011.5); tie between 47065000600 and 47065011444 resolved to 47065000600 by the PI",
+  "packages": {
+    "scikit-learn": "1.8.0",
+    "numpy": "2.4.2",
+    "pandas": "3.0.1",
+    "geopandas": "1.1.2",
+    "shapely": "2.1.2",
+    "pyogrio": "0.12.1",
+    "scipy": "1.17.1",
+    "networkx": "3.6.1"
+  },
+  "raw_sources_sha256": {
+    "data/raw/tl_2020_47_tract.shp": "e48489d69107fec5daf83895465139aba2e20a4ea5ce71726325d50c7ba56a47",
+    "data/raw/tl_2020_47_tract.shx": "face67e0d0a8b769e11391735f8dc6974e70c8de472a064c0d9f7bdba8b0a5b8",
+    "data/raw/tl_2020_47_tract.dbf": "fdd36a83e573014f20bf8218ef71849ddbbf8bb7276edb1de81f3ab685d7c59a",
+    "data/raw/tl_2020_47_tract.prj": "0b9041e921d9ebb43247d314608fe9e38a0b008ee793067fc1806199ea1fb9dd",
+    "data/raw/SVI_2020_US.csv": "f894692de1338c97b268aa99c0ced561c6635f81cdbc2ba94e52de01c752b59b",
+    "data/raw/chattanooga.geojson": "b64955c4109ba403225f0ba5dfb4493748ebdf9ff0a5cd7c15d8f84b92d51204",
+    "data/raw/address_features/combined_address_features.csv": "febd1f32f0aef2b3c932d1bb1dc8dcbb5e1024fd4480448fa610415d8662c741",
+    "data/raw/tl_2023_47065_roads.shp": "20c53068f12f1059ae24884b101c29063a838b661c3fbcb41520dafa61256690",
+    "data/raw/tl_2023_47065_roads.shx": "a695df2248e0d0279342b27716e18fcaa6286a23ffa7733d41a0426c06ec51d4",
+    "data/raw/tl_2023_47065_roads.dbf": "1072c8d9db53fed56b1ca3787da1b28e8002f45480e61fed7d96a9d885f3ece3",
+    "data/raw/tl_2023_47065_roads.prj": "0b9041e921d9ebb43247d314608fe9e38a0b008ee793067fc1806199ea1fb9dd"
+  },
+  "outputs": {
+    "data/results/paper1_figures/hamilton_tracts_svi.geojson": {
+      "sha256": "9e7f48882cbf9d2413a75436eea4fea48a17a44b09ce96d3d407c34870b5b81e",
+      "n_tracts": 87,
+      "n_with_svi": 85,
+      "n_paper1": 20,
+      "missing_svi_geoids": [
+        "47065980100",
+        "47065980200"
+      ]
+    },
+    "data/results/paper1_figures/inset_edges_47065000600.npz": {
+      "sha256": "781bb23ec4ef61cef8a0ca85da76a0b806a49fd2d17f883633a5143bbc619cec",
+      "fips": "47065000600",
+      "n_nodes": 2089,
+      "n_directed_edges": 26324,
+      "n_undirected_edges": 13162,
+      "full_tract_mean_degree": 12.601244614648158,
+      "coords_crs": "EPSG:4269",
+      "center_idx": 1534,
+      "window_n_nodes": 200,
+      "window_induced_undirected_edges": 1037,
+      "window_induced_mean_degree": 10.37,
+      "window_full_graph_mean_degree": 12.85
+    }
+  }
+}

@@ -172,3 +172,6 @@ CLAUDE.md
 SESSION_LOG.md
 PROJECT_PREAMBLE.md
 Research_Status.md
+
+# paper 1 figure inputs (FIG-P1)
+!data/results/paper1_figures/hamilton_tracts_svi.geojson

@@ -1,0 +1,56 @@
+{
+  "batches": {
+    "1": {
+      "commit": "7b4453c70412889c2828403b95c899c4b0781302",
+      "started_at": "2026-11-01T15:09:07"
+    }
+  },
+  "milestone": "FIG-P1 B5",
+  "cell": {
+    "signal_source": "latent",
+    "autocorr": "strong",
+    "snr": "medium",
+    "between_tract": "default"
+  },
+  "data_seed": 42,
+  "feature_mode": "coordinates_only",
+  "graph_knn_k": 10,
+  "training_seeds": [
+    42,
+    17,
+    123,
+    2024,
+    7
+  ],
+  "graph_draw_seeds": [
+    42,
+    17,
+    123,
+    2024,
+    7
+  ],
+  "structured_graph_draw_seed_label": 42,
+  "field_dir": "data/synthetic/run_20260628_030416",
+  "field_generator_commit": "cdc860a4d36cbadb0e6e9865cd31c55d89aaa81b",
+  "base_config": "experiments/ablation/03_smoothness/02_default/config_snapshot.yaml",
+  "tract_selection": "experiments/ablation/00_baseline/tract_selection.txt",
+  "generator": {
+    "wtvr_achieved": 0.32746423783073225,
+    "morans_i_achieved": 0.6861166723012587,
+    "ytrue_rescale_min": -9.669131008144344,
+    "ytrue_rescale_max": 9.19319289695297
+  },
+  "packages": {
+    "scikit-learn": "1.8.0",
+    "numpy": "2.4.2",
+    "pandas": "3.0.1",
+    "geopandas": "1.1.2",
+    "shapely": "2.1.2",
+    "scipy": "1.17.1",
+    "torch": "2.10.0+cpu",
+    "torch-geometric": "2.8.1",
+    "libpysal": "4.14.1",
+    "esda": "2.9.0",
+    "networkx": "3.6.1"
+  }
+}

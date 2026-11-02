@@ -176,6 +176,8 @@ Research_Status.md
 # paper 1 figure inputs (FIG-P1)
 !data/results/paper1_figures/hamilton_tracts_svi.geojson
 !data/results/paper1_figures/input_feature_morans_i.csv
+!data/results/m6_fig4_randomization/cells.csv
+!data/results/m6_fig4_randomization/tract_rows.csv
 
 # m6 committed field for the figure 4 cell (strong/medium/default, seed 42; FIG-P1)
 !/data/synthetic/run_20260628_030416/

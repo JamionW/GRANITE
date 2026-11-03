@@ -563,3 +563,61 @@ change is 0.018 and the maximum is 0.041 (470650114024, 0.463 to 0.504). 60 of t
 consistent with the 15,700 sentinel BGs leaving the top of the national MHI ranking (not
 isolated from the minority change). The two
 named BGs 470650104314 and 470650104333 carry the MHI sentinel and have NaN SVI under v2.
+
+## FIG-P1 figure numbers
+
+Every plotted or captioned number in the Paper 1 figures, as written by `python scripts/build_paper1_figures.py` to `data/results/paper1_figures/figure_numbers.json` (full precision there). Intervals are 95% tract-clustered percentile bootstraps: the 20 tracts resampled with replacement, 2000 resamples, numpy default_rng seed 20261101. Display rounding is 3 decimals, ROUND_HALF_UP on repr(float). Source commit is the last commit touching the source path at build time.
+
+| Figure | Name | Value | 95% interval | Source | Source commit |
+|---|---|---|---|---|---|
+| 1 | n_tracts_county | 87.0 |  | `data/results/paper1_figures/hamilton_tracts_svi.geojson` | `b0e2a57` |
+| 1 | n_tracts_with_svi | 85.0 |  | `data/results/paper1_figures/hamilton_tracts_svi.geojson` | `b0e2a57` |
+| 1 | n_tracts_paper1 | 20.0 |  | `data/results/paper1_figures/hamilton_tracts_svi.geojson` | `b0e2a57` |
+| 1 | inset_n_nodes | 2089.0 |  | `data/results/paper1_figures/provenance.json` | `b0e2a57` |
+| 1 | inset_n_undirected_edges | 13162.0 |  | `data/results/paper1_figures/provenance.json` | `b0e2a57` |
+| 1 | inset_full_tract_mean_degree | 12.601244614648158 |  | `data/results/paper1_figures/provenance.json` | `b0e2a57` |
+| 1 | inset_window_n_nodes | 200.0 |  | `data/results/paper1_figures/provenance.json` | `b0e2a57` |
+| 1 | inset_window_induced_mean_degree | 10.37 |  | `data/results/paper1_figures/provenance.json` | `b0e2a57` |
+| 2 | pooled_bg_r_GRANITE | 0.7663784437781533 | [0.6562008448504074, 0.8483177412358122] | `data/results/bg_reference_v2/m0_aggregate_v1_v2.csv` | `3723706` |
+| 2 | pooled_bg_r_Dasymetric | 0.7966021224941551 | [0.6969647270417941, 0.8715551687715076] | `data/results/bg_reference_v2/m0_aggregate_v1_v2.csv` | `3723706` |
+| 2 | pooled_bg_r_Pycnophylactic | 0.7603570144782591 | [0.6436486700187483, 0.850705948163584] | `data/results/bg_reference_v2/m0_aggregate_v1_v2.csv` | `3723706` |
+| 2 | caption_wilcoxon_statistic | 46.0 |  | `data/results/bg_reference_v2/power_analysis_v2_tietol.json` | `9b14893` |
+| 2 | caption_wilcoxon_p | 0.14879179284657834 |  | `data/results/bg_reference_v2/power_analysis_v2_tietol.json` | `9b14893` |
+| 2 | caption_sign_test_n_pos | 6.0 |  | `data/results/bg_reference_v2/power_analysis_v2_tietol.json` | `9b14893` |
+| 2 | caption_sign_test_n_neg | 11.0 |  | `data/results/bg_reference_v2/power_analysis_v2_tietol.json` | `9b14893` |
+| 2 | caption_sign_test_p | 0.332305908203125 |  | `data/results/bg_reference_v2/power_analysis_v2_tietol.json` | `9b14893` |
+| 3a | morans_i_structured_sage | 0.872302936618014 | [0.7873940462253142, 0.9306402500919304] | `data/results/m6_topology_5b/topology_specificity_metrics.json` | `04f453e` |
+| 3a | morans_i_randomized_crossed_sage | 0.5036719618533596 | [0.4337121323994777, 0.5711953115778655] | `data/results/m6_topology_5b_crossed/trials_incremental.csv` | `9be51a6` |
+| 3a | morans_i_structured_gcn_gat | 0.8844982987957074 | [0.7888894673251794, 0.9490831322455904] | `data/results/m6_topology_5b/topology_specificity_metrics.json` | `04f453e` |
+| 3a | morans_i_randomized_crossed_gcn_gat | 0.07112015012780679 | [0.0550308239773037, 0.08930574958485718] | `data/results/m6_topology_5b_crossed/trials_incremental.csv` | `9be51a6` |
+| 3b | pooled_bg_r_production_sage | 0.7578635160961603 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 3b | pooled_bg_r_road_network_uniform_sage | 0.7574775988798064 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 3b | pooled_bg_r_spatial_knn_uniform_sage | 0.758372306683623 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 3b | pooled_bg_r_randomized_sage | 0.7675283573898029 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 3b | pooled_bg_r_production_gcn_gat | 0.7595399761652136 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 3b | pooled_bg_r_road_network_uniform_gcn_gat | 0.7605008243664212 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 3b | pooled_bg_r_spatial_knn_uniform_gcn_gat | 0.7623512588708399 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 3b | pooled_bg_r_randomized_gcn_gat | 0.7600588552630267 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 3b | pooled_bg_r_range_min | 0.7574775988798064 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 3b | pooled_bg_r_range_max | 0.7675283573898029 |  | `data/results/bg_reference_v2/rescored_condition_means.csv` | `3723706` |
+| 4a | ceiling_gbm_seed42_tract_mean | 0.22580497938891897 |  | `data/results/m6_recovery_grid/recovery_grid.csv` | `d01f5e4` |
+| 4a | recovery_r_spatial_knn_uniform_sage | 0.0017048611628437175 | [-0.014034549133982702, 0.014583164031781982] | `data/results/m6_fig4_randomization/tract_rows.csv` | `c9039a9` |
+| 4a | morans_i_output_spatial_knn_uniform_sage | 0.9520572816056626 | [0.8675958471767207, 0.9950162587379163] | `data/results/m6_fig4_randomization/tract_rows.csv` | `c9039a9` |
+| 4a | recovery_r_randomized_sage | 0.012340346991031289 | [0.0028344450520155383, 0.02320597013421232] | `data/results/m6_fig4_randomization/tract_rows.csv` | `c9039a9` |
+| 4a | morans_i_output_randomized_sage | 0.7732004267874585 | [0.7014405817071755, 0.8193538094070724] | `data/results/m6_fig4_randomization/tract_rows.csv` | `c9039a9` |
+| 4a | recovery_r_spatial_knn_uniform_gcn_gat | -0.007742632991789661 | [-0.01850681735407705, 0.0023571761309547647] | `data/results/m6_fig4_randomization/tract_rows.csv` | `c9039a9` |
+| 4a | morans_i_output_spatial_knn_uniform_gcn_gat | 0.9541605378327782 | [0.8791418809942979, 0.9946291878504451] | `data/results/m6_fig4_randomization/tract_rows.csv` | `c9039a9` |
+| 4a | recovery_r_randomized_gcn_gat | -0.0036855233496790956 | [-0.011497168500558937, 0.003274627801836087] | `data/results/m6_fig4_randomization/tract_rows.csv` | `c9039a9` |
+| 4a | morans_i_output_randomized_gcn_gat | 0.14711036415201947 | [0.13057616169488612, 0.16541700539290558] | `data/results/m6_fig4_randomization/tract_rows.csv` | `c9039a9` |
+| 4a | field_seed42_morans_i_true_current_estimator | 0.15334196178331091 |  | `data/synthetic/run_20260628_030416/addresses.csv` | `0cb231e` |
+| 4a | field_seed42_morans_i_true_committed_old_estimator | 0.15958839305898267 |  | `data/results/m6_recovery_grid/recovery_grid.csv` | `d01f5e4` |
+| 4b | morans_i_output_median_of_draw_means | 0.9407312808464919 |  | `data/results/m6_recovery_grid/recovery_grid.csv` | `d01f5e4` |
+| 4b | recovery_r_median_of_draw_means | 8.464522132189956e-05 |  | `data/results/m6_recovery_grid/recovery_grid.csv` | `d01f5e4` |
+
+Variance components (two-way crossed random effects without replication on the 25 cell means, balanced moment estimators, negatives truncated at 0; structured arms report the variance of the 5 training-seed cell means) are in `figure_numbers.json` under each Figure 3a and 4a entry.
+
+Row-level versus per-draw medians: the 0.00088 recovery_r in Trace 6 (lines 35, 270 and 277 of this file) is the row-level median over the 1,620 sage coordinates_only rows. Figure 4b uses the median over the 81 draws of each draw's 20-tract mean, 8.464522132189956e-05 (8.5e-05).
+
+Figure 4a input Moran's I: the seed-42 field scores 0.15334196178331091 under the current estimator (826c61a and later; recomputed from `data/synthetic/run_20260628_030416/addresses.csv`) and 0.15958839305898267 under the pre-826c61a estimator, as committed in the recovery_grid.csv morans_i_true column, which is not rescored.
+
+Figure 3b: with the crossed randomized arm in place of seed 42, the condition-mean range is 0.7574775988798064 to 0.7675283573898029 (0.757 to 0.768). The earlier 0.757 to 0.765 used the seed-42 randomized arm.

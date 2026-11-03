@@ -1,0 +1,671 @@
+{
+  "milestone": "FIG-P1 B6",
+  "command": "python scripts/build_paper1_figures.py",
+  "build_commit": "c9039a9e1f16f9beabe7659558792f22ef9c19d6",
+  "rounding": "3 decimals, ROUND_HALF_UP via decimal on repr(float)",
+  "bootstrap": {
+    "unit": "tract (20 tracts, resampled with replacement)",
+    "n_resamples": 2000,
+    "interval": "percentile 95%",
+    "rng": "numpy default_rng",
+    "seed": 20261101
+  },
+  "figure_4a_status": "built",
+  "figure_2b": "not drawn (equivalence margin pending with Dr. Gao)",
+  "numbers": [
+    {
+      "figure": 1,
+      "name": "n_tracts_county",
+      "value": 87.0,
+      "value_rounded": 87.0,
+      "source": "data/results/paper1_figures/hamilton_tracts_svi.geojson",
+      "source_commit": "b0e2a5758660989104b06a3da2df806832a08e1f"
+    },
+    {
+      "figure": 1,
+      "name": "n_tracts_with_svi",
+      "value": 85.0,
+      "value_rounded": 85.0,
+      "source": "data/results/paper1_figures/hamilton_tracts_svi.geojson",
+      "source_commit": "b0e2a5758660989104b06a3da2df806832a08e1f"
+    },
+    {
+      "figure": 1,
+      "name": "n_tracts_paper1",
+      "value": 20.0,
+      "value_rounded": 20.0,
+      "source": "data/results/paper1_figures/hamilton_tracts_svi.geojson",
+      "source_commit": "b0e2a5758660989104b06a3da2df806832a08e1f"
+    },
+    {
+      "figure": 1,
+      "name": "inset_n_nodes",
+      "value": 2089.0,
+      "value_rounded": 2089.0,
+      "source": "data/results/paper1_figures/provenance.json",
+      "source_commit": "b0e2a5758660989104b06a3da2df806832a08e1f"
+    },
+    {
+      "figure": 1,
+      "name": "inset_n_undirected_edges",
+      "value": 13162.0,
+      "value_rounded": 13162.0,
+      "source": "data/results/paper1_figures/provenance.json",
+      "source_commit": "b0e2a5758660989104b06a3da2df806832a08e1f"
+    },
+    {
+      "figure": 1,
+      "name": "inset_full_tract_mean_degree",
+      "value": 12.601244614648158,
+      "value_rounded": 12.601,
+      "source": "data/results/paper1_figures/provenance.json",
+      "source_commit": "b0e2a5758660989104b06a3da2df806832a08e1f"
+    },
+    {
+      "figure": 1,
+      "name": "inset_window_n_nodes",
+      "value": 200.0,
+      "value_rounded": 200.0,
+      "source": "data/results/paper1_figures/provenance.json",
+      "source_commit": "b0e2a5758660989104b06a3da2df806832a08e1f"
+    },
+    {
+      "figure": 1,
+      "name": "inset_window_induced_mean_degree",
+      "value": 10.37,
+      "value_rounded": 10.37,
+      "source": "data/results/paper1_figures/provenance.json",
+      "source_commit": "b0e2a5758660989104b06a3da2df806832a08e1f"
+    },
+    {
+      "figure": 2,
+      "name": "pooled_bg_r_GRANITE",
+      "value": 0.7663784437781533,
+      "value_rounded": 0.766,
+      "source": "data/results/bg_reference_v2/m0_aggregate_v1_v2.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "ci95": [
+        0.6562008448504074,
+        0.8483177412358122
+      ],
+      "ci95_rounded": [
+        0.656,
+        0.848
+      ],
+      "n_bgs": 67,
+      "reference": "v2"
+    },
+    {
+      "figure": 2,
+      "name": "pooled_bg_r_Dasymetric",
+      "value": 0.7966021224941551,
+      "value_rounded": 0.797,
+      "source": "data/results/bg_reference_v2/m0_aggregate_v1_v2.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "ci95": [
+        0.6969647270417941,
+        0.8715551687715076
+      ],
+      "ci95_rounded": [
+        0.697,
+        0.872
+      ],
+      "n_bgs": 67,
+      "reference": "v2"
+    },
+    {
+      "figure": 2,
+      "name": "pooled_bg_r_Pycnophylactic",
+      "value": 0.7603570144782591,
+      "value_rounded": 0.76,
+      "source": "data/results/bg_reference_v2/m0_aggregate_v1_v2.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "ci95": [
+        0.6436486700187483,
+        0.850705948163584
+      ],
+      "ci95_rounded": [
+        0.644,
+        0.851
+      ],
+      "n_bgs": 67,
+      "reference": "v2"
+    },
+    {
+      "figure": 2,
+      "name": "caption_wilcoxon_statistic",
+      "value": 46.0,
+      "value_rounded": 46.0,
+      "source": "data/results/bg_reference_v2/power_analysis_v2_tietol.json",
+      "source_commit": "9b14893cda9a6b08c2e946f0764b57e74c4b32d2",
+      "n_nonzero": 17
+    },
+    {
+      "figure": 2,
+      "name": "caption_wilcoxon_p",
+      "value": 0.14879179284657834,
+      "value_rounded": 0.149,
+      "source": "data/results/bg_reference_v2/power_analysis_v2_tietol.json",
+      "source_commit": "9b14893cda9a6b08c2e946f0764b57e74c4b32d2"
+    },
+    {
+      "figure": 2,
+      "name": "caption_sign_test_n_pos",
+      "value": 6.0,
+      "value_rounded": 6.0,
+      "source": "data/results/bg_reference_v2/power_analysis_v2_tietol.json",
+      "source_commit": "9b14893cda9a6b08c2e946f0764b57e74c4b32d2"
+    },
+    {
+      "figure": 2,
+      "name": "caption_sign_test_n_neg",
+      "value": 11.0,
+      "value_rounded": 11.0,
+      "source": "data/results/bg_reference_v2/power_analysis_v2_tietol.json",
+      "source_commit": "9b14893cda9a6b08c2e946f0764b57e74c4b32d2"
+    },
+    {
+      "figure": 2,
+      "name": "caption_sign_test_p",
+      "value": 0.332305908203125,
+      "value_rounded": 0.332,
+      "source": "data/results/bg_reference_v2/power_analysis_v2_tietol.json",
+      "source_commit": "9b14893cda9a6b08c2e946f0764b57e74c4b32d2"
+    },
+    {
+      "figure": "3a",
+      "name": "morans_i_structured_sage",
+      "value": 0.872302936618014,
+      "value_rounded": 0.872,
+      "source": "data/results/m6_topology_5b/topology_specificity_metrics.json",
+      "source_commit": "04f453ef03997e83fbae02f6706bad74060afd9f",
+      "ci95": [
+        0.7873940462253142,
+        0.9306402500919304
+      ],
+      "ci95_rounded": [
+        0.787,
+        0.931
+      ],
+      "ci_source": "data/results/m6_topology_5b/predictions",
+      "n_cells": 5,
+      "n_tracts": 20,
+      "var_training_seed": 0.00016498833010542439,
+      "sd_training_seed": 0.012844778320602672
+    },
+    {
+      "figure": "3a",
+      "name": "morans_i_randomized_crossed_sage",
+      "value": 0.5036719618533596,
+      "value_rounded": 0.504,
+      "source": "data/results/m6_topology_5b_crossed/trials_incremental.csv",
+      "source_commit": "9be51a6f4117110f4bf3cf0ce64a1b6f1a35a057",
+      "ci95": [
+        0.4337121323994777,
+        0.5711953115778655
+      ],
+      "ci95_rounded": [
+        0.434,
+        0.571
+      ],
+      "ci_source": "data/results/m6_topology_5b_crossed/predictions",
+      "n_cells": 25,
+      "n_tracts": 20,
+      "variance_components": {
+        "estimator": "two-way crossed random effects, no replication, balanced moment estimators",
+        "n_training_seeds": 5,
+        "n_graph_draws": 5,
+        "ms_training_seed": 0.040384706200262376,
+        "ms_graph_draw": 0.00025127934969336083,
+        "ms_residual": 0.00013240373610818774,
+        "var_training_seed_raw": 0.008050460492830838,
+        "var_graph_draw_raw": 2.377512271703462e-05,
+        "var_training_seed": 0.008050460492830838,
+        "var_graph_draw": 2.377512271703462e-05,
+        "var_residual_interaction": 0.00013240373610818774
+      }
+    },
+    {
+      "figure": "3a",
+      "name": "morans_i_structured_gcn_gat",
+      "value": 0.8844982987957074,
+      "value_rounded": 0.884,
+      "source": "data/results/m6_topology_5b/topology_specificity_metrics.json",
+      "source_commit": "04f453ef03997e83fbae02f6706bad74060afd9f",
+      "ci95": [
+        0.7888894673251794,
+        0.9490831322455904
+      ],
+      "ci95_rounded": [
+        0.789,
+        0.949
+      ],
+      "ci_source": "data/results/m6_topology_5b/predictions",
+      "n_cells": 5,
+      "n_tracts": 20,
+      "var_training_seed": 0.00013522665961376363,
+      "sd_training_seed": 0.011628699824733787
+    },
+    {
+      "figure": "3a",
+      "name": "morans_i_randomized_crossed_gcn_gat",
+      "value": 0.07112015012780679,
+      "value_rounded": 0.071,
+      "source": "data/results/m6_topology_5b_crossed/trials_incremental.csv",
+      "source_commit": "9be51a6f4117110f4bf3cf0ce64a1b6f1a35a057",
+      "ci95": [
+        0.0550308239773037,
+        0.08930574958485718
+      ],
+      "ci95_rounded": [
+        0.055,
+        0.089
+      ],
+      "ci_source": "data/results/m6_topology_5b_crossed/predictions",
+      "n_cells": 25,
+      "n_tracts": 20,
+      "variance_components": {
+        "estimator": "two-way crossed random effects, no replication, balanced moment estimators",
+        "n_training_seeds": 5,
+        "n_graph_draws": 5,
+        "ms_training_seed": 0.0012341890248448461,
+        "ms_graph_draw": 2.510559876054561e-05,
+        "ms_residual": 3.34898429808943e-05,
+        "var_training_seed_raw": 0.00024013983637279036,
+        "var_graph_draw_raw": -1.6768488440697378e-06,
+        "var_training_seed": 0.00024013983637279036,
+        "var_graph_draw": 0.0,
+        "var_residual_interaction": 3.34898429808943e-05
+      }
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_production_sage",
+      "value": 0.7578635160961603,
+      "value_rounded": 0.758,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "set": "5b",
+      "n_cells": 5,
+      "sd_across_cells": 0.0056925216207293,
+      "n_bgs": 67,
+      "intervals": "absent from source file"
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_road_network_uniform_sage",
+      "value": 0.7574775988798064,
+      "value_rounded": 0.757,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "set": "5b",
+      "n_cells": 5,
+      "sd_across_cells": 0.0031048152676845,
+      "n_bgs": 67,
+      "intervals": "absent from source file"
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_spatial_knn_uniform_sage",
+      "value": 0.758372306683623,
+      "value_rounded": 0.758,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "set": "5b",
+      "n_cells": 5,
+      "sd_across_cells": 0.0072451460286074,
+      "n_bgs": 67,
+      "intervals": "absent from source file"
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_randomized_sage",
+      "value": 0.7675283573898029,
+      "value_rounded": 0.768,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "set": "crossed",
+      "n_cells": 25,
+      "sd_across_cells": 0.0114385295904067,
+      "n_bgs": 67,
+      "intervals": "absent from source file"
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_production_gcn_gat",
+      "value": 0.7595399761652136,
+      "value_rounded": 0.76,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "set": "5b",
+      "n_cells": 5,
+      "sd_across_cells": 0.0166008008434206,
+      "n_bgs": 67,
+      "intervals": "absent from source file"
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_road_network_uniform_gcn_gat",
+      "value": 0.7605008243664212,
+      "value_rounded": 0.761,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "set": "5b",
+      "n_cells": 5,
+      "sd_across_cells": 0.0147067000828382,
+      "n_bgs": 67,
+      "intervals": "absent from source file"
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_spatial_knn_uniform_gcn_gat",
+      "value": 0.7623512588708399,
+      "value_rounded": 0.762,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "set": "5b",
+      "n_cells": 5,
+      "sd_across_cells": 0.0210780680621223,
+      "n_bgs": 67,
+      "intervals": "absent from source file"
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_randomized_gcn_gat",
+      "value": 0.7600588552630267,
+      "value_rounded": 0.76,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8",
+      "set": "crossed",
+      "n_cells": 25,
+      "sd_across_cells": 0.0024044437997058,
+      "n_bgs": 67,
+      "intervals": "absent from source file"
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_range_min",
+      "value": 0.7574775988798064,
+      "value_rounded": 0.757,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8"
+    },
+    {
+      "figure": "3b",
+      "name": "pooled_bg_r_range_max",
+      "value": 0.7675283573898029,
+      "value_rounded": 0.768,
+      "source": "data/results/bg_reference_v2/rescored_condition_means.csv",
+      "source_commit": "3723706614344426667a94be8087d3da4010b7f8"
+    },
+    {
+      "figure": "4a",
+      "name": "ceiling_gbm_seed42_tract_mean",
+      "value": 0.22580497938891897,
+      "value_rounded": 0.226,
+      "source": "data/results/m6_recovery_grid/recovery_grid.csv",
+      "source_commit": "d01f5e4320a27ab98415537b5f626b3f3dfa74bb",
+      "cell": "latent/strong/medium/default",
+      "seed": 42,
+      "n_tracts": 20
+    },
+    {
+      "figure": "4a",
+      "name": "recovery_r_spatial_knn_uniform_sage",
+      "value": 0.0017048611628437175,
+      "value_rounded": 0.002,
+      "source": "data/results/m6_fig4_randomization/tract_rows.csv",
+      "source_commit": "c9039a9e1f16f9beabe7659558792f22ef9c19d6",
+      "ci95": [
+        -0.014034549133982702,
+        0.014583164031781982
+      ],
+      "ci95_rounded": [
+        -0.014,
+        0.015
+      ],
+      "n_cells": 5,
+      "n_tracts": 20,
+      "runtime_s_total": 4113.974235296249,
+      "runtime_s_mean_per_cell": 822.7948470592498,
+      "var_training_seed": 0.0002253253468865573
+    },
+    {
+      "figure": "4a",
+      "name": "morans_i_output_spatial_knn_uniform_sage",
+      "value": 0.9520572816056626,
+      "value_rounded": 0.952,
+      "source": "data/results/m6_fig4_randomization/tract_rows.csv",
+      "source_commit": "c9039a9e1f16f9beabe7659558792f22ef9c19d6",
+      "ci95": [
+        0.8675958471767207,
+        0.9950162587379163
+      ],
+      "ci95_rounded": [
+        0.868,
+        0.995
+      ],
+      "n_cells": 5,
+      "n_tracts": 20,
+      "runtime_s_total": 4113.974235296249,
+      "runtime_s_mean_per_cell": 822.7948470592498,
+      "var_training_seed": 0.00019005624186049504
+    },
+    {
+      "figure": "4a",
+      "name": "recovery_r_randomized_sage",
+      "value": 0.012340346991031289,
+      "value_rounded": 0.012,
+      "source": "data/results/m6_fig4_randomization/tract_rows.csv",
+      "source_commit": "c9039a9e1f16f9beabe7659558792f22ef9c19d6",
+      "ci95": [
+        0.0028344450520155383,
+        0.02320597013421232
+      ],
+      "ci95_rounded": [
+        0.003,
+        0.023
+      ],
+      "n_cells": 25,
+      "n_tracts": 20,
+      "runtime_s_total": 21136.183905363083,
+      "runtime_s_mean_per_cell": 845.4473562145233,
+      "variance_components": {
+        "estimator": "two-way crossed random effects, no replication, balanced moment estimators",
+        "n_training_seeds": 5,
+        "n_graph_draws": 5,
+        "ms_training_seed": 0.00026303653559631694,
+        "ms_graph_draw": 1.297902199042658e-05,
+        "ms_residual": 1.848870320840689e-05,
+        "var_training_seed_raw": 4.890956647758201e-05,
+        "var_graph_draw_raw": -1.1019362435960618e-06,
+        "var_training_seed": 4.890956647758201e-05,
+        "var_graph_draw": 0.0,
+        "var_residual_interaction": 1.848870320840689e-05
+      }
+    },
+    {
+      "figure": "4a",
+      "name": "morans_i_output_randomized_sage",
+      "value": 0.7732004267874585,
+      "value_rounded": 0.773,
+      "source": "data/results/m6_fig4_randomization/tract_rows.csv",
+      "source_commit": "c9039a9e1f16f9beabe7659558792f22ef9c19d6",
+      "ci95": [
+        0.7014405817071755,
+        0.8193538094070724
+      ],
+      "ci95_rounded": [
+        0.701,
+        0.819
+      ],
+      "n_cells": 25,
+      "n_tracts": 20,
+      "runtime_s_total": 21136.183905363083,
+      "runtime_s_mean_per_cell": 845.4473562145233,
+      "variance_components": {
+        "estimator": "two-way crossed random effects, no replication, balanced moment estimators",
+        "n_training_seeds": 5,
+        "n_graph_draws": 5,
+        "ms_training_seed": 0.022815463404935787,
+        "ms_graph_draw": 0.00019667773175959254,
+        "ms_residual": 0.00011536200705185867,
+        "var_training_seed_raw": 0.004540020279576786,
+        "var_graph_draw_raw": 1.626314494154677e-05,
+        "var_training_seed": 0.004540020279576786,
+        "var_graph_draw": 1.626314494154677e-05,
+        "var_residual_interaction": 0.00011536200705185867
+      }
+    },
+    {
+      "figure": "4a",
+      "name": "recovery_r_spatial_knn_uniform_gcn_gat",
+      "value": -0.007742632991789661,
+      "value_rounded": -0.008,
+      "source": "data/results/m6_fig4_randomization/tract_rows.csv",
+      "source_commit": "c9039a9e1f16f9beabe7659558792f22ef9c19d6",
+      "ci95": [
+        -0.01850681735407705,
+        0.0023571761309547647
+      ],
+      "ci95_rounded": [
+        -0.019,
+        0.002
+      ],
+      "n_cells": 5,
+      "n_tracts": 20,
+      "runtime_s_total": 4143.86238360405,
+      "runtime_s_mean_per_cell": 828.7724767208099,
+      "var_training_seed": 6.0945773545099564e-05
+    },
+    {
+      "figure": "4a",
+      "name": "morans_i_output_spatial_knn_uniform_gcn_gat",
+      "value": 0.9541605378327782,
+      "value_rounded": 0.954,
+      "source": "data/results/m6_fig4_randomization/tract_rows.csv",
+      "source_commit": "c9039a9e1f16f9beabe7659558792f22ef9c19d6",
+      "ci95": [
+        0.8791418809942979,
+        0.9946291878504451
+      ],
+      "ci95_rounded": [
+        0.879,
+        0.995
+      ],
+      "n_cells": 5,
+      "n_tracts": 20,
+      "runtime_s_total": 4143.86238360405,
+      "runtime_s_mean_per_cell": 828.7724767208099,
+      "var_training_seed": 0.00010072173752329896
+    },
+    {
+      "figure": "4a",
+      "name": "recovery_r_randomized_gcn_gat",
+      "value": -0.0036855233496790956,
+      "value_rounded": -0.004,
+      "source": "data/results/m6_fig4_randomization/tract_rows.csv",
+      "source_commit": "c9039a9e1f16f9beabe7659558792f22ef9c19d6",
+      "ci95": [
+        -0.011497168500558937,
+        0.003274627801836087
+      ],
+      "ci95_rounded": [
+        -0.011,
+        0.003
+      ],
+      "n_cells": 25,
+      "n_tracts": 20,
+      "runtime_s_total": 21609.04834318161,
+      "runtime_s_mean_per_cell": 864.3619337272644,
+      "variance_components": {
+        "estimator": "two-way crossed random effects, no replication, balanced moment estimators",
+        "n_training_seeds": 5,
+        "n_graph_draws": 5,
+        "ms_training_seed": 0.00011389554367063493,
+        "ms_graph_draw": 5.773063379593089e-06,
+        "ms_residual": 3.419464776906731e-05,
+        "var_training_seed_raw": 1.5940179180313524e-05,
+        "var_graph_draw_raw": -5.684316877894845e-06,
+        "var_training_seed": 1.5940179180313524e-05,
+        "var_graph_draw": 0.0,
+        "var_residual_interaction": 3.419464776906731e-05
+      }
+    },
+    {
+      "figure": "4a",
+      "name": "morans_i_output_randomized_gcn_gat",
+      "value": 0.14711036415201947,
+      "value_rounded": 0.147,
+      "source": "data/results/m6_fig4_randomization/tract_rows.csv",
+      "source_commit": "c9039a9e1f16f9beabe7659558792f22ef9c19d6",
+      "ci95": [
+        0.13057616169488612,
+        0.16541700539290558
+      ],
+      "ci95_rounded": [
+        0.131,
+        0.165
+      ],
+      "n_cells": 25,
+      "n_tracts": 20,
+      "runtime_s_total": 21609.04834318161,
+      "runtime_s_mean_per_cell": 864.3619337272644,
+      "variance_components": {
+        "estimator": "two-way crossed random effects, no replication, balanced moment estimators",
+        "n_training_seeds": 5,
+        "n_graph_draws": 5,
+        "ms_training_seed": 0.0027442795445752023,
+        "ms_graph_draw": 0.0002667231533058248,
+        "ms_residual": 8.796007199904697e-05,
+        "var_training_seed_raw": 0.000531263894515231,
+        "var_graph_draw_raw": 3.575261626135557e-05,
+        "var_training_seed": 0.000531263894515231,
+        "var_graph_draw": 3.575261626135557e-05,
+        "var_residual_interaction": 8.796007199904697e-05
+      }
+    },
+    {
+      "figure": "4a",
+      "name": "field_seed42_morans_i_true_current_estimator",
+      "value": 0.15334196178331091,
+      "value_rounded": 0.153,
+      "source": "data/synthetic/run_20260628_030416/addresses.csv",
+      "source_commit": "0cb231eea2cbcab7e6cff102a1e58ca54576d36a",
+      "estimator": "current (826c61a and later): libpysal KNN k=8 on generator UTM x, y, transform 'r', esda.Moran permutations=0",
+      "aggregation": "unweighted mean over the 20 Paper 1 tracts",
+      "n_tracts": 20
+    },
+    {
+      "figure": "4a",
+      "name": "field_seed42_morans_i_true_committed_old_estimator",
+      "value": 0.15958839305898267,
+      "value_rounded": 0.16,
+      "source": "data/results/m6_recovery_grid/recovery_grid.csv",
+      "source_commit": "d01f5e4320a27ab98415537b5f626b3f3dfa74bb",
+      "estimator": "pre-826c61a (inverse-distance k=8, 2dc231f), as committed in recovery_grid.csv morans_i_true; not rescored",
+      "aggregation": "unweighted mean over the 20 Paper 1 tracts",
+      "n_tracts": 20
+    },
+    {
+      "figure": "4b",
+      "name": "morans_i_output_median_of_draw_means",
+      "value": 0.9407312808464919,
+      "value_rounded": 0.941,
+      "source": "data/results/m6_recovery_grid/recovery_grid.csv",
+      "source_commit": "d01f5e4320a27ab98415537b5f626b3f3dfa74bb",
+      "n_draws": 81,
+      "aggregation": "per-draw mean over 20 tracts, median over 81 draws"
+    },
+    {
+      "figure": "4b",
+      "name": "recovery_r_median_of_draw_means",
+      "value": 8.464522132189956e-05,
+      "value_rounded": 0.0,
+      "source": "data/results/m6_recovery_grid/recovery_grid.csv",
+      "source_commit": "d01f5e4320a27ab98415537b5f626b3f3dfa74bb",
+      "n_draws": 81,
+      "aggregation": "per-draw mean over 20 tracts, median over 81 draws"
+    }
+  ]
+}

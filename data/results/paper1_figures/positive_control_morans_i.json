@@ -1,0 +1,484 @@
+{
+  "milestone": "POSCTRL-P1",
+  "statistic": "ceiling_gbm mean per-tract output Moran's I on out-of-fold predictions",
+  "estimator": "run_grid._compute_morans_i_output -> SpatialLearningDiagnostics.compute_spatial_autocorrelation: libpysal KNN.from_array k=8 on EPSG:4326 address coordinates (address_gdf geometry), transform 'r', esda.Moran permutations=0; identical call to experiments/m6_recovery_grid/run_fig4.py",
+  "aggregation": "unweighted mean over the 20 Paper 1 tracts",
+  "granite_comparator": "spatial_knn_uniform sage, data/results/m6_fig4_randomization/tract_rows.csv; per-tract mean over 5 training seeds",
+  "ceiling_method": "run_grid._ceiling_gbm_r unchanged: z-scored generator UTM x, y; KFold(n_splits=5, shuffle=True, random_state=42); GradientBoostingRegressor(n_estimators=200, max_depth=4, learning_rate=0.05, random_state=42); r is Pearson r of the concatenated OOF predictions",
+  "alignment": "OOF predictions (generator row order) mapped by address hash onto DataLoader.get_addresses_for_tract order; coordinates asserted equal to the Figure 4a npz coords and aligned y_true asserted equal to the npz y_true for every tract",
+  "provenance": {
+    "field_dir": "data/synthetic/run_20260628_030416",
+    "field_commit": "0cb231eea2cbcab7e6cff102a1e58ca54576d36a",
+    "generator_commit": "0351298",
+    "head": "1200586e92f49598097a50725817c1c33d0ff27a",
+    "cell": {
+      "signal_source": "latent",
+      "autocorr": "strong",
+      "snr": "medium",
+      "between_tract": "default"
+    },
+    "data_seed": 42,
+    "ytrue_rescale_min": -9.669131008144344,
+    "ytrue_rescale_max": 9.19319289695297,
+    "fold_seed": 42,
+    "bootstrap_seed": 20261102,
+    "n_boot": 2000,
+    "bootstrap": "tract-clustered percentile, same resample indices for every statistic",
+    "packages": {
+      "scikit-learn": "1.8.0",
+      "numpy": "2.4.2",
+      "pandas": "3.0.1",
+      "scipy": "1.17.1",
+      "geopandas": "1.1.2",
+      "shapely": "2.1.2",
+      "pyogrio": "0.12.1",
+      "libpysal": "4.14.1",
+      "esda": "2.9.0",
+      "torch": "2.10.0+cpu"
+    },
+    "requirements_commit": "fa3ba45",
+    "figure4_commits": [
+      "5fe70f9",
+      "c9039a9",
+      "3e63f25"
+    ]
+  },
+  "anchor": {
+    "rule": "pre-registered anchors and bands, no re-anchor (truth within 0.005 of 0.153)",
+    "I_truth_used": 0.153,
+    "I_granite_used": 0.952,
+    "I_truth_item4_call_recomputed": 0.1528145314554042,
+    "I_truth_utm_figure_numbers": 0.15334196178331091,
+    "I_granite_figure_numbers": 0.9520572816056626
+  },
+  "reproduction_gate": {
+    "decision": {
+      "date": "2026-11-09",
+      "by": "Jamion (logged in the tracker before any ceiling Moran's I was seen)",
+      "text": "The reference of record for ceiling_gbm is the recompute under the pinned fa3ba45 environment (/workspaces/venv_figp1). The committed June rows (2dc231f) ran in an environment that was not pinned. Their deviation from the recompute is a known deviation: at most 3.77e-04 (47065003400) across the 11 tracts listed in the POSCTRL-P1 report. This follows the B2 precedent. The pre-registered statistic, bands, anchors (I_truth = 0.153, I_GRANITE = 0.952) and aggregation (unweighted mean over all 20 tracts, 47065011324 included) are unchanged."
+    },
+    "criterion": "determinism: two in-process recomputes bit-identical per tract (r and OOF vector); known deviation: |recompute - committed june recovery_grid.csv (2dc231f) r| <= 0.00038 per tract",
+    "reference_of_record": "recompute under fa3ba45 (/workspaces/venv_figp1)",
+    "determinism_pass": true,
+    "known_deviation_pass": true,
+    "pass": true,
+    "max_abs_diff": 0.0003770358528910611,
+    "max_abs_diff_tract": "47065003400",
+    "per_tract": [
+      {
+        "tract_fips": "47065000600",
+        "recovery_r_committed_june": 0.1953260749781859,
+        "recovery_r_recomputed": 0.19538263298329922,
+        "recovery_r_recomputed_rerun": 0.19538263298329922,
+        "deterministic": true,
+        "abs_diff": 5.655800511331077e-05,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065000700",
+        "recovery_r_committed_june": 0.242044249506611,
+        "recovery_r_recomputed": 0.24204424950661108,
+        "recovery_r_recomputed_rerun": 0.24204424950661108,
+        "deterministic": true,
+        "abs_diff": 8.326672684688674e-17,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065001200",
+        "recovery_r_committed_june": 0.1087990024775981,
+        "recovery_r_recomputed": 0.10887910328627597,
+        "recovery_r_recomputed_rerun": 0.10887910328627597,
+        "deterministic": true,
+        "abs_diff": 8.01008086778604e-05,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065001800",
+        "recovery_r_committed_june": 0.1820503365556425,
+        "recovery_r_recomputed": 0.18205033655564248,
+        "recovery_r_recomputed_rerun": 0.18205033655564248,
+        "deterministic": true,
+        "abs_diff": 2.7755575615628914e-17,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065001900",
+        "recovery_r_committed_june": 0.1987555028352347,
+        "recovery_r_recomputed": 0.19875550283523483,
+        "recovery_r_recomputed_rerun": 0.19875550283523483,
+        "deterministic": true,
+        "abs_diff": 1.3877787807814457e-16,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065002400",
+        "recovery_r_committed_june": 0.1926385203787448,
+        "recovery_r_recomputed": 0.19263852037874485,
+        "recovery_r_recomputed_rerun": 0.19263852037874485,
+        "deterministic": true,
+        "abs_diff": 5.551115123125783e-17,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065003400",
+        "recovery_r_committed_june": 0.2744421391667062,
+        "recovery_r_recomputed": 0.27481917501959724,
+        "recovery_r_recomputed_rerun": 0.27481917501959724,
+        "deterministic": true,
+        "abs_diff": 0.0003770358528910611,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065010431",
+        "recovery_r_committed_june": 0.2378629009760098,
+        "recovery_r_recomputed": 0.23796234908230118,
+        "recovery_r_recomputed_rerun": 0.23796234908230118,
+        "deterministic": true,
+        "abs_diff": 9.944810629139433e-05,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065010433",
+        "recovery_r_committed_june": 0.218932384073934,
+        "recovery_r_recomputed": 0.21915933569518703,
+        "recovery_r_recomputed_rerun": 0.21915933569518703,
+        "deterministic": true,
+        "abs_diff": 0.00022695162125302426,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065010435",
+        "recovery_r_committed_june": 0.2356837573248666,
+        "recovery_r_recomputed": 0.23568375732486666,
+        "recovery_r_recomputed_rerun": 0.23568375732486666,
+        "deterministic": true,
+        "abs_diff": 5.551115123125783e-17,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011311",
+        "recovery_r_committed_june": 0.2255217363605624,
+        "recovery_r_recomputed": 0.22545571232514033,
+        "recovery_r_recomputed_rerun": 0.22545571232514033,
+        "deterministic": true,
+        "abs_diff": 6.60240354220798e-05,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011321",
+        "recovery_r_committed_june": 0.2782083517827373,
+        "recovery_r_recomputed": 0.27820329530614335,
+        "recovery_r_recomputed_rerun": 0.27820329530614335,
+        "deterministic": true,
+        "abs_diff": 5.056476593934267e-06,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011324",
+        "recovery_r_committed_june": 0.2579414957915963,
+        "recovery_r_recomputed": 0.25794149579159636,
+        "recovery_r_recomputed_rerun": 0.25794149579159636,
+        "deterministic": true,
+        "abs_diff": 5.551115123125783e-17,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011325",
+        "recovery_r_committed_june": 0.2070936471693786,
+        "recovery_r_recomputed": 0.20709364716937864,
+        "recovery_r_recomputed_rerun": 0.20709364716937864,
+        "deterministic": true,
+        "abs_diff": 5.551115123125783e-17,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011326",
+        "recovery_r_committed_june": 0.2352005445178399,
+        "recovery_r_recomputed": 0.23520702952388275,
+        "recovery_r_recomputed_rerun": 0.23520702952388275,
+        "deterministic": true,
+        "abs_diff": 6.4850060428611744e-06,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011402",
+        "recovery_r_committed_june": 0.2285744520277718,
+        "recovery_r_recomputed": 0.22857445202777182,
+        "recovery_r_recomputed_rerun": 0.22857445202777182,
+        "deterministic": true,
+        "abs_diff": 2.7755575615628914e-17,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011413",
+        "recovery_r_committed_june": 0.2251496762303858,
+        "recovery_r_recomputed": 0.22515101940587254,
+        "recovery_r_recomputed_rerun": 0.22515101940587254,
+        "deterministic": true,
+        "abs_diff": 1.3431754867510026e-06,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011444",
+        "recovery_r_committed_june": 0.1686138840761278,
+        "recovery_r_recomputed": 0.16861388407612793,
+        "recovery_r_recomputed_rerun": 0.16861388407612793,
+        "deterministic": true,
+        "abs_diff": 1.3877787807814457e-16,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011447",
+        "recovery_r_committed_june": 0.2479304359838745,
+        "recovery_r_recomputed": 0.24793029180890225,
+        "recovery_r_recomputed_rerun": 0.24793029180890225,
+        "deterministic": true,
+        "abs_diff": 1.4417497223861986e-07,
+        "within_known_deviation": true
+      },
+      {
+        "tract_fips": "47065011900",
+        "recovery_r_committed_june": 0.3553304955645722,
+        "recovery_r_recomputed": 0.355395176891367,
+        "recovery_r_recomputed_rerun": 0.355395176891367,
+        "deterministic": true,
+        "abs_diff": 6.46813267948243e-05,
+        "within_known_deviation": true
+      }
+    ]
+  },
+  "aggregate": {
+    "ceiling_recovery_r": {
+      "mean": 0.22584704834969718,
+      "ci95": [
+        0.20486680947816316,
+        0.24648859237076032
+      ]
+    },
+    "ceiling_morans_i_output": {
+      "mean": 0.5006445894908286,
+      "ci95": [
+        0.4316946299094006,
+        0.5533529319359604
+      ]
+    },
+    "y_true_morans_i": {
+      "mean": 0.1528145314554042,
+      "ci95": [
+        0.12305517988159151,
+        0.17165406050579834
+      ]
+    },
+    "granite_morans_i_output": {
+      "mean": 0.9520572816056626,
+      "ci95": [
+        0.8678252923902451,
+        0.9950163632736905
+      ]
+    },
+    "diff_ceiling_minus_granite": {
+      "mean": -0.4514126921148341,
+      "ci95": [
+        -0.49761748760781704,
+        -0.4018604114073973
+      ]
+    }
+  },
+  "signal_component": "not persisted (field columns: fips, address_hash, x, y, y_true)",
+  "p": {
+    "point": 0.43509961137775793,
+    "ci95_anchor_fixed": [
+      0.34880429275269165,
+      0.501067499294068
+    ],
+    "ci95_joint_resampled_truth_and_granite": [
+      0.39180970756919953,
+      0.48061867583207685
+    ],
+    "band_point_estimate": "C",
+    "band_reported": "C",
+    "band_rule": "A if p >= 0.8; C if 0.2 < p < 0.8; B if p <= 0.2; interval crossing a band edge reports as C (anchor-fixed interval)"
+  },
+  "per_tract": [
+    {
+      "tract_fips": "47065000600",
+      "n_addresses": 2089,
+      "ceiling_recovery_r": 0.19538263298329922,
+      "ceiling_morans_i_output": 0.5465910793068344,
+      "y_true_morans_i": 0.15241451592595517,
+      "granite_morans_i_output_seedmean": 0.9929413242906111,
+      "diff_ceiling_minus_granite": -0.44635024498377673
+    },
+    {
+      "tract_fips": "47065000700",
+      "n_addresses": 1784,
+      "ceiling_recovery_r": 0.24204424950661108,
+      "ceiling_morans_i_output": 0.542196257477341,
+      "y_true_morans_i": 0.16674574204307632,
+      "granite_morans_i_output_seedmean": 0.9869254620567425,
+      "diff_ceiling_minus_granite": -0.44472920457940146
+    },
+    {
+      "tract_fips": "47065001200",
+      "n_addresses": 1420,
+      "ceiling_recovery_r": 0.10887910328627597,
+      "ceiling_morans_i_output": 0.4124346549413227,
+      "y_true_morans_i": 0.12441641057355643,
+      "granite_morans_i_output_seedmean": 0.9955725552257084,
+      "diff_ceiling_minus_granite": -0.5831379002843857
+    },
+    {
+      "tract_fips": "47065001800",
+      "n_addresses": 1411,
+      "ceiling_recovery_r": 0.18205033655564248,
+      "ceiling_morans_i_output": 0.4028356612138024,
+      "y_true_morans_i": 0.13226991385101944,
+      "granite_morans_i_output_seedmean": 0.9911261253524462,
+      "diff_ceiling_minus_granite": -0.5882904641386437
+    },
+    {
+      "tract_fips": "47065001900",
+      "n_addresses": 2469,
+      "ceiling_recovery_r": 0.19875550283523483,
+      "ceiling_morans_i_output": 0.48690441942426643,
+      "y_true_morans_i": 0.1719223658645947,
+      "granite_morans_i_output_seedmean": 0.9981091127739639,
+      "diff_ceiling_minus_granite": -0.5112046933496974
+    },
+    {
+      "tract_fips": "47065002400",
+      "n_addresses": 1918,
+      "ceiling_recovery_r": 0.19263852037874485,
+      "ceiling_morans_i_output": 0.42900128115820685,
+      "y_true_morans_i": 0.1548316145846358,
+      "granite_morans_i_output_seedmean": 0.9940345533011795,
+      "diff_ceiling_minus_granite": -0.5650332721429727
+    },
+    {
+      "tract_fips": "47065003400",
+      "n_addresses": 2559,
+      "ceiling_recovery_r": 0.27481917501959724,
+      "ceiling_morans_i_output": 0.6886412593049943,
+      "y_true_morans_i": 0.177304791154652,
+      "granite_morans_i_output_seedmean": 0.9912752699650882,
+      "diff_ceiling_minus_granite": -0.3026340106600939
+    },
+    {
+      "tract_fips": "47065010431",
+      "n_addresses": 3394,
+      "ceiling_recovery_r": 0.23796234908230118,
+      "ceiling_morans_i_output": 0.5805044563839395,
+      "y_true_morans_i": 0.16821498765124862,
+      "granite_morans_i_output_seedmean": 0.9973440752455444,
+      "diff_ceiling_minus_granite": -0.4168396188616048
+    },
+    {
+      "tract_fips": "47065010433",
+      "n_addresses": 2307,
+      "ceiling_recovery_r": 0.21915933569518703,
+      "ceiling_morans_i_output": 0.5134909050776617,
+      "y_true_morans_i": 0.16064137405076317,
+      "granite_morans_i_output_seedmean": 0.9920918970957899,
+      "diff_ceiling_minus_granite": -0.4786009920181282
+    },
+    {
+      "tract_fips": "47065010435",
+      "n_addresses": 2780,
+      "ceiling_recovery_r": 0.23568375732486666,
+      "ceiling_morans_i_output": 0.6072505266193856,
+      "y_true_morans_i": 0.17348150476512053,
+      "granite_morans_i_output_seedmean": 0.9978135596978779,
+      "diff_ceiling_minus_granite": -0.39056303307849227
+    },
+    {
+      "tract_fips": "47065011311",
+      "n_addresses": 2358,
+      "ceiling_recovery_r": 0.22545571232514033,
+      "ceiling_morans_i_output": 0.5908445065448794,
+      "y_true_morans_i": 0.1601832953588923,
+      "granite_morans_i_output_seedmean": 0.9982154812003851,
+      "diff_ceiling_minus_granite": -0.40737097465550565
+    },
+    {
+      "tract_fips": "47065011321",
+      "n_addresses": 3756,
+      "ceiling_recovery_r": 0.27820329530614335,
+      "ceiling_morans_i_output": 0.6903920306008083,
+      "y_true_morans_i": 0.18877478726052302,
+      "granite_morans_i_output_seedmean": 0.9966502641426512,
+      "diff_ceiling_minus_granite": -0.3062582335418429
+    },
+    {
+      "tract_fips": "47065011324",
+      "n_addresses": 18,
+      "ceiling_recovery_r": 0.25794149579159636,
+      "ceiling_morans_i_output": 0.027256759203200014,
+      "y_true_morans_i": -0.0917335959907413,
+      "granite_morans_i_output_seedmean": 0.15837691089134873,
+      "diff_ceiling_minus_granite": -0.13112015168814872
+    },
+    {
+      "tract_fips": "47065011325",
+      "n_addresses": 1099,
+      "ceiling_recovery_r": 0.20709364716937864,
+      "ceiling_morans_i_output": 0.41206746683656564,
+      "y_true_morans_i": 0.169936993456105,
+      "granite_morans_i_output_seedmean": 0.9884743520403128,
+      "diff_ceiling_minus_granite": -0.5764068852037472
+    },
+    {
+      "tract_fips": "47065011326",
+      "n_addresses": 2738,
+      "ceiling_recovery_r": 0.23520702952388275,
+      "ceiling_morans_i_output": 0.5791787340468563,
+      "y_true_morans_i": 0.16237692125359485,
+      "granite_morans_i_output_seedmean": 0.9980804789349337,
+      "diff_ceiling_minus_granite": -0.4189017448880774
+    },
+    {
+      "tract_fips": "47065011402",
+      "n_addresses": 2858,
+      "ceiling_recovery_r": 0.22857445202777182,
+      "ceiling_morans_i_output": 0.5684838378568505,
+      "y_true_morans_i": 0.1634079084637621,
+      "granite_morans_i_output_seedmean": 0.995291953424811,
+      "diff_ceiling_minus_granite": -0.4268081155679605
+    },
+    {
+      "tract_fips": "47065011413",
+      "n_addresses": 1442,
+      "ceiling_recovery_r": 0.22515101940587254,
+      "ceiling_morans_i_output": 0.48788191121316143,
+      "y_true_morans_i": 0.17403532963051177,
+      "granite_morans_i_output_seedmean": 0.9935485509881202,
+      "diff_ceiling_minus_granite": -0.5056666397749587
+    },
+    {
+      "tract_fips": "47065011444",
+      "n_addresses": 1934,
+      "ceiling_recovery_r": 0.16861388407612793,
+      "ceiling_morans_i_output": 0.4688927944448066,
+      "y_true_morans_i": 0.14890763779247745,
+      "granite_morans_i_output_seedmean": 0.9974747250655532,
+      "diff_ceiling_minus_granite": -0.5285819306207467
+    },
+    {
+      "tract_fips": "47065011447",
+      "n_addresses": 853,
+      "ceiling_recovery_r": 0.24793029180890225,
+      "ceiling_morans_i_output": 0.4020664914833685,
+      "y_true_morans_i": 0.1866204929892594,
+      "granite_morans_i_output_seedmean": 0.9894674775119435,
+      "diff_ceiling_minus_granite": -0.587400986028575
+    },
+    {
+      "tract_fips": "47065011900",
+      "n_addresses": 348,
+      "ceiling_recovery_r": 0.355395176891367,
+      "ceiling_morans_i_output": 0.5759767566783175,
+      "y_true_morans_i": 0.21153763842907736,
+      "granite_morans_i_output_seedmean": 0.9883315029082377,
+      "diff_ceiling_minus_granite": -0.4123547462299202
+    }
+  ]
+}

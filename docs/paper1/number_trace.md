@@ -650,3 +650,21 @@ C2 variance components, reported separately (no pooling). Tract: bootstrap varia
 | gcn_gat | z | 8.049e-04 | 2.454e-03 | 9.214e-08 | `C2.gcn_gat.variance_components.{tract.d_z.bootstrap_var, z_scale.*.difference_var}` |
 
 C1 has no seed component: M0 GRANITE carries one training seed (42). C2 carries no equivalence verdict (`C2.*.verdict` is null). Regeneration: two runs of the script produce byte-identical JSON (sha256 `8e2586746953b109944037e23b84628b6e27d814bf101c7536ab27ad1e01b2d5` at HEAD `d6281ee`); `git_head` in the JSON records the HEAD at generation.
+
+## POSCTRL-P1 positive control
+
+Every number below is written by `python experiments/m6_recovery_grid/run_positive_control.py` (pinned environment, `requirements.txt` at `fa3ba45`) to `data/results/paper1_figures/positive_control_morans_i.json` (JSON key in the table, full precision there). Field: seed-42 M6 cell latent/strong/medium/default, `data/synthetic/run_20260628_030416` (committed `0cb231e`, generator `0351298`). Ceiling: `run_grid._ceiling_gbm_r` unchanged (z-scored UTM x, y; KFold 5, shuffle, seed 42; GBM 200 trees, depth 4, rate 0.05, seed 42), out-of-fold predictions. Moran's I: the Figure 4a call `run_grid._compute_morans_i_output` (libpysal KNN k=8 on EPSG:4326 address coordinates, transform 'r', esda permutations 0). GRANITE comparator: spatial_knn_uniform sage from `data/results/m6_fig4_randomization/tract_rows.csv` (`c9039a9`), per-tract mean over 5 training seeds. Aggregation: unweighted mean over the 20 Paper 1 tracts. Bootstrap: tract-clustered, 2,000 resamples, numpy default_rng seed 20261102, same resample indices for every statistic, percentile CIs. Anchors as pre-registered: I_truth = 0.153, I_GRANITE = 0.952. Display rounding is 4 decimals.
+
+| Number | Value | 95% CI | JSON key |
+|---|---|---|---|
+| ceiling recovery r | 0.2258 | [0.2049, 0.2465] | `aggregate.ceiling_recovery_r` |
+| ceiling output Moran's I | 0.5006 | [0.4317, 0.5534] | `aggregate.ceiling_morans_i_output` |
+| y_true Moran's I (Figure 4a call) | 0.1528 | [0.1231, 0.1717] | `aggregate.y_true_morans_i` |
+| GRANITE output Moran's I | 0.9521 | [0.8678, 0.9950] | `aggregate.granite_morans_i_output` |
+| paired difference, ceiling minus GRANITE | -0.4514 | [-0.4976, -0.4019] | `aggregate.diff_ceiling_minus_granite` |
+| p = (I_ceil - 0.153) / (0.952 - 0.153) | 0.4351 | [0.3488, 0.5011] | `p.point`, `p.ci95_anchor_fixed` |
+| p, truth and GRANITE also resampled | | [0.3918, 0.4806] | `p.ci95_joint_resampled_truth_and_granite` |
+| band | C | | `p.band_reported` |
+| signal component | not persisted | | `signal_component` |
+
+Reproduction gate (decision 2026-11-09, `reproduction_gate.decision`): the recompute under `fa3ba45` is the reference of record; two in-process recomputes are bit-identical on all 20 tracts; the largest deviation from the committed June rows (`2dc231f`) is 3.770e-04 at 47065003400, within the 3.8e-04 bound; per-tract table under `reproduction_gate.per_tract`. The y_true Moran's I here uses EPSG:4326 coordinates (0.152815); the 0.153342 in the FIG-P1 table uses generator UTM x, y. Per-tract values under `per_tract`. Regeneration: two runs of the script produce byte-identical JSON (sha256 `8f3fd56c9bcd795ec5641f6469d93a57b637bca5b2c965c49c1bb3edafbb83bc` at HEAD `1200586`); `provenance.head` records the HEAD at generation.

@@ -1,0 +1,391 @@
+{
+  "milestone": "BOOT-P1",
+  "reference_version": "v2",
+  "n_tracts": 20,
+  "n_bgs": 67,
+  "bgs_per_tract": {
+    "47065011324": 1,
+    "47065000700": 4,
+    "47065011447": 4,
+    "47065011325": 3,
+    "47065000600": 3,
+    "47065011413": 5,
+    "47065011900": 2,
+    "47065010431": 4,
+    "47065010433": 3,
+    "47065011326": 3,
+    "47065001800": 2,
+    "47065011402": 4,
+    "47065011321": 4,
+    "47065011444": 2,
+    "47065010435": 4,
+    "47065011311": 6,
+    "47065003400": 3,
+    "47065002400": 4,
+    "47065001200": 3,
+    "47065001900": 3
+  },
+  "B": 10000,
+  "seed": 20261109,
+  "resampling": "tracts with replacement, numpy default_rng(seed).integers(0, n_tracts, size=(B, n_tracts)); pooled r over all bgs of the drawn tracts with duplicates; percentile CIs via numpy nanpercentile (linear)",
+  "margin": {
+    "q_fisher_z": 0.1,
+    "anchor_r": 0.797,
+    "r_scale_lower": -0.03949531309378673,
+    "r_scale_upper": 0.03368241184813314,
+    "sensitivity_margin_r": 0.03,
+    "spec": "docs/paper1/equivalence_margin_spec.md"
+  },
+  "C1": {
+    "r_GRANITE": {
+      "point": 0.7663784437781533,
+      "ci90": [
+        0.6226649171084127,
+        0.8595895105191291
+      ],
+      "ci95": [
+        0.5907743543447262,
+        0.8761846134226088
+      ],
+      "bootstrap_sd": 0.07287597863912912,
+      "bootstrap_var": 0.005310908262610803,
+      "n_nan_resamples": 0
+    },
+    "r_Dasymetric": {
+      "point": 0.7966021224941551,
+      "ci90": [
+        0.6675144468383721,
+        0.8778554083904785
+      ],
+      "ci95": [
+        0.6389113530340615,
+        0.891188112058799
+      ],
+      "bootstrap_sd": 0.06441735560125002,
+      "bootstrap_var": 0.004149595702657898,
+      "n_nan_resamples": 0
+    },
+    "d_r": {
+      "point": -0.030223678716001734,
+      "ci90": [
+        -0.07124132998441662,
+        0.002440036514398236
+      ],
+      "ci95": [
+        -0.08064824839017014,
+        0.008103576545869634
+      ],
+      "bootstrap_sd": 0.022696182329790704,
+      "bootstrap_var": 0.0005151166923471038,
+      "n_nan_resamples": 0
+    },
+    "d_z": {
+      "point": -0.07775213710810425,
+      "ci90": [
+        -0.1640003162032368,
+        0.006487213553078652
+      ],
+      "ci95": [
+        -0.18071348902172235,
+        0.023135944190840033
+      ],
+      "bootstrap_sd": 0.05201871225191415,
+      "bootstrap_var": 0.0027059464243474433,
+      "n_nan_resamples": 0
+    },
+    "verdict": "small but inconclusive",
+    "verdict_rule": "90% CI of d_z against (-0.10, +0.10), per equivalence_margin_spec.md",
+    "d_r_ci90_within_r_scale_bounds": false,
+    "sensitivity_verdict": "small but inconclusive",
+    "sensitivity_rule": "90% CI of d_r against (-0.03, +0.03)",
+    "n_training_seeds": 1,
+    "training_seed": 42,
+    "seed_component": null,
+    "seed_component_note": "m0 GRANITE carries one training seed; C1 has no seed component"
+  },
+  "C2": {
+    "sage": {
+      "structured_condition": "spatial_knn_uniform",
+      "randomized_condition": "randomized (crossed set)",
+      "r_structured_mean": 0.758372306683623,
+      "r_randomized_mean": 0.7675283573898029,
+      "d_r": {
+        "point": -0.009156050706179863,
+        "ci90": [
+          -0.019571362125979336,
+          0.0004151927356733514
+        ],
+        "ci95": [
+          -0.021752929631916672,
+          0.002143109589354287
+        ],
+        "bootstrap_sd": 0.006106319258654964,
+        "bootstrap_var": 3.72871348886205e-05,
+        "n_nan_resamples": 0
+      },
+      "d_z": {
+        "point": -0.022291583398424297,
+        "ci90": [
+          -0.04179333125514247,
+          0.000959893020993117
+        ],
+        "ci95": [
+          -0.045686460551499164,
+          0.005263244441393274
+        ],
+        "bootstrap_sd": 0.01299069985447464,
+        "bootstrap_var": 0.00016875828270904742,
+        "n_nan_resamples": 0
+      },
+      "variance_components": {
+        "tract": {
+          "cell": "training_seed 42, graph_draw 42",
+          "d_r": {
+            "point": -0.009580041125975991,
+            "ci90": [
+              -0.03690864090054171,
+              0.015722896840446674
+            ],
+            "ci95": [
+              -0.04334448093799169,
+              0.020591442968446134
+            ],
+            "bootstrap_sd": 0.01627628965734272,
+            "bootstrap_var": 0.00026491760500972167,
+            "n_nan_resamples": 0
+          },
+          "d_z": {
+            "point": -0.022735207712790917,
+            "ci90": [
+              -0.0824159963723421,
+              0.03739141697865265
+            ],
+            "ci95": [
+              -0.09453053171945335,
+              0.049370502970895985
+            ],
+            "bootstrap_sd": 0.03616461546691539,
+            "bootstrap_var": 0.0013078794118698558,
+            "n_nan_resamples": 0
+          }
+        },
+        "r_scale": {
+          "training_seed": {
+            "difference_var": 8.215739183962809e-05,
+            "structured_var": 5.249214097584673e-05,
+            "randomized_var": 0.00014359599755459947,
+            "per_seed_difference": [
+              -0.009190107449276175,
+              0.0035542776161961998,
+              -0.017556434257712583,
+              -0.004684610920923982,
+              -0.01790337851918289
+            ]
+          },
+          "graph_draw": {
+            "difference_var": 3.6731363800885673e-06,
+            "structured_var": null,
+            "randomized_var": 3.6731363800885673e-06,
+            "per_draw_randomized_mean": [
+              0.7689798932456565,
+              0.7684001764057863,
+              0.7684268675778584,
+              0.7642103816570088,
+              0.7676244680627039
+            ],
+            "note": "structured arm has one graph draw (42); the difference inherits the randomized per-draw variance"
+          }
+        },
+        "z_scale": {
+          "training_seed": {
+            "difference_var": 0.00047350718896794905,
+            "structured_var": 0.00029628973948430466,
+            "randomized_var": 0.0008237691075740655,
+            "per_seed_difference": [
+              -0.021834758093806528,
+              0.00808592470499847,
+              -0.041950725700867775,
+              -0.011722094688455531,
+              -0.04403626321398979
+            ]
+          },
+          "graph_draw": {
+            "difference_var": 2.3092818264631e-05,
+            "structured_var": null,
+            "randomized_var": 2.3092818264631e-05,
+            "per_draw_randomized_mean": [
+              1.018671934298536,
+              1.0168871233614962,
+              1.017218258259661,
+              1.0066034487118687,
+              1.0148367610139228
+            ],
+            "note": "structured arm has one graph draw (42); the difference inherits the randomized per-draw variance"
+          }
+        },
+        "estimator": "tract: bootstrap variance (ddof=1) at the fixed cell; training_seed: variance (ddof=1) of the 5 per-seed values, randomized per-seed values averaged over draws; graph_draw: variance (ddof=1) of the 5 per-draw randomized means averaged over seeds. components are not pooled."
+      },
+      "verdict": null,
+      "verdict_note": "descriptive only; the approved margin covers C1"
+    },
+    "gcn_gat": {
+      "structured_condition": "spatial_knn_uniform",
+      "randomized_condition": "randomized (crossed set)",
+      "r_structured_mean": 0.7623512588708399,
+      "r_randomized_mean": 0.7600588552630266,
+      "d_r": {
+        "point": 0.0022924036078132426,
+        "ci90": [
+          -0.003397796033547291,
+          0.011443550957793097
+        ],
+        "ci95": [
+          -0.004488921091377228,
+          0.013939770884661494
+        ],
+        "bootstrap_sd": 0.004677000494001467,
+        "bootstrap_var": 2.187433362088997e-05,
+        "n_nan_resamples": 0
+      },
+      "d_z": {
+        "point": 0.007058833484094085,
+        "ci90": [
+          -0.004476628910427776,
+          0.02578003855812855
+        ],
+        "ci95": [
+          -0.006810464765109087,
+          0.03061175767063651
+        ],
+        "bootstrap_sd": 0.009560248799206746,
+        "bootstrap_var": 9.139835710273403e-05,
+        "n_nan_resamples": 0
+      },
+      "variance_components": {
+        "tract": {
+          "cell": "training_seed 42, graph_draw 42",
+          "d_r": {
+            "point": 0.0034093065586088267,
+            "ci90": [
+              -0.014526765362222067,
+              0.02715661944839726
+            ],
+            "ci95": [
+              -0.018149002673603542,
+              0.0329003200235436
+            ],
+            "bootstrap_sd": 0.012863109876775282,
+            "bootstrap_var": 0.0001654595957019938,
+            "n_nan_resamples": 0
+          },
+          "d_z": {
+            "point": 0.008194750740705192,
+            "ci90": [
+              -0.03442897193194468,
+              0.05781577379183905
+            ],
+            "ci95": [
+              -0.04234689808248074,
+              0.06967960131560338
+            ],
+            "bootstrap_sd": 0.028371348280366162,
+            "bootstrap_var": 0.0008049334032458359,
+            "n_nan_resamples": 0
+          }
+        },
+        "r_scale": {
+          "training_seed": {
+            "difference_var": 0.00040064171898708593,
+            "structured_var": 0.0004442849532314608,
+            "randomized_var": 2.965839841551957e-06,
+            "per_seed_difference": [
+              0.00545222271619239,
+              0.03409018665901209,
+              -0.014994208988329483,
+              -0.014496848180970856,
+              0.0014106658331622945
+            ]
+          },
+          "graph_draw": {
+            "difference_var": 1.646360198917695e-08,
+            "structured_var": null,
+            "randomized_var": 1.646360198917695e-08,
+            "per_draw_randomized_mean": [
+              0.7602221075151205,
+              0.7599458208139386,
+              0.7599594132982256,
+              0.7599959284667136,
+              0.760171006221135
+            ],
+            "note": "structured arm has one graph draw (42); the difference inherits the randomized per-draw variance"
+          }
+        },
+        "z_scale": {
+          "training_seed": {
+            "difference_var": 0.0024542295233961503,
+            "structured_var": 0.0027166633120897913,
+            "randomized_var": 1.6585048821229094e-05,
+            "per_seed_difference": [
+              0.013020312999668437,
+              0.08700884976360257,
+              -0.03453131346585325,
+              -0.03350622149626492,
+              0.0033025396193181455
+            ]
+          },
+          "graph_draw": {
+            "difference_var": 9.214199448712741e-08,
+            "structured_var": null,
+            "randomized_var": 9.214199448712741e-08,
+            "per_draw_randomized_mean": [
+              0.9967739640407818,
+              0.9961080363965567,
+              0.9961297056130727,
+              0.996252548730187,
+              0.996626016128857
+            ],
+            "note": "structured arm has one graph draw (42); the difference inherits the randomized per-draw variance"
+          }
+        },
+        "estimator": "tract: bootstrap variance (ddof=1) at the fixed cell; training_seed: variance (ddof=1) of the 5 per-seed values, randomized per-seed values averaged over draws; graph_draw: variance (ddof=1) of the 5 per-draw randomized means averaged over seeds. components are not pooled."
+      },
+      "verdict": null,
+      "verdict_note": "descriptive only; the approved margin covers C1"
+    }
+  },
+  "draws_sha256": {
+    "tract_index": "d2bc013fed38cd026e8e8d9dbd25609a5c40039302a471ff10385352226f63d5",
+    "c1_r_granite": "e7d4a92976fef2d38bfeaea6c139c784d4b53a928bca316526aacdb8ccee1670",
+    "c1_r_dasymetric": "f88d37d8eff44d3d0668f72fafe932e48f9e66b9d69bc790742e3117f857896b",
+    "c1_d_r": "9a455e6bbc36443122c11c8fbe268d1033685a72d5941a90d0e04419b6fb3b3f",
+    "c1_d_z": "b296f2c022c82e98a985560fd1bcd0dd0e466c769cd98cc22286912739cf4b88",
+    "c2_sage_d_r": "46feb39fa64e52f7170fe735431ffd787b8149c2da9ade9ee2dd46aa81699550",
+    "c2_sage_d_z": "658121db5f8917d5af763d1cb93cdab905cb7cbc2111c7f612e9ab1d163b791c",
+    "c2_sage_fixed_cell_d_r": "f9582e757c0dabfd79c349da956ffb6161d06ada996bbd9b1c27f2f37b69e92c",
+    "c2_sage_fixed_cell_d_z": "6ce082884fbb2090a1adf0d4e940c6fe9f4d9bff3d50c7a11ce33bb32510d3c2",
+    "c2_gcn_gat_d_r": "37212c3c6fd2c7e975085aeb4e4cc5bf1ab2eba00960d0fd421aebb857a09c89",
+    "c2_gcn_gat_d_z": "d02f1776f467806bb01e7d3f476da01560c1b8d7d57113f290ab9999d3da16c7",
+    "c2_gcn_gat_fixed_cell_d_r": "e3844f9e7f29ce05b2b713aec151030ae5e5018b76763367ec7ed9271f8bba84",
+    "c2_gcn_gat_fixed_cell_d_z": "be832d1b1a08bd8a5a547db4b926c894ffa44bb09a753cbb2449e7a5ccca0ce0"
+  },
+  "git_head": "d6281ee0482139c5943650a8770ce2a1b17749ab",
+  "input_commits": {
+    "m0_predictions": "10d0ee8dde6e82f16705c83bd9f31d35a83a6f9d",
+    "structured_5b_predictions": "c91330644caecfabd54aa641cf877feb1aa8d408",
+    "crossed_5b_predictions": "9be51a6f4117110f4bf3cf0ce64a1b6f1a35a057",
+    "m0_committed_v2": "3723706614344426667a94be8087d3da4010b7f8",
+    "cells_committed_v2": "3723706614344426667a94be8087d3da4010b7f8",
+    "margin_spec": "d6281ee0482139c5943650a8770ce2a1b17749ab",
+    "m0_scorer": "b64c534faf453455af46119fb5941a6379a121ca",
+    "sweep_scorer": "ea0a048b598439831e36c247cf8c932a90060b34",
+    "rescore_script": "62a7dcdafcadac2e230ac97ddb131343b6a4a0c7",
+    "bg_loader": "8d32b7837927f2308971e1443f56327e91e0852b"
+  },
+  "versions": {
+    "python": "3.11.18",
+    "numpy": "2.4.6",
+    "pandas": "3.1.0",
+    "geopandas": "1.2.0",
+    "scipy": "1.17.1"
+  }
+}

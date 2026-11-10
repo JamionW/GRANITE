@@ -621,3 +621,32 @@ Row-level versus per-draw medians: the 0.00088 recovery_r in Trace 6 (lines 35, 
 Figure 4a input Moran's I: the seed-42 field scores 0.15334196178331091 under the current estimator (826c61a and later; recomputed from `data/synthetic/run_20260628_030416/addresses.csv`) and 0.15958839305898267 under the pre-826c61a estimator, as committed in the recovery_grid.csv morans_i_true column, which is not rescored.
 
 Figure 3b: with the crossed randomized arm in place of seed 42, the condition-mean range is 0.7574775988798064 to 0.7675283573898029 (0.757 to 0.768). The earlier 0.757 to 0.765 used the seed-42 randomized arm.
+
+## BOOT-P1 tract bootstrap
+
+Every number below is written by `python scripts/paper1_bootstrap.py` to `data/results/paper1_bootstrap/bootstrap_results.json` (JSON key in the table, full precision there); per-resample values are in `bootstrap_draws.npz`, sha256 per array under `draws_sha256`. Margin and decision rule: `docs/paper1/equivalence_margin_spec.md` (`d6281ee`). Reference v2, 20 tracts, 67 scoring BGs, tracts resampled with replacement, B = 10,000, numpy default_rng seed 20261109, percentile CIs. Inputs: M0 parquets `10d0ee8`, structured 5b `c913306`, crossed 5b `9be51a6`, committed v2 values `3723706`. The script asserts every full-sample r equals the existing scorer to 1e-12 and the committed v2 value to 1e-9. Display rounding is 4 decimals.
+
+| ID | Number | Value | 90% CI | 95% CI | JSON key |
+|---|---|---|---|---|---|
+| C1 | r_GRANITE (M0, one training seed) | 0.7664 | [0.6227, 0.8596] | [0.5908, 0.8762] | `C1.r_GRANITE` |
+| C1 | r_Dasymetric | 0.7966 | [0.6675, 0.8779] | [0.6389, 0.8912] | `C1.r_Dasymetric` |
+| C1 | d_r | -0.0302 | [-0.0712, 0.0024] | [-0.0806, 0.0081] | `C1.d_r` |
+| C1 | d_z | -0.0778 | [-0.1640, 0.0065] | [-0.1807, 0.0231] | `C1.d_z` |
+| C1 | verdict (q = 0.10) | small but inconclusive | | | `C1.verdict` |
+| C1 | sensitivity verdict (r, 0.03) | small but inconclusive | | | `C1.sensitivity_verdict` |
+| C1 | r-scale bounds | -0.0395 / +0.0337 | | | `margin.r_scale_lower`, `margin.r_scale_upper` |
+| C2 | sage d_r, spatial_knn_uniform minus crossed randomized | -0.0092 | [-0.0196, 0.0004] | [-0.0218, 0.0021] | `C2.sage.d_r` |
+| C2 | sage d_z | -0.0223 | [-0.0418, 0.0010] | [-0.0457, 0.0053] | `C2.sage.d_z` |
+| C2 | gcn_gat d_r | 0.0023 | [-0.0034, 0.0114] | [-0.0045, 0.0139] | `C2.gcn_gat.d_r` |
+| C2 | gcn_gat d_z | 0.0071 | [-0.0045, 0.0258] | [-0.0068, 0.0306] | `C2.gcn_gat.d_z` |
+
+C2 variance components, reported separately (no pooling). Tract: bootstrap variance of the difference at training seed 42, graph draw 42. Seed: variance (ddof=1) of the 5 per-seed differences, randomized averaged over draws. Draw: variance (ddof=1) of the 5 per-draw randomized means; the structured arm has one draw.
+
+| Arch | Scale | Tract | Training seed | Graph draw | JSON key |
+|---|---|---|---|---|---|
+| sage | r | 2.649e-04 | 8.216e-05 | 3.673e-06 | `C2.sage.variance_components.{tract.d_r.bootstrap_var, r_scale.training_seed.difference_var, r_scale.graph_draw.difference_var}` |
+| sage | z | 1.308e-03 | 4.735e-04 | 2.309e-05 | `C2.sage.variance_components.{tract.d_z.bootstrap_var, z_scale.*.difference_var}` |
+| gcn_gat | r | 1.655e-04 | 4.006e-04 | 1.646e-08 | `C2.gcn_gat.variance_components.{tract.d_r.bootstrap_var, r_scale.*.difference_var}` |
+| gcn_gat | z | 8.049e-04 | 2.454e-03 | 9.214e-08 | `C2.gcn_gat.variance_components.{tract.d_z.bootstrap_var, z_scale.*.difference_var}` |
+
+C1 has no seed component: M0 GRANITE carries one training seed (42). C2 carries no equivalence verdict (`C2.*.verdict` is null). Regeneration: two runs of the script produce byte-identical JSON (sha256 `8e2586746953b109944037e23b84628b6e27d814bf101c7536ab27ad1e01b2d5` at HEAD `d6281ee`); `git_head` in the JSON records the HEAD at generation.

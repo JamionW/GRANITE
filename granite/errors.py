@@ -53,3 +53,22 @@ class FeatureComputationError(GRANITEError):
 class ValidationError(GRANITEError):
     """Raised when data validation fails."""
     pass
+
+class GraphRandomizationError(GRANITEError):
+    """Raised when a degree-preserving swap leaves a tract's edge list unchanged.
+
+    records: list of per-tract swap records (dicts) whose randomized flag is False
+    and whose tract is not allowlisted.
+    """
+
+    def __init__(self, records):
+        self.records = list(records)
+        parts = [f"{r.get('tract_fips')} (seed={r.get('graph_draw_seed')}, "
+                 f"outcome={r.get('swap_outcome')})" for r in self.records]
+        message = (
+            f"randomized graph identical to input for {len(self.records)} tract(s): "
+            + ", ".join(parts)
+            + ". pass --allow-unswapped (config key allow_unswapped) to proceed on the "
+              "unswapped graph with randomized=False"
+        )
+        super().__init__(message)

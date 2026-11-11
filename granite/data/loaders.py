@@ -919,7 +919,11 @@ class DataLoader:
             k = self.config.get('graph_knn_k', 10)
             graph_draw_seed = self.config.get('graph_draw_seed', 42)
             knn_ei, knn_ew = self._create_spatial_knn_uniform(addresses, k)
-            edge_index, edge_weight = self._randomize_graph(knn_ei, knn_ew, n_addresses, graph_draw_seed)
+            tract_fips = None
+            if 'tract_fips' in addresses.columns and n_addresses > 0:
+                tract_fips = ','.join(sorted(addresses['tract_fips'].astype(str).unique()))
+            edge_index, edge_weight = self._randomize_graph(
+                knn_ei, knn_ew, n_addresses, graph_draw_seed, tract_fips=tract_fips)
         else:
             # production: road-network-plus-geographic graph (unchanged)
             self._log(f"Creating road network graph for {n_addresses} addresses...")
@@ -1124,15 +1128,55 @@ class DataLoader:
         )
         return edge_index, edge_weight
 
-    def _randomize_graph(self, edge_index, edge_weight, n_addresses, seed):
+    def _swap_record(self, input_edge_index, output_edge_index, tract_fips, seed,
+                     swaps_requested, swap_outcome):
+        """per-tract swap provenance: input vs output compared as sets of undirected edges.
+
+        networkx double_edge_swap does not expose the number of swaps it completed,
+        so the record carries swaps_requested and the outcome, not swaps_done.
+        """
+        def _undirected(ei):
+            a = ei.numpy()
+            return {(int(min(u, v)), int(max(u, v))) for u, v in zip(a[0], a[1]) if u != v}
+
+        e_in = _undirected(input_edge_index)
+        e_out = _undirected(output_edge_index)
+        n_edges = len(e_in)
+        preserved = len(e_in & e_out)
+        return {
+            'tract_fips': tract_fips,
+            'graph_draw_seed': seed,
+            'n_edges': n_edges,
+            'edges_preserved': preserved,
+            'share_preserved': preserved / n_edges if n_edges else float('nan'),
+            'randomized': e_in != e_out,
+            'swaps_requested': swaps_requested,
+            'swap_outcome': swap_outcome,
+        }
+
+    def _allow_unswapped(self):
+        """allowlisted tract fips from config key allow_unswapped (list or comma string)."""
+        allow = self.config.get('allow_unswapped') or []
+        if isinstance(allow, str):
+            allow = allow.split(',')
+        return {str(a).strip() for a in allow if str(a).strip()}
+
+    def _randomize_graph(self, edge_index, edge_weight, n_addresses, seed,
+                         tract_fips=None, strict=True):
         """degree-preserving double-edge swap on an input undirected graph.
 
-        On nx.NetworkXError / nx.NetworkXAlgorithmError (sparse tracts that
-        cannot reach nswap), falls back to the unswapped spatial_knn_uniform
-        graph and increments self._under_mixed_tracts. Degree is preserved
-        either way; the fallback is the original spatial graph.
+        On nx.NetworkXError / nx.NetworkXAlgorithmError (sparse or dense tracts that
+        cannot reach nswap), returns the unswapped spatial_knn_uniform graph and
+        increments self._under_mixed_tracts; partial swaps are discarded.
+
+        Every call appends a swap record (see _swap_record) to self._swap_records and
+        sets self._last_swap_record. A returned edge list identical to the input is
+        randomized=False: with strict=True this raises GraphRandomizationError unless
+        tract_fips is in config allow_unswapped; an allowlisted tract proceeds on the
+        unswapped graph with a warning.
         """
         import torch
+        from granite.errors import GraphRandomizationError
 
         G = nx.Graph()
         G.add_nodes_from(range(n_addresses))
@@ -1143,40 +1187,97 @@ class DataLoader:
                 G.add_edge(u, v)
 
         n_edges = G.number_of_edges()
-        if n_edges < 2:
-            self._log("randomized: too few edges for swap; returning input graph")
-            return edge_index, torch.FloatTensor([1.0] * edge_index.shape[1])
-
         n_swaps = max(1, 10 * n_edges)
         max_tries = n_swaps * 10
 
+        if n_edges < 2:
+            self._log("randomized: too few edges for swap; returning input graph")
+            out = (edge_index, torch.FloatTensor([1.0] * edge_index.shape[1]))
+            n_swaps, outcome = 0, 'too_few_edges'
+        else:
+            try:
+                nx.double_edge_swap(G, nswap=n_swaps, max_tries=max_tries, seed=seed)
+                outcome = 'swapped'
+            except (nx.NetworkXError, nx.NetworkXAlgorithmError) as e:
+                outcome = ('max_tries_exceeded' if isinstance(e, nx.NetworkXAlgorithmError)
+                           else 'nx_error')
+                self._log(
+                    f"randomized: swap failed n_nodes={n_addresses} n_edges={n_edges} "
+                    f"seed={seed} reason={e}; using unswapped graph"
+                )
+                if not hasattr(self, '_under_mixed_tracts'):
+                    self._under_mixed_tracts = 0
+                self._under_mixed_tracts += 1
+                # return the original spatial_knn_uniform graph; degree preserved
+                out = (edge_index, torch.FloatTensor([1.0] * edge_index.shape[1]))
+
+            if outcome == 'swapped':
+                edge_list = []
+                for u, v in G.edges():
+                    if u != v:
+                        edge_list.extend([[u, v], [v, u]])
+                if not edge_list:
+                    out = self._create_minimal_connectivity(n_addresses)
+                else:
+                    out = (torch.LongTensor(edge_list).t().contiguous(),
+                           torch.FloatTensor([1.0] * len(edge_list)))
+                    self._log(
+                        f"randomized: {n_addresses} nodes, {len(edge_list) // 2} "
+                        f"undirected edges, seed={seed}"
+                    )
+
+        record = self._swap_record(edge_index, out[0], tract_fips, seed, n_swaps, outcome)
+        record['allowlisted'] = tract_fips is not None and str(tract_fips) in self._allow_unswapped()
+        if not hasattr(self, '_swap_records'):
+            self._swap_records = []
+        self._swap_records.append(record)
+        self._last_swap_record = record
+
+        if not record['randomized']:
+            if record['allowlisted']:
+                msg = (f"randomized: allowlisted tract {tract_fips} unswapped at seed={seed} "
+                       f"(outcome={outcome}); training on input graph, randomized=False")
+                print(f"WARNING {msg}")
+                warnings.warn(msg, stacklevel=2)
+            elif strict:
+                raise GraphRandomizationError([record])
+        elif record['allowlisted']:
+            print(f"randomized: allowlisted tract {tract_fips} swapped normally at seed={seed}")
+
+        return out
+
+    def check_randomization(self, tract_list, seeds):
+        """graph-only swap check over tracts x graph-draw seeds; no training.
+
+        builds spatial_knn_uniform (k = config graph_knn_k) per tract from
+        get_addresses_for_tract and swaps it at each seed. returns every swap record;
+        raises GraphRandomizationError listing each non-allowlisted unswapped
+        (tract, seed). leaves _swap_records and _under_mixed_tracts as it found them.
+        """
+        from granite.errors import GraphRandomizationError
+
+        k = self.config.get('graph_knn_k', 10)
+        saved = {a: getattr(self, a) for a in ('_swap_records', '_under_mixed_tracts',
+                                                '_last_swap_record') if hasattr(self, a)}
+        records = []
         try:
-            nx.double_edge_swap(G, nswap=n_swaps, max_tries=max_tries, seed=seed)
-        except (nx.NetworkXError, nx.NetworkXAlgorithmError) as e:
-            self._log(
-                f"randomized: swap failed n_nodes={n_addresses} n_edges={n_edges} "
-                f"seed={seed} reason={e}; using unswapped graph"
-            )
-            if not hasattr(self, '_under_mixed_tracts'):
-                self._under_mixed_tracts = 0
-            self._under_mixed_tracts += 1
-            # return the original spatial_knn_uniform graph; degree preserved
-            return edge_index, torch.FloatTensor([1.0] * edge_index.shape[1])
-
-        edge_list = []
-        for u, v in G.edges():
-            if u != v:
-                edge_list.extend([[u, v], [v, u]])
-
-        if not edge_list:
-            return self._create_minimal_connectivity(n_addresses)
-
-        edge_index_new = torch.LongTensor(edge_list).t().contiguous()
-        edge_weight_new = torch.FloatTensor([1.0] * len(edge_list))
-        self._log(
-            f"randomized: {n_addresses} nodes, {len(edge_list) // 2} undirected edges, seed={seed}"
-        )
-        return edge_index_new, edge_weight_new
+            for fips in tract_list:
+                addresses = self.get_addresses_for_tract(fips)
+                ei, ew = self._create_spatial_knn_uniform(addresses, k)
+                for seed in seeds:
+                    self._randomize_graph(ei, ew, len(addresses), seed,
+                                          tract_fips=fips, strict=False)
+                    records.append(dict(self._last_swap_record))
+        finally:
+            for a in ('_swap_records', '_under_mixed_tracts', '_last_swap_record'):
+                if a in saved:
+                    setattr(self, a, saved[a])
+                elif hasattr(self, a):
+                    delattr(self, a)
+        failing = [r for r in records if not r['randomized'] and not r['allowlisted']]
+        if failing:
+            raise GraphRandomizationError(failing)
+        return records
 
     def _create_road_network_graph(self, addresses, roads):
         """Create graph with road network-based connectivity"""

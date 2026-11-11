@@ -20,12 +20,16 @@ Outputs (data/results/m6_fig4_randomization/):
   predictions/{condition}__{arch}__ts{ts}__gs{gs}__ds{dataseed}__{fips}.npz
       arrays predictions, coords (EPSG:4326), y_true (rescaled, aligned)
   tract_rows.csv   one row per (cell, tract)
-  cells.csv        one row per completed cell; resume skips cells listed here
+  cells.csv        one row per completed cell; resume skips cells listed here;
+                   under_mixed_tracts and n_unswapped_tracts per cell (SWAP-GUARD)
+  swap_provenance.csv  one row per (randomized cell, tract) swap record
   run_meta.json    cell, seeds, packages, commit, generator diagnostics
 
 Usage:
     python experiments/m6_recovery_grid/run_fig4.py --batch 1
     python experiments/m6_recovery_grid/run_fig4.py --batch 2
+    ... --allow-unswapped 47065011324   train that tract on its unswapped graph,
+                                        recorded randomized=False
 """
 
 import argparse
@@ -54,6 +58,7 @@ PRED_DIR = OUT_DIR / 'predictions'
 TRACT_CSV = OUT_DIR / 'tract_rows.csv'
 CELL_CSV = OUT_DIR / 'cells.csv'
 META_JSON = OUT_DIR / 'run_meta.json'
+PROVENANCE_CSV = OUT_DIR / 'swap_provenance.csv'
 
 CELL = {'signal_source': 'latent', 'autocorr': 'strong', 'snr': 'medium',
         'between_tract': 'default'}
@@ -69,7 +74,10 @@ TRACT_FIELDS = ['condition', 'arch', 'training_seed', 'graph_draw_seed', 'data_s
                 'tract_fips', 'n_addresses', 'recovery_r', 'morans_i_output']
 CELL_FIELDS = ['condition', 'arch', 'training_seed', 'graph_draw_seed', 'data_seed',
                'n_tracts', 'recovery_r_mean', 'morans_i_output_mean', 'runtime_s',
-               'finished_at']
+               'finished_at', 'under_mixed_tracts', 'n_unswapped_tracts']
+PROVENANCE_FIELDS = ['condition', 'arch', 'training_seed', 'graph_draw_seed', 'data_seed',
+                     'tract_fips', 'n_edges', 'edges_preserved', 'share_preserved',
+                     'randomized', 'swaps_requested', 'swap_outcome', 'allowlisted']
 
 
 def cells_for_batch(batch):
@@ -110,6 +118,18 @@ def _drop_incomplete_tract_rows(done):
     if not all(keep):
         print(f'[fig4] dropping {len(keep) - sum(keep)} tract rows from an interrupted cell')
         df[keep].to_csv(TRACT_CSV, index=False, float_format='%.17g')
+
+
+def _check_header(path, fields):
+    """refuse to append to an existing csv whose header lacks fields (pre-SWAP-GUARD)."""
+    if not path.exists():
+        return
+    with open(path, newline='') as f:
+        header = next(csv.reader(f), [])
+    absent = [c for c in fields if c not in header]
+    if absent:
+        raise RuntimeError(f'{path} predates SWAP-GUARD (header lacks {absent}); '
+                           f'new cells must not be appended to an existing results directory')
 
 
 def _append(path, fields, rows):
@@ -157,7 +177,11 @@ def main():
     ap.add_argument('--batch', type=int, choices=[1, 2], required=True)
     ap.add_argument('--max-cells', type=int, default=None, help='stop after N new cells')
     ap.add_argument('--verbose', action='store_true')
+    ap.add_argument('--allow-unswapped', default='',
+                    help='comma-separated tract FIPS allowed to train on an unswapped '
+                         'randomized graph (recorded randomized=False, warned)')
     args = ap.parse_args()
+    allow = [f.strip() for f in args.allow_unswapped.split(',') if f.strip()]
 
     PRED_DIR.mkdir(parents=True, exist_ok=True)
     done = _completed_cells()
@@ -167,6 +191,7 @@ def main():
           f'{len(todo)} to run, data seed {DATA_SEED}')
     if not todo:
         return
+    _check_header(CELL_CSV, CELL_FIELDS)
 
     tract_list = run_grid._load_tract_list()
     cfg_base = run_grid._load_base_config()
@@ -176,6 +201,17 @@ def main():
     pipeline.verbose = args.verbose
     data = pipeline._load_spatial_data()
     pipeline.data_loader.config['graph_knn_k'] = GRAPH_KNN_K
+    pipeline.data_loader.config['allow_unswapped'] = allow
+    if allow:
+        print(f'[fig4] allow-unswapped: {allow}')
+
+    # graph-only swap check at every pending graph draw; raises before any training
+    rand_gs = sorted({gs for condition, _, _, gs in todo if condition == 'randomized'})
+    if rand_gs:
+        recs = pipeline.data_loader.check_randomization(tract_list, rand_gs)
+        print(f'[fig4] swap check: {len(tract_list)} tracts x {len(rand_gs)} graph draws, '
+              f'{sum(1 for r in recs if not r["randomized"])} unswapped, allowlisted: '
+              f'{sorted({r["tract_fips"] for r in recs if not r["randomized"]})}')
 
     draw_spec = dict(CELL, seed=DATA_SEED)
     gen_result, addr_df, tract_means, y_min, y_max, wtvr = run_grid._generate_draw(
@@ -191,6 +227,8 @@ def main():
         t0 = time.time()
         graph_opts = {'graph_variant': condition, 'graph_draw_seed': gs, 'training_seed': ts}
         set_random_seed(ts)
+        pipeline.data_loader._under_mixed_tracts = 0
+        pipeline.data_loader._swap_records = []
         rows = []
         for fips in tract_list:
             run_cfg = run_grid._make_run_cfg(cfg_base, fips, FEATURE_MODE, arch, graph_opts)
@@ -215,6 +253,18 @@ def main():
                          'n_addresses': len(preds), 'recovery_r': rr, 'morans_i_output': mi})
             print(f'[fig4]   {condition}/{arch}/ts{ts}/gs{gs}/{fips}: rr={rr:.4f} mi={mi:.4f}')
         runtime = time.time() - t0
+        swap_records = list(pipeline.data_loader._swap_records)
+        for r in swap_records:
+            if not r['randomized']:
+                print(f'[fig4]   UNSWAPPED {condition}/{arch}/ts{ts}/gs{gs}/{r["tract_fips"]}: '
+                      f'randomized=False (allowlisted={r["allowlisted"]}, '
+                      f'outcome={r["swap_outcome"]})')
+        if condition == 'randomized':
+            _append(PROVENANCE_CSV, PROVENANCE_FIELDS, [
+                {**{k: r[k] for k in PROVENANCE_FIELDS if k in r},
+                 'condition': condition, 'arch': arch, 'training_seed': ts,
+                 'graph_draw_seed': gs, 'data_seed': DATA_SEED}
+                for r in swap_records])
         _append(TRACT_CSV, TRACT_FIELDS, rows)
         _append(CELL_CSV, CELL_FIELDS, [{
             'condition': condition, 'arch': arch, 'training_seed': ts, 'graph_draw_seed': gs,
@@ -222,6 +272,8 @@ def main():
             'recovery_r_mean': float(np.mean([r['recovery_r'] for r in rows])),
             'morans_i_output_mean': float(np.mean([r['morans_i_output'] for r in rows])),
             'runtime_s': runtime, 'finished_at': datetime.now().isoformat(timespec='seconds'),
+            'under_mixed_tracts': int(getattr(pipeline.data_loader, '_under_mixed_tracts', 0)),
+            'n_unswapped_tracts': sum(1 for r in swap_records if not r['randomized']),
         }])
         n_new += 1
         print(f'[fig4] cell {condition}/{arch}/ts{ts}/gs{gs} done in {runtime:.0f}s')

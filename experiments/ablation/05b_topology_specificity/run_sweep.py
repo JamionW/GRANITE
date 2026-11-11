@@ -26,6 +26,12 @@ Usage:
     python experiments/ablation/05b_topology_specificity/run_sweep.py --dry-run
     python experiments/ablation/05b_topology_specificity/run_sweep.py --check-only
     python experiments/ablation/05b_topology_specificity/run_sweep.py --condition randomized --design crossed
+
+Swap guard (SWAP-GUARD): every randomized cell is preceded by a graph-only swap check
+over all tracts at the pending graph draws. A tract whose randomized edge list equals
+its input raises GraphRandomizationError unless named in --allow-unswapped FIPS[,FIPS];
+an allowlisted tract trains on its unswapped graph and is recorded randomized=False.
+Per-tract swap records go to swap_provenance.csv beside trials_incremental.csv.
 """
 import argparse
 import csv
@@ -52,6 +58,7 @@ from granite.data.block_group_loader import BlockGroupLoader
 from granite.validation.block_group_validation import BlockGroupValidator
 from granite.evaluation.spatial_diagnostics import SpatialLearningDiagnostics
 from granite.models.gnn import set_random_seed
+from granite.errors import GraphRandomizationError
 
 # ---------------------------------------------------------------------------
 # constants
@@ -79,6 +86,19 @@ STRUCTURED_CONDITIONS = ['spatial_knn_uniform', 'road_network_uniform']
 
 MIN_ADDRESSES_PER_BG = 3
 MIN_ADDRESSES_POOLED = 10
+
+# incremental csv columns; the two swap flags survive resume (SWAP-GUARD)
+TRIAL_FIELDS = [
+    'condition', 'arch', 'training_seed', 'graph_draw_seed',
+    'morans_i', 'within_tract_std', 'pooled_bg_r',
+    'n_tracts', 'runtime_s', 'under_mixed_tracts', 'n_unswapped_tracts',
+]
+SWAP_FLAG_FIELDS = ['under_mixed_tracts', 'n_unswapped_tracts']
+PROVENANCE_FIELDS = [
+    'condition', 'arch', 'training_seed', 'graph_draw_seed', 'tract_fips',
+    'n_edges', 'edges_preserved', 'share_preserved', 'randomized',
+    'swaps_requested', 'swap_outcome', 'allowlisted',
+]
 
 # degree parity tolerance: mean node degree must agree within this value
 DEGREE_PARITY_TOL = 0.5
@@ -319,6 +339,8 @@ def run_preflight_check(cfg_base, tract_list):
                     fallback_count = getattr(dl, '_last_road_fallback', 0)
                 if condition == 'randomized':
                     under_mixed += getattr(dl, '_under_mixed_tracts', 0)
+            except GraphRandomizationError:
+                raise
             except Exception as e:
                 print(f'[step05b]   {fips}/{condition}: graph failed: {e}')
                 ei_by_cond[condition] = None
@@ -479,9 +501,11 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
     pipeline.data_loader.config['graph_knn_k'] = cfg.get('graph_knn_k', 10)
     pipeline.data_loader.config['road_knn_k'] = cfg.get('road_knn_k', cfg.get('graph_knn_k', 10))
     pipeline.data_loader.config['processing'] = cfg['processing']
+    pipeline.data_loader.config['allow_unswapped'] = list(cfg_base.get('allow_unswapped', []))
 
-    # reset under_mixed counter for this seed run
+    # reset under_mixed counter and swap records for this seed run
     pipeline.data_loader._under_mixed_tracts = 0
+    pipeline.data_loader._swap_records = []
 
     per_tract_stds = []
     per_tract_morans = []
@@ -495,6 +519,9 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
 
         try:
             result = pipeline._process_single_tract(fips, data)
+        except GraphRandomizationError:
+            # unswapped, non-allowlisted tract: abort the run, never skip the tract
+            raise
         except Exception as e:
             print(f'[step05b]   ERROR {condition}/{arch}/tseed={training_seed}/gseed={graph_draw_seed}/{fips}: {str(e)[:200]}')
             traceback.print_exc()
@@ -533,6 +560,14 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
             f'std={sp_std:.4f} moran={morans_i:.3f} constr={constr_err:.2e}'
         )
 
+    # swap records exist only for the randomized variant; structured cells report 0
+    swap_records = list(getattr(pipeline.data_loader, '_swap_records', []))
+    for r in swap_records:
+        if not r['randomized']:
+            print(f'[step05b]   UNSWAPPED {condition}/{arch}/tseed={training_seed}/'
+                  f'gseed={graph_draw_seed}/{r["tract_fips"]}: randomized=False '
+                  f'(allowlisted={r["allowlisted"]}, outcome={r["swap_outcome"]})')
+
     within_tract_std = float(np.mean(per_tract_stds)) if per_tract_stds else float('nan')
     morans_i_mean = float(np.mean(per_tract_morans)) if per_tract_morans else float('nan')
 
@@ -560,6 +595,8 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
         'n_bgs': n_bgs,
         'n_tracts': len(per_tract_stds),
         'under_mixed_tracts': int(getattr(pipeline.data_loader, '_under_mixed_tracts', 0)),
+        'n_unswapped_tracts': sum(1 for r in swap_records if not r['randomized']),
+        '_swap_records': swap_records,
     }
 
 
@@ -572,10 +609,18 @@ def _load_completed_trials(csv_path):
     if csv_path is None or not csv_path.exists():
         return {}
     completed = {}
+    missing = []
     with open(csv_path, newline='') as f:
         for row in csv.DictReader(f):
             key = (row['condition'], row['arch'],
                    int(row['training_seed']), int(row['graph_draw_seed']))
+            # swap flags: carried through as read; absent or empty is None, never 0
+            flags = {}
+            for col in SWAP_FLAG_FIELDS:
+                v = row.get(col)
+                flags[col] = int(v) if v not in (None, '') else None
+            if any(v is None for v in flags.values()):
+                missing.append((key, [c for c, v in flags.items() if v is None]))
             completed[key] = {
                 'training_seed':    int(row['training_seed']),
                 'graph_draw_seed':  int(row['graph_draw_seed']),
@@ -584,19 +629,36 @@ def _load_completed_trials(csv_path):
                 'pooled_bg_r':      float(row['pooled_bg_r']),
                 'n_tracts':         int(row['n_tracts']),
                 'runtime_s':        float(row['runtime_s']),
+                **flags,
             }
+    if missing:
+        print(f'[step05b] resume: {len(missing)} completed trial(s) in {csv_path.name} '
+              f'missing swap flags (reported as missing, not filled):')
+        for key, cols in missing:
+            print(f'[step05b]   MISSING {"/".join(str(k) for k in key)}: {cols}')
     return completed
+
+
+def _check_csv_header(csv_path, fields):
+    """refuse to append rows to an existing csv whose header lacks fields."""
+    if csv_path is None or not csv_path.exists():
+        return
+    with open(csv_path, newline='') as f:
+        header = next(csv.reader(f), [])
+    absent = [c for c in fields if c not in header]
+    if absent:
+        raise RuntimeError(
+            f'{csv_path} predates SWAP-GUARD (header lacks {absent}); new cells must '
+            f'go to a new --out-dir, not an existing results directory'
+        )
 
 
 def _append_trial_csv(csv_path, condition, arch, seed_result):
     """append one trial row to the incremental CSV; creates with header if new."""
+    _check_csv_header(csv_path, TRIAL_FIELDS)
     is_new = not csv_path.exists()
     with open(csv_path, 'a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            'condition', 'arch', 'training_seed', 'graph_draw_seed',
-            'morans_i', 'within_tract_std', 'pooled_bg_r',
-            'n_tracts', 'runtime_s',
-        ])
+        writer = csv.DictWriter(f, fieldnames=TRIAL_FIELDS)
         if is_new:
             writer.writeheader()
         writer.writerow({
@@ -609,7 +671,22 @@ def _append_trial_csv(csv_path, condition, arch, seed_result):
             'pooled_bg_r':      seed_result.get('pooled_bg_r'),
             'n_tracts':         seed_result.get('n_tracts'),
             'runtime_s':        seed_result.get('runtime_s'),
+            'under_mixed_tracts': seed_result.get('under_mixed_tracts'),
+            'n_unswapped_tracts': seed_result.get('n_unswapped_tracts'),
         })
+
+
+def _append_swap_provenance(path, condition, arch, training_seed, graph_draw_seed, records):
+    """append one row per tract swap record for a randomized cell."""
+    is_new = not path.exists()
+    with open(path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=PROVENANCE_FIELDS, extrasaction='ignore')
+        if is_new:
+            writer.writeheader()
+        for r in records:
+            writer.writerow({**r, 'condition': condition, 'arch': arch,
+                             'training_seed': training_seed,
+                             'graph_draw_seed': graph_draw_seed})
 
 
 def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=False,
@@ -659,6 +736,25 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
         seed_pairs = [(ts, 42) for ts in TRAINING_SEEDS]
         seed_label = 'training_seed'
 
+    pending = [(a, ts, gs) for a in archs for ts, gs in seed_pairs
+               if (condition, a, ts, gs) not in completed_trials]
+    provenance_csv = None
+    if pending:
+        _check_csv_header(incremental_csv, TRIAL_FIELDS)
+    if condition == 'randomized' and pending:
+        if incremental_csv is not None:
+            provenance_csv = incremental_csv.parent / 'swap_provenance.csv'
+        # graph-only swap check at every pending graph draw; raises before training
+        dl = pipeline.data_loader
+        dl.config['graph_knn_k'] = cfg_base.get('graph_knn_k', 10)
+        dl.config['allow_unswapped'] = list(cfg_base.get('allow_unswapped', []))
+        pending_gs = sorted({gs for _, _, gs in pending})
+        recs = dl.check_randomization(tract_list, pending_gs)
+        n_unswapped = sum(1 for r in recs if not r['randomized'])
+        print(f'[step05b] swap check: {len(tract_list)} tracts x {len(pending_gs)} graph draws, '
+              f'{n_unswapped} unswapped, allowlisted: '
+              f'{sorted({r["tract_fips"] for r in recs if not r["randomized"]})}')
+
     results = {}
     for arch in archs:
         arch_seed_results = []
@@ -683,6 +779,10 @@ def run_condition(condition, cfg_base, bg_gdf, validator, tract_list, verbose=Fa
                 persist_preds=persist_preds
             )
             seed_result['runtime_s'] = round(time.time() - t0, 1)
+            swap_records = seed_result.pop('_swap_records', [])
+            if provenance_csv is not None:
+                _append_swap_provenance(provenance_csv, condition, arch,
+                                        training_seed, graph_draw_seed, swap_records)
             arch_seed_results.append(seed_result)
             if incremental_csv is not None:
                 _append_trial_csv(incremental_csv, condition, arch, seed_result)
@@ -767,6 +867,12 @@ def main():
                             'defaults to data/results/m6_topology_5b_crossed/. never '
                             'data/results/m6_topology_5b/ (frozen).'
                         ))
+    parser.add_argument('--allow-unswapped', default='',
+                        help=(
+                            'comma-separated tract FIPS allowed to train on an unswapped '
+                            'randomized graph (recorded randomized=False, warned). any other '
+                            'unswapped tract raises GraphRandomizationError.'
+                        ))
     parser.add_argument('--dry-run', action='store_true',
                         help='validate setup without running training')
     parser.add_argument('--check-only', action='store_true',
@@ -849,6 +955,9 @@ def main():
     cfg_base['training']['constraint_mode'] = 'soft'
     cfg_base['training']['apply_post_correction'] = True
     cfg_base['training']['variation_weight'] = 0.8
+    cfg_base['allow_unswapped'] = [f.strip() for f in args.allow_unswapped.split(',') if f.strip()]
+    if cfg_base['allow_unswapped']:
+        print(f'[step05b] allow-unswapped: {cfg_base["allow_unswapped"]}')
 
     if args.check_only:
         print('[step05b] check-only mode: running preflight validation')

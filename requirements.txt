@@ -36,3 +36,6 @@ networkx>=2.6.0
 tqdm>=4.62.0
 requests>=2.25.0
 PyYAML>=5.4.0
+
+# testing
+pytest==9.2.0

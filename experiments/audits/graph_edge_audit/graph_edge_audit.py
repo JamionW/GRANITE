@@ -11,6 +11,7 @@ directed row has a matching reverse row (both_dir_ok).
 Read-only: does not touch any file under data/ or experiments/ other than
 writing this script's own output JSON.
 """
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -56,10 +57,20 @@ def both_directions_present(edge_index):
 
 
 def main():
+    parser = argparse.ArgumentParser(description='graph edge audit for the 05b conditions')
+    parser.add_argument('--allow-unswapped', default='',
+                        help=(
+                            'comma-separated tract FIPS allowed to train on an unswapped '
+                            'randomized graph (recorded randomized=False, warned). any other '
+                            'unswapped tract raises GraphRandomizationError.'
+                        ))
+    args = parser.parse_args()
+    allow_unswapped = [f.strip() for f in args.allow_unswapped.split(',') if f.strip()]
+
     tract_list = load_tract_list()
     assert len(tract_list) == 20, f"expected 20 tracts, got {len(tract_list)}"
 
-    dl = DataLoader(str(REPO_ROOT / 'data'), config={})
+    dl = DataLoader(str(REPO_ROOT / 'data'), config={'allow_unswapped': allow_unswapped})
 
     per_condition = {
         cond: {'n_nodes': 0, 'n_undirected_edges': 0, 'n_directed_edges': 0,

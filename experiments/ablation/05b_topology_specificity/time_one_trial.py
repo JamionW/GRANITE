@@ -3,6 +3,7 @@ single-trial timing check for step05b.
 runs spatial_knn_uniform / sage / training_seed=42 over all 20 tracts.
 reports wall-clock and per-tract moran's i. no results written.
 """
+import argparse
 import importlib.util
 import os
 import sys
@@ -37,6 +38,16 @@ TRAINING_SEED = 42
 GRAPH_DRAW_SEED = 42
 
 def main():
+    parser = argparse.ArgumentParser(description='single-trial timing check for step05b')
+    parser.add_argument('--allow-unswapped', default='',
+                        help=(
+                            'comma-separated tract FIPS allowed to train on an unswapped '
+                            'randomized graph (recorded randomized=False, warned). any other '
+                            'unswapped tract raises GraphRandomizationError.'
+                        ))
+    args = parser.parse_args()
+    allow_unswapped = [f.strip() for f in args.allow_unswapped.split(',') if f.strip()]
+
     t_start = time.time()
 
     tract_list = mod._load_tract_list()
@@ -89,6 +100,7 @@ def main():
     pipeline.data_loader.config['graph_variant'] = CONDITION
     pipeline.data_loader.config['graph_draw_seed'] = GRAPH_DRAW_SEED
     pipeline.data_loader.config['processing'] = cfg2['processing']
+    pipeline.data_loader.config['allow_unswapped'] = allow_unswapped
     pipeline.data_loader._under_mixed_tracts = 0
 
     print(f'\nrunning {CONDITION}/{ARCH}/tseed={TRAINING_SEED} over {len(tract_list)} tracts...\n')

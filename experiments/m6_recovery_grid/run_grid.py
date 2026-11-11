@@ -851,7 +851,14 @@ def main():
     parser.add_argument('--field-dir', type=Path, default=None,
                         help='load this stored generator output for the --cell draw '
                              'instead of regenerating (requires --cell and --out-dir)')
+    parser.add_argument('--allow-unswapped', default='',
+                        help=(
+                            'comma-separated tract FIPS allowed to train on an unswapped '
+                            'randomized graph (recorded randomized=False, warned). any other '
+                            'unswapped tract raises GraphRandomizationError.'
+                        ))
     args = parser.parse_args()
+    allow_unswapped = [f.strip() for f in args.allow_unswapped.split(',') if f.strip()]
 
     graph_opts = {
         'graph_variant': args.graph_variant,
@@ -940,6 +947,9 @@ def main():
     print('[m6] initializing pipeline...')
     pipeline = GRANITEPipeline(cfg_init, output_dir=str(PIPELINE_SCRATCH))
     pipeline.verbose = args.verbose
+    pipeline.data_loader.config['allow_unswapped'] = allow_unswapped
+    if allow_unswapped:
+        print(f'[m6] allow-unswapped: {allow_unswapped}')
 
     print('[m6] loading spatial data...')
     try:

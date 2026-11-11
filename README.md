@@ -22,7 +22,7 @@ Disaggregation is treated as an allocation problem: the tract mean is fixed, and
 
 ## Current Study Area
 
-Hamilton County, Tennessee (FIPS 47065): 85 tracts with valid SVI data, 102,647 address points (66 tracts with sufficient address coverage for analysis).
+Hamilton County, Tennessee (FIPS 47065): 85 tracts with valid SVI data, 102,647 address points. The 20 Paper 1 tracts are the only tracts with complete routing caches.
 
 **Data sources:**
 - LEHD Workplace Area Characteristics 2021 (1,329 employment locations)

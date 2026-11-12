@@ -1,0 +1,1527 @@
+{
+ "milestone": "TAG-B",
+ "artifact": "swap-failure rebuild (preregistration v4.1, section 7)",
+ "path": "DataLoader.check_randomization (granite/data/loaders.py:1249): _create_spatial_knn_uniform(get_addresses_for_tract(fips), k=10), then _randomize_graph(seed) degree-preserving double-edge swap; one call per (tract, seed); nothing trained or scored",
+ "arms": "one rebuild covers both arms (arm = shared): consumers run_sweep.py (frozen 5b and crossed sets) and run_fig4.py (figure 4 synthetic run) build randomized graphs through the same path with k = 10, the same seeds and the same address coordinates",
+ "consumers": [
+  "experiments/ablation/05b_topology_specificity/run_sweep.py",
+  "experiments/m6_recovery_grid/run_fig4.py"
+ ],
+ "graph_draw_seeds": [
+  42,
+  17,
+  123,
+  2024,
+  7
+ ],
+ "graph_knn_k": 10,
+ "git_head": "b08132be82ddbaa9b19971b1e8ada3d8de6d9434",
+ "networkx_version": "3.6.1",
+ "scikit_learn_version": "1.8.0",
+ "reference_report": "83927c3 graph-only check (SWAP-GUARD): 0.003 to 0.036 and 47065011324 1.000, measured under a drifted scikit-learn 1.9.1, whose k-NN tie-breaking builds a different euclidean edge set for 47065011900 (same edge count); registered range under the pinned 1.8.0: 0.0029 to 0.0393",
+ "partial_swap_share": "not exposed: _randomize_graph swaps a local networkx graph and discards it on the max_tries failure (granite/data/loaders.py:1181-1213); the record compares input with the returned unswapped graph. not recorded without editing loaders.py",
+ "gates": [
+  {
+   "gate": "only 47065011324 has randomized = False, at every seed",
+   "observed": [
+    [
+     "47065011324",
+     7
+    ],
+    [
+     "47065011324",
+     17
+    ],
+    [
+     "47065011324",
+     42
+    ],
+    [
+     "47065011324",
+     123
+    ],
+    [
+     "47065011324",
+     2024
+    ]
+   ],
+   "pass": true
+  },
+  {
+   "gate": "47065011324 share_preserved 1.000 at every seed",
+   "observed": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "pass": true
+  },
+  {
+   "gate": "47065011324 has 18 addresses and 111 edges",
+   "observed": [
+    [
+     18,
+     111
+    ]
+   ],
+   "pass": true
+  },
+  {
+   "gate": "the other 19 tracts lie in [0.0029, 0.0393] inclusive",
+   "observed": [
+    0.0028963550485696463,
+    0.039273441335297005
+   ],
+   "pass": true
+  },
+  {
+   "gate": "47065011900 at seed 123 reads 0.03927",
+   "observed": [
+    0.039273441335297005
+   ],
+   "pass": true
+  },
+  {
+   "gate": "rebuilt addresses equal the saved coordinates of both arms",
+   "observed": [],
+   "pass": true
+  },
+  {
+   "gate": "rebuilt euclidean edge counts equal graph_edge_audit.json",
+   "observed": [],
+   "pass": true
+  }
+ ],
+ "all_gates_pass": true,
+ "excluded_tracts": [
+  "47065011324"
+ ],
+ "coordinate_checks": {
+  "47065011324": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065000700": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065011447": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065011325": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065000600": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065011413": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065011900": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065010431": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065010433": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065011326": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065001800": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065011402": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065011321": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065011444": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065010435": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065011311": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065003400": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065002400": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065001200": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  },
+  "47065001900": {
+   "run_sweep.py (frozen 5b)": true,
+   "run_sweep.py (crossed)": true,
+   "run_fig4.py": true
+  }
+ },
+ "edge_count_checks": {
+  "47065011324": {
+   "rebuilt": 111,
+   "graph_edge_audit": 111,
+   "edge_index_sha256": "b466d7ef3821f3c6f996c750b348a3a0efbb29681ad12ca08ca0d609091e312e",
+   "edge_index_dtype": "int64"
+  },
+  "47065000700": {
+   "rebuilt": 10255,
+   "graph_edge_audit": 10255,
+   "edge_index_sha256": "9773f3ec655828a8116fcc2c0c6c53e4bbe35cd71fb970c995f8e2b88cf2e685",
+   "edge_index_dtype": "int64"
+  },
+  "47065011447": {
+   "rebuilt": 4910,
+   "graph_edge_audit": 4910,
+   "edge_index_sha256": "ef629dadf4a88a07e5e27fa55beca3419b3c4817412e6d8ea0f8a5041d31e90f",
+   "edge_index_dtype": "int64"
+  },
+  "47065011325": {
+   "rebuilt": 6285,
+   "graph_edge_audit": 6285,
+   "edge_index_sha256": "348acbb15196b67cf10ab8191713dbcca95377c3ee9701e161fa158ac6854860",
+   "edge_index_dtype": "int64"
+  },
+  "47065000600": {
+   "rebuilt": 12132,
+   "graph_edge_audit": 12132,
+   "edge_index_sha256": "07f84e6512ef3f2d798ae078caffb6fb657934ab4450d0026fd106af54c1b704",
+   "edge_index_dtype": "int64"
+  },
+  "47065011413": {
+   "rebuilt": 8484,
+   "graph_edge_audit": 8484,
+   "edge_index_sha256": "bf33f875729502d50d595fa332909639132a99e1d62f78c60e00facc6d568ca8",
+   "edge_index_dtype": "int64"
+  },
+  "47065011900": {
+   "rebuilt": 2037,
+   "graph_edge_audit": 2037,
+   "edge_index_sha256": "b8bc40d93f560ef536fd8bd5faf338fa015498359140e221767c704946377df3",
+   "edge_index_dtype": "int64"
+  },
+  "47065010431": {
+   "rebuilt": 19866,
+   "graph_edge_audit": 19866,
+   "edge_index_sha256": "8dcc54cfbccb063802f02dd4145756dbcbee795e8f782ab0d33166046ae7e5ea",
+   "edge_index_dtype": "int64"
+  },
+  "47065010433": {
+   "rebuilt": 13281,
+   "graph_edge_audit": 13281,
+   "edge_index_sha256": "831437512732b1a8b691a9266dbc29dec78383143fec1a387afd2cfcbf6cc820",
+   "edge_index_dtype": "int64"
+  },
+  "47065011326": {
+   "rebuilt": 15862,
+   "graph_edge_audit": 15862,
+   "edge_index_sha256": "34df44182a69cbbb527aa23d2c1741a90703075d88696cd913d5cd50e0aff7b3",
+   "edge_index_dtype": "int64"
+  },
+  "47065001800": {
+   "rebuilt": 8190,
+   "graph_edge_audit": 8190,
+   "edge_index_sha256": "63d1ba95817762e84e2de8eda37aa93c032b5f28138d111249a8eedd0ca45afd",
+   "edge_index_dtype": "int64"
+  },
+  "47065011402": {
+   "rebuilt": 16506,
+   "graph_edge_audit": 16506,
+   "edge_index_sha256": "e07ca9cf0615dbce87f8a0dadcd32bcb00cb92e3ff031301ac6f6b6341640d9f",
+   "edge_index_dtype": "int64"
+  },
+  "47065011321": {
+   "rebuilt": 22442,
+   "graph_edge_audit": 22442,
+   "edge_index_sha256": "97eaf1b653333865df1b2c6988c5466e9ad711c1ade9aeb553aefea4bf2bd54b",
+   "edge_index_dtype": "int64"
+  },
+  "47065011444": {
+   "rebuilt": 11377,
+   "graph_edge_audit": 11377,
+   "edge_index_sha256": "477441bc56070d75eece52eeda5d329d10fcfd313d34c550e62cccc69c2c265d",
+   "edge_index_dtype": "int64"
+  },
+  "47065010435": {
+   "rebuilt": 16506,
+   "graph_edge_audit": 16506,
+   "edge_index_sha256": "bf4f567bf10aa076fc1d1d589094cee316bf153900dea56d40d35680503eeed3",
+   "edge_index_dtype": "int64"
+  },
+  "47065011311": {
+   "rebuilt": 13808,
+   "graph_edge_audit": 13808,
+   "edge_index_sha256": "e00fc8e55bc3e78c7026ee1957068927aaeaa16def1be784be7b2c38535ae3cd",
+   "edge_index_dtype": "int64"
+  },
+  "47065003400": {
+   "rebuilt": 16160,
+   "graph_edge_audit": 16160,
+   "edge_index_sha256": "8668d04d7610e20ac21f60a62145082e4bc8d37900c421ced06d54f7beb63f6b",
+   "edge_index_dtype": "int64"
+  },
+  "47065002400": {
+   "rebuilt": 10931,
+   "graph_edge_audit": 10931,
+   "edge_index_sha256": "e804a91b0ad1c6dfaf5f82bb33697499d20801265012df378ab98bf935a89860",
+   "edge_index_dtype": "int64"
+  },
+  "47065001200": {
+   "rebuilt": 8464,
+   "graph_edge_audit": 8464,
+   "edge_index_sha256": "3b40697a407162a130928182fab31a018421132ece9cf420570f5cf13460639a",
+   "edge_index_dtype": "int64"
+  },
+  "47065001900": {
+   "rebuilt": 14502,
+   "graph_edge_audit": 14502,
+   "edge_index_sha256": "37381b7c5cf1d7fbfe0fa5538aaefb8e19035ec9efcbc4677d430af33d96ff22",
+   "edge_index_dtype": "int64"
+  }
+ },
+ "rows": [
+  {
+   "arm": "shared",
+   "tract": "47065011324",
+   "seed": 42,
+   "n_addresses": 18,
+   "n_edges": 111,
+   "edges_preserved": 111,
+   "randomized": false,
+   "share_preserved": 1.0,
+   "swap_outcome": "max_tries_exceeded",
+   "guard_raised": true
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011324",
+   "seed": 17,
+   "n_addresses": 18,
+   "n_edges": 111,
+   "edges_preserved": 111,
+   "randomized": false,
+   "share_preserved": 1.0,
+   "swap_outcome": "max_tries_exceeded",
+   "guard_raised": true
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011324",
+   "seed": 123,
+   "n_addresses": 18,
+   "n_edges": 111,
+   "edges_preserved": 111,
+   "randomized": false,
+   "share_preserved": 1.0,
+   "swap_outcome": "max_tries_exceeded",
+   "guard_raised": true
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011324",
+   "seed": 2024,
+   "n_addresses": 18,
+   "n_edges": 111,
+   "edges_preserved": 111,
+   "randomized": false,
+   "share_preserved": 1.0,
+   "swap_outcome": "max_tries_exceeded",
+   "guard_raised": true
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011324",
+   "seed": 7,
+   "n_addresses": 18,
+   "n_edges": 111,
+   "edges_preserved": 111,
+   "randomized": false,
+   "share_preserved": 1.0,
+   "swap_outcome": "max_tries_exceeded",
+   "guard_raised": true
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000700",
+   "seed": 42,
+   "n_addresses": 1784,
+   "n_edges": 10255,
+   "edges_preserved": 67,
+   "randomized": true,
+   "share_preserved": 0.006533398342272062,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000700",
+   "seed": 17,
+   "n_addresses": 1784,
+   "n_edges": 10255,
+   "edges_preserved": 81,
+   "randomized": true,
+   "share_preserved": 0.007898586055582642,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000700",
+   "seed": 123,
+   "n_addresses": 1784,
+   "n_edges": 10255,
+   "edges_preserved": 75,
+   "randomized": true,
+   "share_preserved": 0.007313505607020965,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000700",
+   "seed": 2024,
+   "n_addresses": 1784,
+   "n_edges": 10255,
+   "edges_preserved": 57,
+   "randomized": true,
+   "share_preserved": 0.005558264261335934,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000700",
+   "seed": 7,
+   "n_addresses": 1784,
+   "n_edges": 10255,
+   "edges_preserved": 67,
+   "randomized": true,
+   "share_preserved": 0.006533398342272062,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011447",
+   "seed": 42,
+   "n_addresses": 853,
+   "n_edges": 4910,
+   "edges_preserved": 74,
+   "randomized": true,
+   "share_preserved": 0.015071283095723014,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011447",
+   "seed": 17,
+   "n_addresses": 853,
+   "n_edges": 4910,
+   "edges_preserved": 73,
+   "randomized": true,
+   "share_preserved": 0.014867617107942974,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011447",
+   "seed": 123,
+   "n_addresses": 853,
+   "n_edges": 4910,
+   "edges_preserved": 67,
+   "randomized": true,
+   "share_preserved": 0.013645621181262729,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011447",
+   "seed": 2024,
+   "n_addresses": 853,
+   "n_edges": 4910,
+   "edges_preserved": 79,
+   "randomized": true,
+   "share_preserved": 0.016089613034623217,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011447",
+   "seed": 7,
+   "n_addresses": 853,
+   "n_edges": 4910,
+   "edges_preserved": 74,
+   "randomized": true,
+   "share_preserved": 0.015071283095723014,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011325",
+   "seed": 42,
+   "n_addresses": 1099,
+   "n_edges": 6285,
+   "edges_preserved": 61,
+   "randomized": true,
+   "share_preserved": 0.009705648369132855,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011325",
+   "seed": 17,
+   "n_addresses": 1099,
+   "n_edges": 6285,
+   "edges_preserved": 57,
+   "randomized": true,
+   "share_preserved": 0.009069212410501194,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011325",
+   "seed": 123,
+   "n_addresses": 1099,
+   "n_edges": 6285,
+   "edges_preserved": 70,
+   "randomized": true,
+   "share_preserved": 0.011137629276054098,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011325",
+   "seed": 2024,
+   "n_addresses": 1099,
+   "n_edges": 6285,
+   "edges_preserved": 74,
+   "randomized": true,
+   "share_preserved": 0.011774065234685759,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011325",
+   "seed": 7,
+   "n_addresses": 1099,
+   "n_edges": 6285,
+   "edges_preserved": 68,
+   "randomized": true,
+   "share_preserved": 0.010819411296738265,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000600",
+   "seed": 42,
+   "n_addresses": 2089,
+   "n_edges": 12132,
+   "edges_preserved": 56,
+   "randomized": true,
+   "share_preserved": 0.004615891856247939,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000600",
+   "seed": 17,
+   "n_addresses": 2089,
+   "n_edges": 12132,
+   "edges_preserved": 64,
+   "randomized": true,
+   "share_preserved": 0.005275304978569074,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000600",
+   "seed": 123,
+   "n_addresses": 2089,
+   "n_edges": 12132,
+   "edges_preserved": 85,
+   "randomized": true,
+   "share_preserved": 0.007006264424662051,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000600",
+   "seed": 2024,
+   "n_addresses": 2089,
+   "n_edges": 12132,
+   "edges_preserved": 69,
+   "randomized": true,
+   "share_preserved": 0.0056874381800197825,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065000600",
+   "seed": 7,
+   "n_addresses": 2089,
+   "n_edges": 12132,
+   "edges_preserved": 58,
+   "randomized": true,
+   "share_preserved": 0.004780745136828223,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011413",
+   "seed": 42,
+   "n_addresses": 1442,
+   "n_edges": 8484,
+   "edges_preserved": 69,
+   "randomized": true,
+   "share_preserved": 0.008132956152758133,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011413",
+   "seed": 17,
+   "n_addresses": 1442,
+   "n_edges": 8484,
+   "edges_preserved": 57,
+   "randomized": true,
+   "share_preserved": 0.006718528995756719,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011413",
+   "seed": 123,
+   "n_addresses": 1442,
+   "n_edges": 8484,
+   "edges_preserved": 66,
+   "randomized": true,
+   "share_preserved": 0.007779349363507779,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011413",
+   "seed": 2024,
+   "n_addresses": 1442,
+   "n_edges": 8484,
+   "edges_preserved": 75,
+   "randomized": true,
+   "share_preserved": 0.00884016973125884,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011413",
+   "seed": 7,
+   "n_addresses": 1442,
+   "n_edges": 8484,
+   "edges_preserved": 74,
+   "randomized": true,
+   "share_preserved": 0.008722300801508723,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011900",
+   "seed": 42,
+   "n_addresses": 348,
+   "n_edges": 2037,
+   "edges_preserved": 73,
+   "randomized": true,
+   "share_preserved": 0.035837015218458515,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011900",
+   "seed": 17,
+   "n_addresses": 348,
+   "n_edges": 2037,
+   "edges_preserved": 72,
+   "randomized": true,
+   "share_preserved": 0.035346097201767304,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011900",
+   "seed": 123,
+   "n_addresses": 348,
+   "n_edges": 2037,
+   "edges_preserved": 80,
+   "randomized": true,
+   "share_preserved": 0.039273441335297005,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011900",
+   "seed": 2024,
+   "n_addresses": 348,
+   "n_edges": 2037,
+   "edges_preserved": 58,
+   "randomized": true,
+   "share_preserved": 0.02847324496809033,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011900",
+   "seed": 7,
+   "n_addresses": 348,
+   "n_edges": 2037,
+   "edges_preserved": 68,
+   "randomized": true,
+   "share_preserved": 0.033382425135002454,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010431",
+   "seed": 42,
+   "n_addresses": 3394,
+   "n_edges": 19866,
+   "edges_preserved": 66,
+   "randomized": true,
+   "share_preserved": 0.0033222591362126247,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010431",
+   "seed": 17,
+   "n_addresses": 3394,
+   "n_edges": 19866,
+   "edges_preserved": 77,
+   "randomized": true,
+   "share_preserved": 0.003875968992248062,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010431",
+   "seed": 123,
+   "n_addresses": 3394,
+   "n_edges": 19866,
+   "edges_preserved": 82,
+   "randomized": true,
+   "share_preserved": 0.0041276552904459885,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010431",
+   "seed": 2024,
+   "n_addresses": 3394,
+   "n_edges": 19866,
+   "edges_preserved": 78,
+   "randomized": true,
+   "share_preserved": 0.003926306251887647,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010431",
+   "seed": 7,
+   "n_addresses": 3394,
+   "n_edges": 19866,
+   "edges_preserved": 64,
+   "randomized": true,
+   "share_preserved": 0.003221584616933454,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010433",
+   "seed": 42,
+   "n_addresses": 2307,
+   "n_edges": 13281,
+   "edges_preserved": 73,
+   "randomized": true,
+   "share_preserved": 0.005496574053158647,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010433",
+   "seed": 17,
+   "n_addresses": 2307,
+   "n_edges": 13281,
+   "edges_preserved": 63,
+   "randomized": true,
+   "share_preserved": 0.0047436187034108875,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010433",
+   "seed": 123,
+   "n_addresses": 2307,
+   "n_edges": 13281,
+   "edges_preserved": 66,
+   "randomized": true,
+   "share_preserved": 0.004969505308335216,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010433",
+   "seed": 2024,
+   "n_addresses": 2307,
+   "n_edges": 13281,
+   "edges_preserved": 54,
+   "randomized": true,
+   "share_preserved": 0.0040659588886379034,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010433",
+   "seed": 7,
+   "n_addresses": 2307,
+   "n_edges": 13281,
+   "edges_preserved": 62,
+   "randomized": true,
+   "share_preserved": 0.004668323168436112,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011326",
+   "seed": 42,
+   "n_addresses": 2738,
+   "n_edges": 15862,
+   "edges_preserved": 80,
+   "randomized": true,
+   "share_preserved": 0.005043500189131257,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011326",
+   "seed": 17,
+   "n_addresses": 2738,
+   "n_edges": 15862,
+   "edges_preserved": 84,
+   "randomized": true,
+   "share_preserved": 0.00529567519858782,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011326",
+   "seed": 123,
+   "n_addresses": 2738,
+   "n_edges": 15862,
+   "edges_preserved": 74,
+   "randomized": true,
+   "share_preserved": 0.004665237674946413,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011326",
+   "seed": 2024,
+   "n_addresses": 2738,
+   "n_edges": 15862,
+   "edges_preserved": 71,
+   "randomized": true,
+   "share_preserved": 0.004476106417853991,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011326",
+   "seed": 7,
+   "n_addresses": 2738,
+   "n_edges": 15862,
+   "edges_preserved": 80,
+   "randomized": true,
+   "share_preserved": 0.005043500189131257,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001800",
+   "seed": 42,
+   "n_addresses": 1411,
+   "n_edges": 8190,
+   "edges_preserved": 61,
+   "randomized": true,
+   "share_preserved": 0.0074481074481074485,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001800",
+   "seed": 17,
+   "n_addresses": 1411,
+   "n_edges": 8190,
+   "edges_preserved": 72,
+   "randomized": true,
+   "share_preserved": 0.008791208791208791,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001800",
+   "seed": 123,
+   "n_addresses": 1411,
+   "n_edges": 8190,
+   "edges_preserved": 77,
+   "randomized": true,
+   "share_preserved": 0.009401709401709401,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001800",
+   "seed": 2024,
+   "n_addresses": 1411,
+   "n_edges": 8190,
+   "edges_preserved": 78,
+   "randomized": true,
+   "share_preserved": 0.009523809523809525,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001800",
+   "seed": 7,
+   "n_addresses": 1411,
+   "n_edges": 8190,
+   "edges_preserved": 79,
+   "randomized": true,
+   "share_preserved": 0.009645909645909646,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011402",
+   "seed": 42,
+   "n_addresses": 2858,
+   "n_edges": 16506,
+   "edges_preserved": 70,
+   "randomized": true,
+   "share_preserved": 0.004240882103477523,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011402",
+   "seed": 17,
+   "n_addresses": 2858,
+   "n_edges": 16506,
+   "edges_preserved": 68,
+   "randomized": true,
+   "share_preserved": 0.004119714043378166,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011402",
+   "seed": 123,
+   "n_addresses": 2858,
+   "n_edges": 16506,
+   "edges_preserved": 79,
+   "randomized": true,
+   "share_preserved": 0.004786138373924633,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011402",
+   "seed": 2024,
+   "n_addresses": 2858,
+   "n_edges": 16506,
+   "edges_preserved": 60,
+   "randomized": true,
+   "share_preserved": 0.0036350418029807343,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011402",
+   "seed": 7,
+   "n_addresses": 2858,
+   "n_edges": 16506,
+   "edges_preserved": 61,
+   "randomized": true,
+   "share_preserved": 0.003695625833030413,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011321",
+   "seed": 42,
+   "n_addresses": 3756,
+   "n_edges": 22442,
+   "edges_preserved": 98,
+   "randomized": true,
+   "share_preserved": 0.004366812227074236,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011321",
+   "seed": 17,
+   "n_addresses": 3756,
+   "n_edges": 22442,
+   "edges_preserved": 79,
+   "randomized": true,
+   "share_preserved": 0.0035201853667231084,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011321",
+   "seed": 123,
+   "n_addresses": 3756,
+   "n_edges": 22442,
+   "edges_preserved": 65,
+   "randomized": true,
+   "share_preserved": 0.0028963550485696463,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011321",
+   "seed": 2024,
+   "n_addresses": 3756,
+   "n_edges": 22442,
+   "edges_preserved": 78,
+   "randomized": true,
+   "share_preserved": 0.0034756260582835753,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011321",
+   "seed": 7,
+   "n_addresses": 3756,
+   "n_edges": 22442,
+   "edges_preserved": 75,
+   "randomized": true,
+   "share_preserved": 0.0033419481329649762,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011444",
+   "seed": 42,
+   "n_addresses": 1934,
+   "n_edges": 11377,
+   "edges_preserved": 60,
+   "randomized": true,
+   "share_preserved": 0.005273798013536082,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011444",
+   "seed": 17,
+   "n_addresses": 1934,
+   "n_edges": 11377,
+   "edges_preserved": 82,
+   "randomized": true,
+   "share_preserved": 0.007207523951832645,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011444",
+   "seed": 123,
+   "n_addresses": 1934,
+   "n_edges": 11377,
+   "edges_preserved": 63,
+   "randomized": true,
+   "share_preserved": 0.005537487914212886,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011444",
+   "seed": 2024,
+   "n_addresses": 1934,
+   "n_edges": 11377,
+   "edges_preserved": 65,
+   "randomized": true,
+   "share_preserved": 0.005713281181330755,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011444",
+   "seed": 7,
+   "n_addresses": 1934,
+   "n_edges": 11377,
+   "edges_preserved": 65,
+   "randomized": true,
+   "share_preserved": 0.005713281181330755,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010435",
+   "seed": 42,
+   "n_addresses": 2780,
+   "n_edges": 16506,
+   "edges_preserved": 70,
+   "randomized": true,
+   "share_preserved": 0.004240882103477523,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010435",
+   "seed": 17,
+   "n_addresses": 2780,
+   "n_edges": 16506,
+   "edges_preserved": 95,
+   "randomized": true,
+   "share_preserved": 0.005755482854719496,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010435",
+   "seed": 123,
+   "n_addresses": 2780,
+   "n_edges": 16506,
+   "edges_preserved": 85,
+   "randomized": true,
+   "share_preserved": 0.005149642554222707,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010435",
+   "seed": 2024,
+   "n_addresses": 2780,
+   "n_edges": 16506,
+   "edges_preserved": 58,
+   "randomized": true,
+   "share_preserved": 0.0035138737428813765,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065010435",
+   "seed": 7,
+   "n_addresses": 2780,
+   "n_edges": 16506,
+   "edges_preserved": 82,
+   "randomized": true,
+   "share_preserved": 0.00496789046407367,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011311",
+   "seed": 42,
+   "n_addresses": 2358,
+   "n_edges": 13808,
+   "edges_preserved": 66,
+   "randomized": true,
+   "share_preserved": 0.004779837775202781,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011311",
+   "seed": 17,
+   "n_addresses": 2358,
+   "n_edges": 13808,
+   "edges_preserved": 76,
+   "randomized": true,
+   "share_preserved": 0.005504055619930475,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011311",
+   "seed": 123,
+   "n_addresses": 2358,
+   "n_edges": 13808,
+   "edges_preserved": 75,
+   "randomized": true,
+   "share_preserved": 0.005431633835457706,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011311",
+   "seed": 2024,
+   "n_addresses": 2358,
+   "n_edges": 13808,
+   "edges_preserved": 92,
+   "randomized": true,
+   "share_preserved": 0.006662804171494786,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065011311",
+   "seed": 7,
+   "n_addresses": 2358,
+   "n_edges": 13808,
+   "edges_preserved": 79,
+   "randomized": true,
+   "share_preserved": 0.005721320973348784,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065003400",
+   "seed": 42,
+   "n_addresses": 2559,
+   "n_edges": 16160,
+   "edges_preserved": 107,
+   "randomized": true,
+   "share_preserved": 0.006621287128712871,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065003400",
+   "seed": 17,
+   "n_addresses": 2559,
+   "n_edges": 16160,
+   "edges_preserved": 95,
+   "randomized": true,
+   "share_preserved": 0.005878712871287129,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065003400",
+   "seed": 123,
+   "n_addresses": 2559,
+   "n_edges": 16160,
+   "edges_preserved": 89,
+   "randomized": true,
+   "share_preserved": 0.005507425742574257,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065003400",
+   "seed": 2024,
+   "n_addresses": 2559,
+   "n_edges": 16160,
+   "edges_preserved": 98,
+   "randomized": true,
+   "share_preserved": 0.0060643564356435645,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065003400",
+   "seed": 7,
+   "n_addresses": 2559,
+   "n_edges": 16160,
+   "edges_preserved": 75,
+   "randomized": true,
+   "share_preserved": 0.004641089108910891,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065002400",
+   "seed": 42,
+   "n_addresses": 1918,
+   "n_edges": 10931,
+   "edges_preserved": 61,
+   "randomized": true,
+   "share_preserved": 0.005580459244350929,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065002400",
+   "seed": 17,
+   "n_addresses": 1918,
+   "n_edges": 10931,
+   "edges_preserved": 89,
+   "randomized": true,
+   "share_preserved": 0.008141981520446437,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065002400",
+   "seed": 123,
+   "n_addresses": 1918,
+   "n_edges": 10931,
+   "edges_preserved": 58,
+   "randomized": true,
+   "share_preserved": 0.0053060104290549815,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065002400",
+   "seed": 2024,
+   "n_addresses": 1918,
+   "n_edges": 10931,
+   "edges_preserved": 75,
+   "randomized": true,
+   "share_preserved": 0.0068612203823986825,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065002400",
+   "seed": 7,
+   "n_addresses": 1918,
+   "n_edges": 10931,
+   "edges_preserved": 53,
+   "randomized": true,
+   "share_preserved": 0.004848595736895069,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001200",
+   "seed": 42,
+   "n_addresses": 1420,
+   "n_edges": 8464,
+   "edges_preserved": 64,
+   "randomized": true,
+   "share_preserved": 0.007561436672967864,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001200",
+   "seed": 17,
+   "n_addresses": 1420,
+   "n_edges": 8464,
+   "edges_preserved": 71,
+   "randomized": true,
+   "share_preserved": 0.008388468809073724,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001200",
+   "seed": 123,
+   "n_addresses": 1420,
+   "n_edges": 8464,
+   "edges_preserved": 67,
+   "randomized": true,
+   "share_preserved": 0.007915879017013232,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001200",
+   "seed": 2024,
+   "n_addresses": 1420,
+   "n_edges": 8464,
+   "edges_preserved": 79,
+   "randomized": true,
+   "share_preserved": 0.009333648393194708,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001200",
+   "seed": 7,
+   "n_addresses": 1420,
+   "n_edges": 8464,
+   "edges_preserved": 61,
+   "randomized": true,
+   "share_preserved": 0.0072069943289224956,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001900",
+   "seed": 42,
+   "n_addresses": 2469,
+   "n_edges": 14502,
+   "edges_preserved": 65,
+   "randomized": true,
+   "share_preserved": 0.0044821403944283545,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001900",
+   "seed": 17,
+   "n_addresses": 2469,
+   "n_edges": 14502,
+   "edges_preserved": 82,
+   "randomized": true,
+   "share_preserved": 0.00565439249758654,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001900",
+   "seed": 123,
+   "n_addresses": 2469,
+   "n_edges": 14502,
+   "edges_preserved": 85,
+   "randomized": true,
+   "share_preserved": 0.005861260515790926,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001900",
+   "seed": 2024,
+   "n_addresses": 2469,
+   "n_edges": 14502,
+   "edges_preserved": 76,
+   "randomized": true,
+   "share_preserved": 0.0052406564611777685,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  },
+  {
+   "arm": "shared",
+   "tract": "47065001900",
+   "seed": 7,
+   "n_addresses": 2469,
+   "n_edges": 14502,
+   "edges_preserved": 54,
+   "randomized": true,
+   "share_preserved": 0.003723624327678941,
+   "swap_outcome": "swapped",
+   "guard_raised": false
+  }
+ ]
+}

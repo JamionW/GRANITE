@@ -16,8 +16,8 @@ pyproj>=3.0.0
 geopy>=2.3.0
 
 # spatial statistics
-libpysal>=4.6.0
-esda>=2.4.0
+libpysal==4.14.1
+esda==2.9.0
 
 # deep learning (cpu-only wheel; no nvidia/cuda runtime libraries)
 --index-url https://download.pytorch.org/whl/cpu

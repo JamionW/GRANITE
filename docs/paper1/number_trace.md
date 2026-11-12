@@ -668,3 +668,10 @@ Every number below is written by `python experiments/m6_recovery_grid/run_positi
 | signal component | not persisted | | `signal_component` |
 
 Reproduction gate (decision 2026-11-09, `reproduction_gate.decision`): the recompute under `fa3ba45` is the reference of record; two in-process recomputes are bit-identical on all 20 tracts; the largest deviation from the committed June rows (`2dc231f`) is 3.770e-04 at 47065003400, within the 3.8e-04 bound; per-tract table under `reproduction_gate.per_tract`. The y_true Moran's I here uses EPSG:4326 coordinates (0.152815); the 0.153342 in the FIG-P1 table uses generator UTM x, y. Per-tract values under `per_tract`. Regeneration: two runs of the script produce byte-identical JSON (sha256 `8f3fd56c9bcd795ec5641f6469d93a57b637bca5b2c965c49c1bb3edafbb83bc` at HEAD `1200586`); `provenance.head` records the HEAD at generation.
+
+## TAG-B
+
+- M0 pooled code uses a 10-address block-group floor (`granite/scripts/run_m0_parity.py:40`) against the registered 3; on this data both select the same 67 scored block groups (every touched block group has at least 10 addresses; reproduction gate at `ccbc3ee`). BOOT-P1 used B = 10,000 with seed 20261109 (`data/results/paper1_bootstrap/bootstrap_results.json`).
+- The registered clip share is 0.65% on the analysis set (20,586 of 3,162,800 values; frozen structured runs plus the crossed set, training-seed-42 randomized files counted once); 0.73% was the frozen 5b set alone (0.726%) or the ts42 double count (0.728%). Six tracts with SVI of 0.51 or less clip at 1 (`data/results/paper1_prereg_artifacts/clip_counts.json`, `b08132b`).
+- The no-graph coherence values 0.682 and 0.675 (`59bd8e9`) predate the estimator fix in `826c61a` (inverse-distance, symmetrized weights) and cannot be rescored: those runs saved no predictions.
+- The 83927c3 swap range 0.003 to 0.036 was measured under a drifted scikit-learn 1.9.1; the registered range under the pinned 1.8.0 is 0.0029 to 0.0393 for the 19 randomized tracts, 47065011324 at 1.000 (`data/results/paper1_prereg_artifacts/swap_rebuild.json`, `56ac806`).

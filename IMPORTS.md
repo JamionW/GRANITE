@@ -21,7 +21,7 @@
 │   │   └── pipeline.py
 │   └── ... (other modules)
 ├── scripts/
-│   └── run_holdout_validation.py
+│   └── ... (run_holdout_validation.py lives at granite/scripts/run_holdout_validation.py)
 └── ... (other files)
 ```
 

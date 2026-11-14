@@ -2261,15 +2261,15 @@ class GRANITEPipeline:
             'address_id': [addr.get('address_id', i) for i, (_, addr) in enumerate(addresses.iterrows())],
             'x': x_coords,
             'y': y_coords,
-            'mean': adjusted_predictions,  # Raw GNN output (adjustment = 0)
+            'mean': adjusted_predictions,  # after the iterated shift and clip when apply_post_correction, else raw
             'sd': total_uncertainty,
             'q025': np.clip(adjusted_predictions - 1.96 * total_uncertainty, 0.0, 1.0),
             'q975': np.clip(adjusted_predictions + 1.96 * total_uncertainty, 0.0, 1.0),
-            'raw_prediction': predictions,  # Same as 'mean' (no correction)
-            'adjustment': adjustment  # Will be 0.0
+            'raw_prediction': predictions,  # trainer output before any shift or clip
+            'adjustment': adjustment  # tract_svi minus raw mean when corrected, else 0.0
         })
         
-        self._log(f"Finalized predictions (RAW, uncorrected): {len(final_predictions)} addresses")
+        self._log(f"Finalized predictions (post-correction={apply_correction}): {len(final_predictions)} addresses")
         self._log(f" Final spatial std: {np.std(adjusted_predictions):.4f}")
         
         final_predictions.reset_index(drop=True, inplace=True)

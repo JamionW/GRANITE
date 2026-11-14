@@ -82,6 +82,7 @@ ARCH_LABELS = {'sage': 'GRANITE-SAGE', 'gcn_gat': 'GRANITE-GCNGAT'}
 TRAINING_SEEDS = [42, 17, 123, 2024, 7]
 GRAPH_DRAW_SEEDS = [42, 17, 123, 2024, 7]
 CONDITIONS = ['spatial_knn_uniform', 'road_network_uniform', 'randomized', 'production']
+# mlp_floor (self-loops only, loaders.py) runs only when named; 'all' keeps the four above
 STRUCTURED_CONDITIONS = ['spatial_knn_uniform', 'road_network_uniform']
 
 MIN_ADDRESSES_PER_BG = 3
@@ -208,14 +209,17 @@ def _pred_path(condition, arch, training_seed, graph_draw_seed, fips):
     )
 
 
-def _save_pred_atomic(path, preds, coords):
-    """atomically write predictions and EPSG:4326 coords to an npz file."""
+def _save_pred_atomic(path, preds, coords, raw=None):
+    """atomically write predictions, EPSG:4326 coords and, if given, the raw trainer output."""
     import os
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix('.tmp.npz')
+    arrays = {'predictions': np.asarray(preds, dtype=float),
+              'coords': np.asarray(coords, dtype=float)}
+    if raw is not None:
+        arrays['raw_prediction'] = np.asarray(raw, dtype=float)
     try:
-        np.savez(tmp, predictions=np.asarray(preds, dtype=float),
-                 coords=np.asarray(coords, dtype=float))
+        np.savez(tmp, **arrays)
         os.replace(str(tmp), str(path))
     except Exception:
         if tmp.exists():
@@ -539,9 +543,14 @@ def run_seed(condition, arch, training_seed, graph_draw_seed,
         if persist_preds:
             pp = _pred_path(condition, arch, training_seed, graph_draw_seed, fips)
             if not pp.exists():
+                # raw_prediction: trainer output before the inference shift and clip
+                raw_arr = None
+                if 'raw_prediction' in result['predictions'].columns:
+                    raw_arr = result['predictions']['raw_prediction'].values.astype(float)
                 _save_pred_atomic(
                     pp, preds_arr,
-                    np.array([[g.x, g.y] for g in address_gdf.geometry])
+                    np.array([[g.x, g.y] for g in address_gdf.geometry]),
+                    raw=raw_arr,
                 )
 
         constr_err = abs(np.mean(preds_arr) - tract_svi)
@@ -849,7 +858,7 @@ def check_constraints(results):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--condition', choices=CONDITIONS + ['all'], default='all',
+    parser.add_argument('--condition', choices=CONDITIONS + ['mlp_floor', 'all'], default='all',
                         help='which condition to run (default: all)')
     parser.add_argument('--sage-only', action='store_true',
                         help='restrict to SAGE architecture only')
@@ -866,6 +875,12 @@ def main():
                             'output base dir for metrics/csv/predictions. crossed design '
                             'defaults to data/results/m6_topology_5b_crossed/. never '
                             'data/results/m6_topology_5b/ (frozen).'
+                        ))
+    parser.add_argument('--persist-preds', action='store_true',
+                        help=(
+                            'with --out-dir: save per-tract npz files under '
+                            '<out-dir>/predictions/ and write per-condition provenance under '
+                            '<out-dir>/<condition>/ instead of the frozen 05b tree.'
                         ))
     parser.add_argument('--allow-unswapped', default='',
                         help=(
@@ -1022,7 +1037,12 @@ def main():
         out_base.mkdir(parents=True, exist_ok=True)
         results_path = out_base / 'topology_specificity_metrics.json'
         incremental_csv = out_base / 'trials_incremental.csv'
-        persist_preds = False
+        persist_preds = args.persist_preds
+        if persist_preds:
+            # keep provenance and npz under out_base; the 05b tree stays frozen
+            cond_out_dir = out_base
+            PRED_DIR = out_base / 'predictions'
+            print(f'[step05b] persist-preds: predictions -> {PRED_DIR}')
         if results_path.exists():
             with open(results_path) as f:
                 all_results = json.load(f)
@@ -1083,7 +1103,7 @@ def main():
         merged.update(cond_results)
         all_results[cond] = merged
 
-        if not args.rerun_fresh and args.design != 'crossed':
+        if not args.rerun_fresh and args.design != 'crossed' and cond_out_dir is None:
             cond_results_path = STEP5B_ROOT / cond / 'results' / f'{cond}_metrics.json'
             with open(cond_results_path, 'w') as f:
                 json.dump(merged, f, indent=2,

@@ -1,0 +1,152 @@
+{
+  "mlp_floor": {
+    "sage": {
+      "seeds": [
+        {
+          "training_seed": 42,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.06788925972777264,
+          "morans_i": 0.6297700381595285,
+          "pooled_bg_r": 0.7649223919160176,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 808.4
+        },
+        {
+          "training_seed": 17,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.06707878021127052,
+          "morans_i": 0.5999001431862427,
+          "pooled_bg_r": 0.7530744225841093,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 804.4
+        },
+        {
+          "training_seed": 123,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.08669143767098346,
+          "morans_i": 0.7081048503979405,
+          "pooled_bg_r": 0.7676968389761082,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 813.4
+        },
+        {
+          "training_seed": 2024,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.08652176782048732,
+          "morans_i": 0.6909247292031337,
+          "pooled_bg_r": 0.7771399176301864,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 815.0
+        },
+        {
+          "training_seed": 7,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.10775001060233877,
+          "morans_i": 0.7155781867813275,
+          "pooled_bg_r": 0.7662325487766428,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 815.9
+        }
+      ],
+      "mean": {
+        "within_tract_std": 0.08318625120657056,
+        "morans_i": 0.6688555895456346,
+        "pooled_bg_r": 0.7658132239766129
+      },
+      "std": {
+        "within_tract_std": 0.01673498468069255,
+        "morans_i": 0.05121788360744281,
+        "pooled_bg_r": 0.00858906966082449
+      }
+    },
+    "gcn_gat": {
+      "seeds": [
+        {
+          "training_seed": 42,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.07339074945188569,
+          "morans_i": 0.648913393261051,
+          "pooled_bg_r": 0.7546089235784122,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 812.9
+        },
+        {
+          "training_seed": 17,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.07543293625488978,
+          "morans_i": 0.5614269504453829,
+          "pooled_bg_r": 0.7755396174611873,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 810.2
+        },
+        {
+          "training_seed": 123,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.08203473145867947,
+          "morans_i": 0.7262662832019162,
+          "pooled_bg_r": 0.7529918149594698,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 812.8
+        },
+        {
+          "training_seed": 2024,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.08617606861831176,
+          "morans_i": 0.7188293019252231,
+          "pooled_bg_r": 0.758672810743626,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 812.6
+        },
+        {
+          "training_seed": 7,
+          "graph_draw_seed": 42,
+          "within_tract_std": 0.08916449005950595,
+          "morans_i": 0.6075066053059397,
+          "pooled_bg_r": 0.7587949235915165,
+          "n_bgs": 67,
+          "n_tracts": 20,
+          "under_mixed_tracts": 0,
+          "n_unswapped_tracts": 0,
+          "runtime_s": 816.3
+        }
+      ],
+      "mean": {
+        "within_tract_std": 0.08123979516865452,
+        "morans_i": 0.6525885068279026,
+        "pooled_bg_r": 0.7601216180668424
+      },
+      "std": {
+        "within_tract_std": 0.006766214552768272,
+        "morans_i": 0.0710150887720224,
+        "pooled_bg_r": 0.008983286690952165
+      }
+    }
+  }
+}
